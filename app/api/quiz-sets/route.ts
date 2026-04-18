@@ -21,7 +21,7 @@ export async function GET(req: NextRequest) {
   };
 
   // Admin can see all
-  if (session.user.role === "admin") {
+  if (session.user.role === "ADMIN") {
     delete (where as Record<string, unknown>).createdById;
   }
 

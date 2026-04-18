@@ -80,8 +80,11 @@ enum QuizSetStatus {
 
 enum QuizQuestionType {
   MCQ
+  MULTIPLE_RESPONSE
   TRUE_FALSE
   SHORT_ANSWER
+  FILL_BLANK
+  ESSAY
 }
 
 enum IdentifyBy {
@@ -320,10 +323,25 @@ model QuizSet {
   theme               String?       @default("default")
   passMessage         String?
   failMessage         String?
+  introText           String?       // Introduction shown before test starts
+  conclusionText      String?       // Text shown after submission
   // Difficulty mix settings
   easyPercent         Int           @default(20)
   mediumPercent       Int           @default(60)
   hardPercent         Int           @default(20)
+  // Testmoz-parity settings
+  allowBlankAnswers   Boolean       @default(false)
+  penalizeIncorrect   Boolean       @default(false)
+  showScore           Boolean       @default(true)
+  showOutline         Boolean       @default(true)
+  showCorrectAnswers  Boolean       @default(true)
+  notificationEmail   String?       // comma-separated emails for completion notifications
+  disableRightClick   Boolean       @default(false)
+  disableCopyPaste    Boolean       @default(false)
+  disableTranslate    Boolean       @default(false)
+  disablePrint        Boolean       @default(false)
+  customIdentifierPrompt String?    // custom text above name/ID field
+  language            String?       @default("en") // "en" or "vi"
   createdAt           DateTime      @default(now())
   updatedAt           DateTime      @updatedAt
 
@@ -331,8 +349,24 @@ model QuizSet {
   createdBy   User           @relation(fields: [createdById], references: [id])
   questions   QuizQuestion[]
   attempts    Attempt[]
+  documents   QuizDocument[]
 
   @@map("testsgen_quiz_sets")
+}
+
+model QuizDocument {
+  id         String   @id @default(cuid())
+  quizSetId  String
+  fileName   String
+  fileType   String   @default("other")
+  fileSize   Int
+  filePath   String
+  uploadedAt DateTime @default(now())
+
+  // Relations
+  quizSet QuizSet @relation(fields: [quizSetId], references: [id], onDelete: Cascade)
+
+  @@map("testsgen_quiz_documents")
 }
 
 model QuizQuestion {

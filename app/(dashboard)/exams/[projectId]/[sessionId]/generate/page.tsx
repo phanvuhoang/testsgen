@@ -206,7 +206,7 @@ export default function GeneratePage() {
                 <Label>AI Model</Label>
                 <Select value={selectedModel} onValueChange={setSelectedModel}>
                   <SelectTrigger className="h-9">
-                    <SelectValue placeholder="Chọn AI model..." />
+                    <SelectValue placeholder="Select AI model..." />
                   </SelectTrigger>
                   <SelectContent>
                     {aiModels.length > 0 ? (

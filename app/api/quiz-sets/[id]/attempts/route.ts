@@ -13,7 +13,7 @@ export async function GET(
   }
 
   const where =
-    session.user.role === "admin"
+    session.user.role === "ADMIN"
       ? { id: params.id }
       : { id: params.id, createdById: session.user.id };
 

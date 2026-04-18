@@ -41,7 +41,13 @@ export default function UsersPage() {
     setIsLoading(true)
     try {
       const res = await fetch('/api/users')
-      if (res.ok) setUsers(await res.json())
+      if (res.ok) {
+        const data = await res.json()
+        // API returns { users, pagination } object
+        setUsers(Array.isArray(data) ? data : (data.users ?? []))
+      }
+    } catch {
+      // silently handle — forbidden for non-admins shows empty state
     } finally {
       setIsLoading(false)
     }

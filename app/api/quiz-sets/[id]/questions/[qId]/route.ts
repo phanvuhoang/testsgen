@@ -12,7 +12,7 @@ export async function PATCH(
   }
 
   const where =
-    session.user.role === "admin"
+    session.user.role === "ADMIN"
       ? { id: params.id }
       : { id: params.id, createdById: session.user.id };
 
@@ -58,7 +58,7 @@ export async function DELETE(
   }
 
   const where =
-    session.user.role === "admin"
+    session.user.role === "ADMIN"
       ? { id: params.id }
       : { id: params.id, createdById: session.user.id };
 

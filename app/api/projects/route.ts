@@ -17,7 +17,7 @@ export async function GET() {
   const projects = await db.project.findMany({
     where,
     orderBy: { createdAt: 'desc' },
-    include: { _count: { select: { sessions: true } } },
+    include: { _count: { select: { sessions: true } }, createdBy: { select: { name: true } } },
   })
   return NextResponse.json(projects)
 }

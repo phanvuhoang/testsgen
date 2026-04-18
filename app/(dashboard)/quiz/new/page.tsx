@@ -80,6 +80,7 @@ export default function NewQuizPage() {
   const [uploadedDocId, setUploadedDocId] = useState<string | null>(null)
   const [isUploading, setIsUploading] = useState(false)
   const [quizSetId, setQuizSetId] = useState<string | null>(null)
+  const [createdQuizSetId, setCreatedQuizSetId] = useState<string | null>(null)
   const [generatedQuestions, setGeneratedQuestions] = useState<QuestionCard[]>([])
   const [isGenerating, setIsGenerating] = useState(false)
   const [generationComplete, setGenerationComplete] = useState(false)
@@ -122,14 +123,12 @@ export default function NewQuizPage() {
   const handleFileUpload = async (file: File) => {
     setIsUploading(true)
     try {
-      const formData = new FormData()
-      formData.append('file', file)
-      const res = await fetch('/api/upload', { method: 'POST', body: formData })
-      if (!res.ok) throw new Error('Upload failed')
-      const data = await res.json()
-      setUploadedDocId(data.id)
+      // Step 1: Create a temporary quiz set to attach the document to,
+      // OR just store the file for later upload after quiz set creation.
+      // We'll store file locally and upload after quiz set is created.
       setUploadedFile(file)
-      toast({ title: 'File uploaded', description: `${file.name} uploaded successfully` })
+      setUploadedDocId('pending') // mark as pending
+      toast({ title: 'File ready', description: `${file.name} will be uploaded with the quiz` })
     } catch {
       toast({ title: 'Upload failed', variant: 'destructive' })
     } finally {
@@ -179,14 +178,36 @@ export default function NewQuizPage() {
       if (!res.ok) throw new Error()
       const quiz = await res.json()
       setQuizSetId(quiz.id)
+      setCreatedQuizSetId(quiz.id)
       setStep(4)
-      startGeneration(quiz.id, step2Data, data)
+
+      // Upload the document to the new quiz set if user chose file upload
+      let resolvedDocId: string | null = null
+      if (source === 'upload' && uploadedFile && uploadedDocId === 'pending') {
+        try {
+          const formData = new FormData()
+          formData.append('file', uploadedFile)
+          const docRes = await fetch(`/api/quiz-sets/${quiz.id}/documents`, {
+            method: 'POST',
+            body: formData,
+          })
+          if (docRes.ok) {
+            const doc = await docRes.json()
+            resolvedDocId = doc.id
+            setUploadedDocId(doc.id)
+          }
+        } catch {
+          // fallback: generation will use pastedText if doc upload fails
+        }
+      }
+
+      startGeneration(quiz.id, step2Data, data, resolvedDocId)
     } catch {
       toast({ title: 'Failed to create quiz set', variant: 'destructive' })
     }
   }
 
-  const startGeneration = async (qsId: string, step2Data: Step2Form, step3Data: Step3Form) => {
+  const startGeneration = async (qsId: string, step2Data: Step2Form, step3Data: Step3Form, docId?: string | null) => {
     setIsGenerating(true)
     setGeneratedQuestions([])
     try {
@@ -195,7 +216,8 @@ export default function NewQuizPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           source,
-          documentId: uploadedDocId,
+          // Use documentIds array (new API) if we have a DB doc ID
+          documentIds: docId ? [docId] : undefined,
           pastedText: source === 'paste' ? pastedText : undefined,
           totalQuestions: step2Data.totalQuestions,
           easyCount: step2Data.easyCount,

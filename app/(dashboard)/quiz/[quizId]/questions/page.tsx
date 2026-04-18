@@ -60,6 +60,13 @@ export default function QuizQuestionsPage() {
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editForm, setEditForm] = useState<Partial<Question>>({})
+  // Documents state
+  const [documents, setDocuments] = useState<{ id: string; fileName: string; fileType: string; fileSize: number }[]>([])
+  const [selectedDocIds, setSelectedDocIds] = useState<string[]>([])
+  const [isUploadingDoc, setIsUploadingDoc] = useState(false)
+  const [isDeletingDoc, setIsDeletingDoc] = useState<string | null>(null)
+  const docInputRef = useRef<HTMLInputElement>(null)
+
   const [isAdding, setIsAdding] = useState(false)
   const [newQuestion, setNewQuestion] = useState({
     stem: '',
@@ -90,6 +97,7 @@ export default function QuizQuestionsPage() {
   useEffect(() => {
     fetchQuestions()
     fetchAIModels()
+    fetchDocuments()
   }, [])
 
   const fetchQuestions = async () => {
@@ -103,6 +111,44 @@ export default function QuizQuestionsPage() {
       toast({ title: 'Failed to load questions', variant: 'destructive' })
     } finally {
       setIsLoading(false)
+    }
+  }
+
+  const fetchDocuments = async () => {
+    try {
+      const res = await fetch(`/api/quiz-sets/${params.quizId}/documents`)
+      if (res.ok) setDocuments(await res.json())
+    } catch {}
+  }
+
+  const handleDocUpload = async (file: File) => {
+    setIsUploadingDoc(true)
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+      const res = await fetch(`/api/quiz-sets/${params.quizId}/documents`, { method: 'POST', body: formData })
+      if (!res.ok) throw new Error()
+      const doc = await res.json()
+      setDocuments((prev) => [doc, ...prev])
+      setSelectedDocIds((prev) => [...prev, doc.id])
+      toast({ title: `Document "${file.name}" uploaded` })
+    } catch {
+      toast({ title: 'Upload failed', variant: 'destructive' })
+    } finally {
+      setIsUploadingDoc(false)
+    }
+  }
+
+  const handleDocDelete = async (docId: string) => {
+    setIsDeletingDoc(docId)
+    try {
+      await fetch(`/api/quiz-sets/${params.quizId}/documents/${docId}`, { method: 'DELETE' })
+      setDocuments((prev) => prev.filter((d) => d.id !== docId))
+      setSelectedDocIds((prev) => prev.filter((id) => id !== docId))
+    } catch {
+      toast({ title: 'Failed to delete document', variant: 'destructive' })
+    } finally {
+      setIsDeletingDoc(null)
     }
   }
 
@@ -166,14 +212,14 @@ export default function QuizQuestionsPage() {
 
   // ── AI Generate ──────────────────────────────────────────────────────────────
   const handleAIGenerate = async () => {
-    if (!aiTopic.trim()) {
-      toast({ title: 'Nhập nội dung/chủ đề cần tạo câu hỏi', variant: 'destructive' })
+    if (!aiTopic.trim() && selectedDocIds.length === 0) {
+      toast({ title: 'Enter a topic or select a document first', variant: 'destructive' })
       return
     }
     setIsGenerating(true)
     setGenProgress(0)
     setGenTotal(aiCount)
-    setGenStatus('Đang kết nối AI...')
+    setGenStatus('Connecting to AI...')
 
     try {
       const easy = Math.round(aiCount * 0.2)
@@ -184,7 +230,8 @@ export default function QuizQuestionsPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          topic: aiTopic,
+          topic: aiTopic || undefined,
+          documentIds: selectedDocIds.length > 0 ? selectedDocIds : undefined,
           totalQuestions: aiCount,
           easyCount: easy,
           mediumCount: medium,
@@ -197,7 +244,7 @@ export default function QuizQuestionsPage() {
 
       if (!res.ok || !res.body) {
         const err = await res.json().catch(() => ({}))
-        throw new Error(err.error || 'Lỗi kết nối AI')
+        throw new Error(err.error || 'AI connection error')
       }
 
       const reader = res.body.getReader()
@@ -222,10 +269,10 @@ export default function QuizQuestionsPage() {
             if (event.type === 'question') {
               newQs.push(event.question)
               setGenProgress(event.progress)
-              setGenStatus(`Đã tạo ${event.progress}/${event.total} câu hỏi...`)
+              setGenStatus(`Generated ${event.progress}/${event.total} questions...`)
             }
             if (event.type === 'complete') {
-              setGenStatus(`Hoàn thành: ${event.count} câu hỏi`)
+              setGenStatus(`Done: ${event.count} questions`)
               setQuestions((prev) => [...prev, ...newQs])
             }
             if (event.type === 'error') throw new Error(event.message)
@@ -233,12 +280,12 @@ export default function QuizQuestionsPage() {
         }
       }
 
-      toast({ title: `Đã tạo ${newQs.length} câu hỏi bằng AI` })
+      toast({ title: `Generated ${newQs.length} questions with AI` })
       setShowAIPanel(false)
       setAITopic('')
     } catch (err) {
       toast({
-        title: 'Tạo câu hỏi thất bại',
+        title: 'Generation failed',
         description: String(err),
         variant: 'destructive',
       })
@@ -252,7 +299,7 @@ export default function QuizQuestionsPage() {
   const handleExport = async (format: 'testmoz' | 'csv' = 'testmoz') => {
     const res = await fetch(`/api/quiz-sets/${params.quizId}/questions/export?format=${format}`)
     if (!res.ok) {
-      toast({ title: 'Export thất bại', variant: 'destructive' })
+      toast({ title: 'Export failed', variant: 'destructive' })
       return
     }
     const blob = await res.blob()
@@ -275,14 +322,14 @@ export default function QuizQuestionsPage() {
         body: formData,
       })
       const data = await res.json()
-      if (!res.ok) throw new Error(data.error || 'Import thất bại')
+      if (!res.ok) throw new Error(data.error || 'Import failed')
       toast({
-        title: `Đã import ${data.imported} câu hỏi`,
-        description: data.errors?.length ? `${data.errors.length} lỗi được bỏ qua` : undefined,
+        title: `Imported ${data.imported} questions`,
+        description: data.errors?.length ? `${data.errors.length} rows skipped` : undefined,
       })
       fetchQuestions()
     } catch (err) {
-      toast({ title: 'Import thất bại', description: String(err), variant: 'destructive' })
+      toast({ title: 'Import failed', description: String(err), variant: 'destructive' })
     } finally {
       setIsImporting(false)
       if (fileInputRef.current) fileInputRef.current.value = ''
@@ -310,11 +357,86 @@ export default function QuizQuestionsPage() {
 
   return (
     <div className="p-6 max-w-7xl mx-auto">
+      {/* Documents Panel (always visible) */}
+      {documents.length > 0 && (
+        <Card className="mb-4 border-gray-200">
+          <CardHeader className="pb-2 pt-3">
+            <CardTitle className="text-sm flex items-center justify-between">
+              <span className="flex items-center gap-2">
+                <FileSpreadsheet className="h-4 w-4 text-gray-500" />
+                Uploaded Documents ({documents.length})
+              </span>
+              <input
+                ref={docInputRef}
+                type="file"
+                accept=".pdf,.docx,.doc,.txt"
+                className="hidden"
+                onChange={(e) => { const f = e.target.files?.[0]; if (f) handleDocUpload(f); }}
+              />
+              <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => docInputRef.current?.click()} disabled={isUploadingDoc}>
+                {isUploadingDoc ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <Upload className="h-3 w-3 mr-1" />}
+                Add Document
+              </Button>
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="pb-3">
+            <div className="flex flex-wrap gap-2">
+              {documents.map((doc) => (
+                <div
+                  key={doc.id}
+                  className={`flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-full border cursor-pointer transition-colors ${
+                    selectedDocIds.includes(doc.id)
+                      ? 'bg-[#028a39]/10 border-[#028a39] text-[#028a39]'
+                      : 'bg-gray-50 border-gray-200 text-gray-600'
+                  }`}
+                  onClick={() =>
+                    setSelectedDocIds((prev) =>
+                      prev.includes(doc.id) ? prev.filter((id) => id !== doc.id) : [...prev, doc.id]
+                    )
+                  }
+                >
+                  <FileSpreadsheet className="h-3 w-3" />
+                  <span className="max-w-[160px] truncate">{doc.fileName}</span>
+                  <button
+                    onClick={(e) => { e.stopPropagation(); handleDocDelete(doc.id) }}
+                    disabled={isDeletingDoc === doc.id}
+                    className="ml-1 hover:text-red-500"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </div>
+              ))}
+            </div>
+            {selectedDocIds.length > 0 && (
+              <p className="text-xs text-[#028a39] mt-2">{selectedDocIds.length} document(s) selected for AI generation</p>
+            )}
+          </CardContent>
+        </Card>
+      )}
+
       {/* Header */}
       <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
         <h1 className="text-xl font-bold">Question Bank</h1>
         <div className="flex gap-2 flex-wrap">
-          {/* Import */}
+          {/* Upload Document for AI */}
+          <input
+            ref={docInputRef}
+            type="file"
+            accept=".pdf,.docx,.doc,.txt"
+            className="hidden"
+            onChange={(e) => { const f = e.target.files?.[0]; if (f) handleDocUpload(f) }}
+          />
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => docInputRef.current?.click()}
+            disabled={isUploadingDoc}
+          >
+            {isUploadingDoc ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Upload className="h-4 w-4 mr-2" />}
+            Upload Document
+          </Button>
+
+          {/* Import TestMoz */}
           <input
             ref={fileInputRef}
             type="file"
@@ -334,9 +456,9 @@ export default function QuizQuestionsPage() {
             {isImporting ? (
               <Loader2 className="h-4 w-4 mr-2 animate-spin" />
             ) : (
-              <Upload className="h-4 w-4 mr-2" />
+              <FileSpreadsheet className="h-4 w-4 mr-2" />
             )}
-            Import TestMoz
+            Import Questions
           </Button>
 
           {/* Export */}
@@ -358,13 +480,13 @@ export default function QuizQuestionsPage() {
             onClick={() => setShowAIPanel((v) => !v)}
           >
             <Sparkles className="h-4 w-4 mr-2" />
-            Tạo bằng AI
+            Generate with AI
           </Button>
 
           {/* Add Manual */}
           <Button variant="outline" size="sm" onClick={() => setIsAdding(true)}>
             <Plus className="h-4 w-4 mr-2" />
-            Thêm thủ công
+            Add Question
           </Button>
         </div>
       </div>
@@ -376,7 +498,7 @@ export default function QuizQuestionsPage() {
             <div className="flex items-center justify-between">
               <CardTitle className="text-base flex items-center gap-2">
                 <Sparkles className="h-4 w-4 text-[#028a39]" />
-                Tạo câu hỏi bằng AI
+                Generate Questions with AI
               </CardTitle>
               <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setShowAIPanel(false)}>
                 <X className="h-4 w-4" />
@@ -389,7 +511,7 @@ export default function QuizQuestionsPage() {
               <Label className="text-xs text-gray-600">AI Model</Label>
               <Select value={selectedModel} onValueChange={setSelectedModel}>
                 <SelectTrigger className="h-9">
-                  <SelectValue placeholder="Chọn AI model..." />
+                  <SelectValue placeholder="Select AI model..." />
                 </SelectTrigger>
                 <SelectContent>
                   {aiModels.length > 0 ? (
@@ -411,22 +533,58 @@ export default function QuizQuestionsPage() {
               </Select>
             </div>
 
+            {/* Documents context */}
+            {documents.length > 0 && (
+              <div className="space-y-1.5">
+                <Label className="text-xs text-gray-600">Source Documents (click to select)</Label>
+                <div className="flex flex-wrap gap-1.5">
+                  {documents.map((doc) => (
+                    <button
+                      key={doc.id}
+                      type="button"
+                      disabled={isGenerating}
+                      onClick={() =>
+                        setSelectedDocIds((prev) =>
+                          prev.includes(doc.id) ? prev.filter((id) => id !== doc.id) : [...prev, doc.id]
+                        )
+                      }
+                      className={`text-xs px-2.5 py-1 rounded-full border transition-colors ${
+                        selectedDocIds.includes(doc.id)
+                          ? 'bg-[#028a39] text-white border-[#028a39]'
+                          : 'bg-white text-gray-600 border-gray-200'
+                      }`}
+                    >
+                      {doc.fileName}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
             {/* Topic */}
             <div className="space-y-1.5">
-              <Label className="text-xs text-gray-600">Nội dung / Chủ đề</Label>
+              <Label className="text-xs text-gray-600">
+                Topic / Additional Content
+                {documents.length === 0 && <span className="text-red-500 ml-1">*</span>}
+              </Label>
               <Textarea
-                placeholder="Dán nội dung tài liệu, đề mục, hoặc mô tả chủ đề cần tạo câu hỏi..."
+                placeholder={documents.length > 0
+                  ? 'Optional: add specific topic, chapter, or instructions to focus the questions...'
+                  : 'Paste document content, paste text, or describe the topic to generate questions about...'}
                 className="min-h-[100px] text-sm"
                 value={aiTopic}
                 onChange={(e) => setAITopic(e.target.value)}
                 disabled={isGenerating}
               />
+              {documents.length === 0 && !aiTopic.trim() && (
+                <p className="text-xs text-amber-600">Tip: Upload a document first or paste content here</p>
+              )}
             </div>
 
             <div className="grid grid-cols-2 gap-3">
-              {/* Số câu */}
+              {/* Number of questions */}
               <div className="space-y-1.5">
-                <Label className="text-xs text-gray-600">Số câu hỏi</Label>
+                <Label className="text-xs text-gray-600">Number of questions</Label>
                 <Input
                   type="number"
                   min={1}
@@ -438,9 +596,9 @@ export default function QuizQuestionsPage() {
                 />
               </div>
 
-              {/* Loại câu hỏi */}
+              {/* Question types */}
               <div className="space-y-1.5">
-                <Label className="text-xs text-gray-600">Loại câu hỏi</Label>
+                <Label className="text-xs text-gray-600">Question types</Label>
                 <div className="flex gap-1.5 flex-wrap pt-1">
                   {['MCQ', 'TRUE_FALSE', 'SHORT_ANSWER'].map((type) => (
                     <button
@@ -462,9 +620,9 @@ export default function QuizQuestionsPage() {
 
             {/* Extra instructions */}
             <div className="space-y-1.5">
-              <Label className="text-xs text-gray-600">Hướng dẫn thêm (tùy chọn)</Label>
+              <Label className="text-xs text-gray-600">Additional instructions (optional)</Label>
               <Input
-                placeholder="VD: Tập trung vào chương 3, ngôn ngữ tiếng Việt..."
+                placeholder="e.g. Focus on chapter 3, formal language..."
                 value={aiInstructions}
                 onChange={(e) => setAIInstructions(e.target.value)}
                 className="h-9 text-sm"
@@ -488,23 +646,23 @@ export default function QuizQuestionsPage() {
                 onClick={() => setShowAIPanel(false)}
                 disabled={isGenerating}
               >
-                Hủy
+                Cancel
               </Button>
               <Button
                 size="sm"
                 className="bg-[#028a39] hover:bg-[#026d2e] text-white min-w-[120px]"
                 onClick={handleAIGenerate}
-                disabled={isGenerating || !aiTopic.trim()}
+                disabled={isGenerating || (selectedDocIds.length === 0 && !aiTopic.trim())}
               >
                 {isGenerating ? (
                   <>
                     <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                    Đang tạo...
+                    Generating...
                   </>
                 ) : (
                   <>
                     <Sparkles className="h-4 w-4 mr-2" />
-                    Tạo {aiCount} câu hỏi
+                    Generate {aiCount} Questions
                   </>
                 )}
               </Button>
@@ -518,7 +676,7 @@ export default function QuizQuestionsPage() {
         <div className="relative flex-1 min-w-48">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
           <Input
-            placeholder="Tìm kiếm câu hỏi..."
+            placeholder="Search questions..."
             className="pl-9"
             value={search}
             onChange={(e) => setSearch(e.target.value)}
@@ -526,21 +684,21 @@ export default function QuizQuestionsPage() {
         </div>
         <Select value={difficultyFilter} onValueChange={setDifficultyFilter}>
           <SelectTrigger className="w-36">
-            <SelectValue placeholder="Độ khó" />
+            <SelectValue placeholder="Difficulty" />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">Tất cả</SelectItem>
-            <SelectItem value="EASY">Dễ</SelectItem>
-            <SelectItem value="MEDIUM">Trung bình</SelectItem>
-            <SelectItem value="HARD">Khó</SelectItem>
+            <SelectItem value="all">All</SelectItem>
+            <SelectItem value="EASY">Easy</SelectItem>
+            <SelectItem value="MEDIUM">Medium</SelectItem>
+            <SelectItem value="HARD">Hard</SelectItem>
           </SelectContent>
         </Select>
         <Select value={typeFilter} onValueChange={setTypeFilter}>
           <SelectTrigger className="w-36">
-            <SelectValue placeholder="Loại" />
+            <SelectValue placeholder="Type" />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">Tất cả</SelectItem>
+            <SelectItem value="all">All</SelectItem>
             <SelectItem value="MCQ">MCQ</SelectItem>
             <SelectItem value="TRUE_FALSE">True/False</SelectItem>
             <SelectItem value="SHORT_ANSWER">Short Answer</SelectItem>
@@ -549,16 +707,16 @@ export default function QuizQuestionsPage() {
       </div>
 
       <p className="text-sm text-gray-500 mb-4">
-        {filtered.length} / {questions.length} câu hỏi
+        {filtered.length} / {questions.length} questions
       </p>
 
       {/* Add Question Form */}
       {isAdding && (
         <Card className="mb-4 border-[#028a39]/40">
           <CardContent className="p-4 space-y-3">
-            <h3 className="font-semibold text-sm">Câu hỏi mới</h3>
+            <h3 className="font-semibold text-sm">New Question</h3>
             <Textarea
-              placeholder="Nội dung câu hỏi..."
+              placeholder="Question content..."
               value={newQuestion.stem}
               onChange={(e) => setNewQuestion({ ...newQuestion, stem: e.target.value })}
               className="min-h-[80px]"
@@ -581,14 +739,14 @@ export default function QuizQuestionsPage() {
               >
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="EASY">Dễ</SelectItem>
-                  <SelectItem value="MEDIUM">Trung bình</SelectItem>
-                  <SelectItem value="HARD">Khó</SelectItem>
+                  <SelectItem value="EASY">Easy</SelectItem>
+                  <SelectItem value="MEDIUM">Medium</SelectItem>
+                  <SelectItem value="HARD">Hard</SelectItem>
                 </SelectContent>
               </Select>
               <Input
                 type="number"
-                placeholder="Điểm"
+                placeholder="Points"
                 value={newQuestion.points}
                 onChange={(e) => setNewQuestion({ ...newQuestion, points: Number(e.target.value) })}
               />
@@ -598,7 +756,7 @@ export default function QuizQuestionsPage() {
                 {newQuestion.options.map((opt, i) => (
                   <Input
                     key={i}
-                    placeholder={`Đáp án ${String.fromCharCode(65 + i)}`}
+                    placeholder={`Option ${String.fromCharCode(65 + i)}`}
                     value={opt}
                     onChange={(e) => {
                       const opts = [...newQuestion.options]
@@ -608,27 +766,27 @@ export default function QuizQuestionsPage() {
                   />
                 ))}
                 <Input
-                  placeholder="Đáp án đúng (nhập nội dung đáp án đúng)"
+                  placeholder="Correct answer (enter the exact text of the correct option)"
                   value={newQuestion.correctAnswer}
                   onChange={(e) => setNewQuestion({ ...newQuestion, correctAnswer: e.target.value })}
                 />
               </div>
             )}
             <Textarea
-              placeholder="Giải thích (tùy chọn)..."
+              placeholder="Explanation (optional)..."
               value={newQuestion.explanation}
               onChange={(e) => setNewQuestion({ ...newQuestion, explanation: e.target.value })}
             />
             <div className="flex gap-2 justify-end">
               <Button variant="outline" size="sm" onClick={() => setIsAdding(false)}>
-                Hủy
+                Cancel
               </Button>
               <Button
                 size="sm"
                 className="bg-[#028a39] hover:bg-[#026d2e] text-white"
                 onClick={handleAddQuestion}
               >
-                Thêm
+                Add
               </Button>
             </div>
           </CardContent>
@@ -649,8 +807,8 @@ export default function QuizQuestionsPage() {
         </div>
       ) : filtered.length === 0 ? (
         <div className="text-center py-16 text-gray-400">
-          <p className="text-sm">Chưa có câu hỏi nào</p>
-          <p className="text-xs mt-1">Dùng AI để tạo, import từ file TestMoz, hoặc thêm thủ công</p>
+          <p className="text-sm">No questions yet</p>
+          <p className="text-xs mt-1">Use AI to generate, import from TestMoz Excel, or add manually</p>
         </div>
       ) : (
         <div className="space-y-2">
@@ -723,24 +881,24 @@ export default function QuizQuestionsPage() {
                                 opts[i] = e.target.value
                                 setEditForm({ ...editForm, options: opts })
                               }}
-                              placeholder={`Đáp án ${String.fromCharCode(65 + i)}`}
+                              placeholder={`Option ${String.fromCharCode(65 + i)}`}
                             />
                           ))}
                           <Input
                             value={editForm.correctAnswer || ''}
                             onChange={(e) => setEditForm({ ...editForm, correctAnswer: e.target.value })}
-                            placeholder="Đáp án đúng"
+                            placeholder="Correct answer"
                           />
                         </div>
                       )}
                       <Textarea
                         value={editForm.explanation || ''}
                         onChange={(e) => setEditForm({ ...editForm, explanation: e.target.value })}
-                        placeholder="Giải thích..."
+                        placeholder="Explanation..."
                       />
                       <div className="flex gap-2 justify-end">
                         <Button variant="outline" size="sm" onClick={() => setEditingId(null)}>
-                          Hủy
+                          Cancel
                         </Button>
                         <Button
                           size="sm"
@@ -748,7 +906,7 @@ export default function QuizQuestionsPage() {
                           onClick={() => handleSaveEdit(q.id)}
                         >
                           <Check className="h-4 w-4 mr-1" />
-                          Lưu
+                          Save
                         </Button>
                       </div>
                     </div>
@@ -769,11 +927,11 @@ export default function QuizQuestionsPage() {
                           </div>
                         ))}
                       {q.correctAnswer && !q.options && (
-                        <p className="text-[#028a39] font-medium">Đáp án: {q.correctAnswer}</p>
+                        <p className="text-[#028a39] font-medium">Answer: {q.correctAnswer}</p>
                       )}
                       {q.explanation && (
                         <div className="mt-2 p-3 bg-blue-50 rounded text-blue-800 text-xs">
-                          <p className="font-semibold mb-1">Giải thích</p>
+                          <p className="font-semibold mb-1">Explanation</p>
                           {q.explanation}
                         </div>
                       )}

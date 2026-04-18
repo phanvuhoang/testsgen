@@ -12,7 +12,7 @@ export async function GET(
   }
 
   const where =
-    session.user.role === "admin"
+    session.user.role === "ADMIN"
       ? { id: params.id }
       : { id: params.id, createdById: session.user.id };
 
@@ -45,7 +45,7 @@ export async function PATCH(
   }
 
   const where =
-    session.user.role === "admin"
+    session.user.role === "ADMIN"
       ? { id: params.id }
       : { id: params.id, createdById: session.user.id };
 
@@ -79,6 +79,21 @@ export async function PATCH(
     mediumPercent,
     hardPercent,
     identifyBy,
+    // Testmoz parity fields
+    allowBlankAnswers,
+    penalizeIncorrect,
+    showScore,
+    showOutline,
+    showCorrectAnswers,
+    notificationEmail,
+    disableRightClick,
+    disableCopyPaste,
+    disableTranslate,
+    disablePrint,
+    customIdentifierPrompt,
+    language,
+    introText,
+    conclusionText,
   } = body;
 
   const updated = await db.quizSet.update({
@@ -106,6 +121,21 @@ export async function PATCH(
       ...(mediumPercent !== undefined && { mediumPercent }),
       ...(hardPercent !== undefined && { hardPercent }),
       ...(identifyBy !== undefined && { identifyBy }),
+      // Testmoz parity fields
+      ...(allowBlankAnswers !== undefined && { allowBlankAnswers }),
+      ...(penalizeIncorrect !== undefined && { penalizeIncorrect }),
+      ...(showScore !== undefined && { showScore }),
+      ...(showOutline !== undefined && { showOutline }),
+      ...(showCorrectAnswers !== undefined && { showCorrectAnswers }),
+      ...(notificationEmail !== undefined && { notificationEmail }),
+      ...(disableRightClick !== undefined && { disableRightClick }),
+      ...(disableCopyPaste !== undefined && { disableCopyPaste }),
+      ...(disableTranslate !== undefined && { disableTranslate }),
+      ...(disablePrint !== undefined && { disablePrint }),
+      ...(customIdentifierPrompt !== undefined && { customIdentifierPrompt }),
+      ...(language !== undefined && { language }),
+      ...(introText !== undefined && { introText }),
+      ...(conclusionText !== undefined && { conclusionText }),
     },
     include: {
       _count: { select: { questions: true, attempts: true } },
@@ -125,7 +155,7 @@ export async function DELETE(
   }
 
   const where =
-    session.user.role === "admin"
+    session.user.role === "ADMIN"
       ? { id: params.id }
       : { id: params.id, createdById: session.user.id };
 
