@@ -9,7 +9,8 @@ WORKDIR /app
 COPY package.json package-lock.json* ./
 COPY prisma ./prisma/
 
-# Install dependencies
+# Install ALL dependencies (including devDeps needed for build)
+# NODE_ENV must NOT be set here — production mode skips devDependencies
 RUN npm ci --legacy-peer-deps
 
 # Generate Prisma client
@@ -25,9 +26,8 @@ WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
-# Set environment for build
+# Do NOT set NODE_ENV=production here — Next.js build needs devDependencies
 ENV NEXT_TELEMETRY_DISABLED=1
-ENV NODE_ENV=production
 
 # Build Next.js app
 RUN npm run build
@@ -39,6 +39,7 @@ RUN apk add --no-cache libc6-compat openssl
 
 WORKDIR /app
 
+# Only set NODE_ENV=production in the runtime stage
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 
@@ -46,23 +47,23 @@ ENV NEXT_TELEMETRY_DISABLED=1
 RUN addgroup --system --gid 1001 nodejs
 RUN adduser --system --uid 1001 nextjs
 
-# Copy built assets
+# Copy built assets from builder
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
 
-# Copy Prisma files for migrations
+# Copy Prisma files for migrations at runtime
 COPY --from=builder /app/prisma ./prisma
 COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
 COPY --from=builder /app/node_modules/@prisma ./node_modules/@prisma
 
-# Copy startup script
+# Copy startup script and its dependencies
 COPY --from=builder /app/scripts ./scripts
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/package.json ./package.json
 COPY --from=builder /app/tsconfig.json ./tsconfig.json
 
-# Create uploads directory
+# Create uploads directory with correct ownership
 RUN mkdir -p public/uploads && chown -R nextjs:nodejs public/uploads
 
 USER nextjs
@@ -72,5 +73,5 @@ EXPOSE 3000
 ENV PORT=3000
 ENV HOSTNAME="0.0.0.0"
 
-# Run migrations + seed, then start
+# On startup: migrate DB → seed admin → start Next.js
 CMD ["sh", "-c", "npx prisma migrate deploy && npx tsx scripts/startup.ts && node server.js"]
