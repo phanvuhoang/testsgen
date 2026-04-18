@@ -1,28 +1,6 @@
 version: "3.9"
 
 services:
-  # ─── PostgreSQL Database ──────────────────────────────────────────────────
-  postgres:
-    image: postgres:16-alpine
-    container_name: testsgen_postgres
-    restart: unless-stopped
-    environment:
-      POSTGRES_USER: ${POSTGRES_USER:-testsgen}
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-testsgen_secret}
-      POSTGRES_DB: ${POSTGRES_DB:-testsgen}
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    ports:
-      - "5432:5432"
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-testsgen} -d ${POSTGRES_DB:-testsgen}"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-      start_period: 30s
-    networks:
-      - testsgen_network
-
   # ─── Next.js Application ─────────────────────────────────────────────────
   app:
     build:
@@ -30,21 +8,20 @@ services:
       dockerfile: Dockerfile
     container_name: testsgen_app
     restart: unless-stopped
-    depends_on:
-      postgres:
-        condition: service_healthy
     environment:
-      # Database
-      DATABASE_URL: postgresql://${POSTGRES_USER:-testsgen}:${POSTGRES_PASSWORD:-testsgen_secret}@postgres:5432/${POSTGRES_DB:-testsgen}
+      # Database — external PostgreSQL on VPS (10.0.1.11)
+      # Format: postgresql://user:password@host:port/database
+      DATABASE_URL: ${DATABASE_URL}
 
       # NextAuth
       NEXTAUTH_URL: ${NEXTAUTH_URL:-http://localhost:3000}
-      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:-change_this_to_a_secure_random_string_32chars}
-      AUTH_SECRET: ${NEXTAUTH_SECRET:-change_this_to_a_secure_random_string_32chars}
+      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET}
+      AUTH_SECRET: ${NEXTAUTH_SECRET}
 
       # AI Provider — OpenRouter (default)
       AI_PROVIDER: ${AI_PROVIDER:-openrouter}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      OPENROUTER_MODELS: ${OPENROUTER_MODELS:-google/gemini-2.0-flash-001,anthropic/claude-3.5-haiku,meta-llama/llama-3.3-70b-instruct,deepseek/deepseek-chat-v3-0324,mistralai/mistral-small-3.1-24b-instruct}
       AI_MODEL_GENERATION: ${AI_MODEL_GENERATION:-google/gemini-2.0-flash-001}
       AI_MODEL_GRADING: ${AI_MODEL_GRADING:-google/gemini-2.0-flash-001}
 
@@ -53,9 +30,17 @@ services:
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
 
+      # Email (optional)
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USER: ${SMTP_USER:-}
+      SMTP_PASS: ${SMTP_PASS:-}
+      SMTP_FROM: ${SMTP_FROM:-noreply@testsgen.com}
+
       # App
       NODE_ENV: production
       NEXT_TELEMETRY_DISABLED: "1"
+      NEXT_PUBLIC_APP_URL: ${NEXTAUTH_URL:-http://localhost:3000}
     volumes:
       - uploads_data:/app/public/uploads
     ports:
@@ -70,8 +55,6 @@ services:
       start_period: 60s
 
 volumes:
-  postgres_data:
-    driver: local
   uploads_data:
     driver: local
 
