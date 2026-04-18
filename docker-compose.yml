@@ -1,0 +1,80 @@
+version: "3.9"
+
+services:
+  # ─── PostgreSQL Database ──────────────────────────────────────────────────
+  postgres:
+    image: postgres:16-alpine
+    container_name: testsgen_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:-testsgen}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-testsgen_secret}
+      POSTGRES_DB: ${POSTGRES_DB:-testsgen}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-testsgen} -d ${POSTGRES_DB:-testsgen}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    networks:
+      - testsgen_network
+
+  # ─── Next.js Application ─────────────────────────────────────────────────
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: testsgen_app
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      # Database
+      DATABASE_URL: postgresql://${POSTGRES_USER:-testsgen}:${POSTGRES_PASSWORD:-testsgen_secret}@postgres:5432/${POSTGRES_DB:-testsgen}
+
+      # NextAuth
+      NEXTAUTH_URL: ${NEXTAUTH_URL:-http://localhost:3000}
+      NEXTAUTH_SECRET: ${NEXTAUTH_SECRET:-change_this_to_a_secure_random_string_32chars}
+      AUTH_SECRET: ${NEXTAUTH_SECRET:-change_this_to_a_secure_random_string_32chars}
+
+      # AI Provider — OpenRouter (default)
+      AI_PROVIDER: ${AI_PROVIDER:-openrouter}
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      AI_MODEL_GENERATION: ${AI_MODEL_GENERATION:-google/gemini-2.0-flash-001}
+      AI_MODEL_GRADING: ${AI_MODEL_GRADING:-google/gemini-2.0-flash-001}
+
+      # Optional alternative AI providers
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+
+      # App
+      NODE_ENV: production
+      NEXT_TELEMETRY_DISABLED: "1"
+    volumes:
+      - uploads_data:/app/public/uploads
+    ports:
+      - "${APP_PORT:-3000}:3000"
+    networks:
+      - testsgen_network
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO- http://localhost:3000/api/auth/session || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+
+volumes:
+  postgres_data:
+    driver: local
+  uploads_data:
+    driver: local
+
+networks:
+  testsgen_network:
+    driver: bridge

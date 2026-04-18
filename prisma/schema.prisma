@@ -1,0 +1,364 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ─── Enums ───────────────────────────────────────────────────────────────────
+
+enum UserRole {
+  ADMIN
+  TEACHER
+  STUDENT
+}
+
+enum UserStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum ProjectStatus {
+  ACTIVE
+  ARCHIVED
+}
+
+enum SessionStatus {
+  DRAFT
+  ACTIVE
+  ARCHIVED
+}
+
+enum FileType {
+  SYLLABUS
+  TAX_REGULATIONS
+  SAMPLE_QUESTIONS
+  STUDY_MATERIAL
+  OTHER
+}
+
+enum QuestionType {
+  MCQ_SINGLE
+  MCQ_MULTIPLE
+  SCENARIO
+  ESSAY
+  SHORT_ANSWER
+}
+
+enum Difficulty {
+  EASY
+  MEDIUM
+  HARD
+}
+
+enum QuestionStatus {
+  APPROVED
+  NEEDS_REVIEW
+}
+
+enum MockExamStatus {
+  DRAFT
+  PUBLISHED
+}
+
+enum AttemptStatus {
+  IN_PROGRESS
+  SUBMITTED
+  GRADED
+}
+
+enum QuizSetStatus {
+  DRAFT
+  OPEN
+  CLOSED
+}
+
+enum QuizQuestionType {
+  MCQ
+  TRUE_FALSE
+  SHORT_ANSWER
+}
+
+enum IdentifyBy {
+  NAME
+  EMAIL
+  ID
+}
+
+enum QuizAccess {
+  PUBLIC
+  PASSCODE
+  EMAIL_LIST
+}
+
+enum DisplayMode {
+  ALL_AT_ONCE
+  ONE_AT_ONCE
+}
+
+// ─── Models ──────────────────────────────────────────────────────────────────
+
+model User {
+  id          String     @id @default(cuid())
+  name        String
+  email       String     @unique
+  password    String
+  role        UserRole   @default(STUDENT)
+  status      UserStatus @default(ACTIVE)
+  lastLoginAt DateTime?
+  createdAt   DateTime   @default(now())
+  updatedAt   DateTime   @updatedAt
+
+  // Relations
+  projects   Project[]
+  quizSets   QuizSet[]
+  attempts   Attempt[]
+
+  @@map("testsgen_users")
+}
+
+model Project {
+  id          String        @id @default(cuid())
+  name        String
+  code        String        @unique
+  description String?
+  status      ProjectStatus @default(ACTIVE)
+  createdById String
+  createdAt   DateTime      @default(now())
+  updatedAt   DateTime      @updatedAt
+
+  // Relations
+  createdBy User      @relation(fields: [createdById], references: [id])
+  sessions  Session[]
+
+  @@map("testsgen_projects")
+}
+
+model Session {
+  id        String        @id @default(cuid())
+  projectId String
+  name      String
+  status    SessionStatus @default(DRAFT)
+  startDate DateTime?
+  endDate   DateTime?
+  createdAt DateTime      @default(now())
+  updatedAt DateTime      @updatedAt
+
+  // Relations
+  project    Project      @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  documents  Document[]
+  sections   ExamSection[]
+  questions  Question[]
+  mockExams  MockExam[]
+
+  @@map("testsgen_sessions")
+}
+
+model Document {
+  id         String   @id @default(cuid())
+  sessionId  String
+  fileName   String
+  fileType   FileType @default(OTHER)
+  fileSize   Int
+  filePath   String
+  uploadedAt DateTime @default(now())
+
+  // Relations
+  session Session @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  @@map("testsgen_documents")
+}
+
+model ExamSection {
+  id                 String       @id @default(cuid())
+  sessionId          String
+  name               String
+  instructions       String?
+  questionType       QuestionType @default(MCQ_SINGLE)
+  marksPerQuestion   Int          @default(1)
+  questionsInExam    Int          @default(10)
+  questionsInBank    Int          @default(40)
+  topics             String?
+  aiInstructions     String?
+  sortOrder          Int          @default(0)
+
+  // Relations
+  session          Session          @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  questions        Question[]
+  mockExamSections MockExamSection[]
+
+  @@map("testsgen_sections")
+}
+
+model Question {
+  id            String         @id @default(cuid())
+  sessionId     String
+  sectionId     String
+  stem          String
+  options       Json?
+  correctAnswer String?
+  markingScheme String?
+  modelAnswer   String?
+  topic         String?
+  difficulty    Difficulty     @default(MEDIUM)
+  status        QuestionStatus @default(NEEDS_REVIEW)
+  questionType  QuestionType   @default(MCQ_SINGLE)
+  marks         Int            @default(1)
+  createdAt     DateTime       @default(now())
+
+  // Relations
+  session         Session           @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  section         ExamSection       @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+  attemptAnswers  AttemptAnswer[]
+
+  @@map("testsgen_questions")
+}
+
+model MockExam {
+  id                  String         @id @default(cuid())
+  sessionId           String
+  name                String
+  duration            Int            // minutes
+  instructions        String?
+  passMark            Int            @default(50) // percentage
+  passMessage         String?
+  failMessage         String?
+  status              MockExamStatus @default(DRAFT)
+  allowSequentialOnly Boolean        @default(false)
+  createdAt           DateTime       @default(now())
+
+  // Relations
+  session  Session          @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  sections MockExamSection[]
+  attempts Attempt[]
+
+  @@map("testsgen_mock_exams")
+}
+
+model MockExamSection {
+  id                  String @id @default(cuid())
+  mockExamId          String
+  sectionId           String
+  questionsToDrawCount Int    @default(5)
+
+  // Relations
+  mockExam MockExam    @relation(fields: [mockExamId], references: [id], onDelete: Cascade)
+  section  ExamSection @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+
+  @@map("testsgen_mock_exam_sections")
+}
+
+model Attempt {
+  id                String        @id @default(cuid())
+  userId            String?
+  mockExamId        String?
+  quizSetId         String?
+  startedAt         DateTime      @default(now())
+  submittedAt       DateTime?
+  totalScore        Float?
+  maxScore          Float?
+  status            AttemptStatus @default(IN_PROGRESS)
+  guestName         String?
+  guestEmail        String?
+  questionsSnapshot Json?         // snapshot of questions at time of attempt
+
+  // Relations
+  user    User?          @relation(fields: [userId], references: [id])
+  mockExam MockExam?     @relation(fields: [mockExamId], references: [id])
+  quizSet  QuizSet?      @relation(fields: [quizSetId], references: [id])
+  answers  AttemptAnswer[]
+
+  @@map("testsgen_attempts")
+}
+
+model AttemptAnswer {
+  id           String    @id @default(cuid())
+  attemptId    String
+  questionId   String?
+  quizQuestionId String?
+  answer       String?
+  isCorrect    Boolean?
+  marksAwarded Float?
+  aiFeedback   String?
+  gradedAt     DateTime?
+
+  // Relations
+  attempt      Attempt       @relation(fields: [attemptId], references: [id], onDelete: Cascade)
+  question     Question?     @relation(fields: [questionId], references: [id])
+  quizQuestion QuizQuestion? @relation(fields: [quizQuestionId], references: [id])
+
+  @@unique([attemptId, quizQuestionId])
+  @@unique([attemptId, questionId])
+  @@map("testsgen_attempt_answers")
+}
+
+model QuizSet {
+  id                  String        @id @default(cuid())
+  title               String
+  description         String?
+  createdById         String
+  shareCode           String        @unique @default(cuid())
+  status              QuizSetStatus @default(DRAFT)
+  questionsPerAttempt Int           @default(20)
+  timeLimitMinutes    Int?
+  showAnswers         Boolean       @default(true)
+  passMark            Int           @default(50)
+  maxAttempts         Int?
+  identifyBy          IdentifyBy    @default(EMAIL)
+  access              QuizAccess    @default(PUBLIC)
+  passcode            String?
+  allowedEmails       String?       // JSON array of emails
+  randomizeQuestions  Boolean       @default(true)
+  displayMode         DisplayMode   @default(ONE_AT_ONCE)
+  expiresAt           DateTime?
+  tags                Json?         @default("[]")
+  theme               String?       @default("default")
+  passMessage         String?
+  failMessage         String?
+  // Difficulty mix settings
+  easyPercent         Int           @default(20)
+  mediumPercent       Int           @default(60)
+  hardPercent         Int           @default(20)
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
+
+  // Relations
+  createdBy   User           @relation(fields: [createdById], references: [id])
+  questions   QuizQuestion[]
+  attempts    Attempt[]
+
+  @@map("testsgen_quiz_sets")
+}
+
+model QuizQuestion {
+  id            String           @id @default(cuid())
+  quizSetId     String
+  stem          String
+  questionType  QuizQuestionType @default(MCQ)
+  options       Json?
+  correctAnswer String?
+  explanation   String?
+  difficulty    Difficulty       @default(MEDIUM)
+  points        Int              @default(1)
+  createdAt     DateTime         @default(now())
+
+  // Relations
+  quizSet        QuizSet         @relation(fields: [quizSetId], references: [id], onDelete: Cascade)
+  attemptAnswers AttemptAnswer[]
+
+  @@map("testsgen_quiz_questions")
+}
+
+model SystemSetting {
+  id        String   @id @default(cuid())
+  key       String   @unique
+  value     String
+  updatedAt DateTime @updatedAt
+
+  @@map("testsgen_system_settings")
+}
