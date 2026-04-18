@@ -73,5 +73,6 @@ EXPOSE 3000
 ENV PORT=3000
 ENV HOSTNAME="0.0.0.0"
 
-# On startup: migrate DB → seed admin → start Next.js
-CMD ["sh", "-c", "npx prisma migrate deploy && npx tsx scripts/startup.ts && node server.js"]
+# On startup: push schema to DB (creates tables if not exist) → seed admin → start Next.js
+# Using db push instead of migrate deploy because there are no migration files in this image
+CMD ["sh", "-c", "npx prisma db push --accept-data-loss --skip-generate && npx tsx scripts/startup.ts && node server.js"]

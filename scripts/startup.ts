@@ -1,19 +1,7 @@
-import { execSync } from 'child_process'
 import { PrismaClient } from '@prisma/client'
 import bcrypt from 'bcryptjs'
 
 const prisma = new PrismaClient()
-
-async function runMigrations() {
-  console.log('🔄 Running database migrations...')
-  try {
-    execSync('npx prisma migrate deploy', { stdio: 'inherit' })
-    console.log('✅ Migrations complete')
-  } catch (error) {
-    console.error('❌ Migration failed:', error)
-    process.exit(1)
-  }
-}
 
 async function seedAdmin() {
   console.log('🌱 Running seed check...')
@@ -58,7 +46,6 @@ async function seedAdmin() {
 }
 
 async function main() {
-  await runMigrations()
   await seedAdmin()
   await prisma.$disconnect()
   console.log('🚀 Startup complete — starting Next.js server...')
