@@ -1,7 +1,8 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Badge } from '@/components/ui/badge'
@@ -17,7 +18,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
-import { Plus, Puzzle, Share2, BarChart2, Copy, Trash2 } from 'lucide-react'
+import { Plus, Puzzle, Share2, BarChart2, Copy, Trash2, Sparkles, PenLine, FileSpreadsheet, Loader2, ChevronDown } from 'lucide-react'
 import { formatDate } from '@/lib/utils'
 
 type QuizSet = {
@@ -33,14 +34,27 @@ type QuizSet = {
 
 export default function QuizPage() {
   const { toast } = useToast()
+  const router = useRouter()
+  const importRef = useRef<HTMLInputElement>(null)
+
   const [quizSets, setQuizSets] = useState<QuizSet[]>([])
   const [isLoading, setIsLoading] = useState(true)
   const [deleteId, setDeleteId] = useState<string | null>(null)
   const [isDeleting, setIsDeleting] = useState(false)
+  const [isImporting, setIsImporting] = useState(false)
+  const [showCreateMenu, setShowCreateMenu] = useState(false)
 
   useEffect(() => {
     fetchQuizSets()
   }, [])
+
+  // Close menu on outside click
+  useEffect(() => {
+    if (!showCreateMenu) return
+    const handler = () => setShowCreateMenu(false)
+    document.addEventListener('click', handler)
+    return () => document.removeEventListener('click', handler)
+  }, [showCreateMenu])
 
   const fetchQuizSets = async () => {
     setIsLoading(true)
@@ -77,6 +91,33 @@ export default function QuizPage() {
     toast({ title: 'Link copied to clipboard' })
   }
 
+  const handleImportExcel = async (file: File) => {
+    setIsImporting(true)
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+      const res = await fetch('/api/quiz-sets/import-excel', {
+        method: 'POST',
+        body: formData,
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Import failed')
+      toast({
+        title: `Imported quiz set`,
+        description: data.title ? `"${data.title}" created` : undefined,
+      })
+      fetchQuizSets()
+      if (data.id) {
+        router.push(`/quiz/${data.id}/questions`)
+      }
+    } catch (err) {
+      toast({ title: 'Import failed', description: String(err), variant: 'destructive' })
+    } finally {
+      setIsImporting(false)
+      if (importRef.current) importRef.current.value = ''
+    }
+  }
+
   const statusVariant: Record<string, 'success' | 'secondary' | 'outline'> = {
     OPEN: 'success',
     CLOSED: 'secondary',
@@ -90,12 +131,49 @@ export default function QuizPage() {
           <h1 className="text-2xl font-bold text-gray-900">My Quiz Sets</h1>
           <p className="text-gray-500">Create and manage AI-generated quizzes</p>
         </div>
-        <Button asChild className="bg-[#028a39] hover:bg-[#026d2e] text-white">
-          <Link href="/quiz/new">
-            <Plus className="h-4 w-4 mr-2" />
-            Create New Quiz Set
-          </Link>
-        </Button>
+
+        {/* Create actions */}
+        <div className="flex items-center gap-2">
+          {/* Import Excel */}
+          <input
+            ref={importRef}
+            type="file"
+            accept=".xlsx,.xls"
+            className="hidden"
+            onChange={(e) => {
+              const file = e.target.files?.[0]
+              if (file) handleImportExcel(file)
+            }}
+          />
+          <Button
+            variant="outline"
+            onClick={() => importRef.current?.click()}
+            disabled={isImporting}
+          >
+            {isImporting ? (
+              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+            ) : (
+              <FileSpreadsheet className="h-4 w-4 mr-2" />
+            )}
+            Import from Excel
+          </Button>
+
+          {/* Create with AI */}
+          <Button asChild className="bg-[#028a39] hover:bg-[#026d2e] text-white">
+            <Link href="/quiz/new">
+              <Sparkles className="h-4 w-4 mr-2" />
+              Create with AI
+            </Link>
+          </Button>
+
+          {/* Create Manually */}
+          <Button asChild variant="outline">
+            <Link href="/quiz/new?mode=manual">
+              <PenLine className="h-4 w-4 mr-2" />
+              Create Manually
+            </Link>
+          </Button>
+        </div>
       </div>
 
       {isLoading ? (
@@ -111,14 +189,30 @@ export default function QuizPage() {
           </div>
           <h2 className="text-lg font-semibold text-gray-900 mb-2">No quiz sets yet</h2>
           <p className="text-gray-500 mb-6 text-center max-w-md">
-            Create your first quiz set by uploading a document or building questions manually.
+            Create your first quiz set with AI, import from Excel, or build questions manually.
           </p>
-          <Button asChild className="bg-[#028a39] hover:bg-[#026d2e] text-white">
-            <Link href="/quiz/new">
-              <Plus className="h-4 w-4 mr-2" />
-              Create Your First Quiz Set
-            </Link>
-          </Button>
+          <div className="flex gap-3 flex-wrap justify-center">
+            <Button asChild className="bg-[#028a39] hover:bg-[#026d2e] text-white">
+              <Link href="/quiz/new">
+                <Sparkles className="h-4 w-4 mr-2" />
+                Create with AI
+              </Link>
+            </Button>
+            <Button asChild variant="outline">
+              <Link href="/quiz/new?mode=manual">
+                <PenLine className="h-4 w-4 mr-2" />
+                Create Manually
+              </Link>
+            </Button>
+            <Button
+              variant="outline"
+              onClick={() => importRef.current?.click()}
+              disabled={isImporting}
+            >
+              <FileSpreadsheet className="h-4 w-4 mr-2" />
+              Import from Excel
+            </Button>
+          </div>
         </div>
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">

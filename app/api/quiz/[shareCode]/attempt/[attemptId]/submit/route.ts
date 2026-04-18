@@ -51,13 +51,20 @@ export async function POST(
     stem: string;
     answer: string;
     correct: boolean;
+    isCorrect: boolean;
     correctAnswer: string;
     points: number;
     earnedPoints: number;
+    marksAwarded: number;
     explanation: string | null;
   }[] = [];
 
+  const quizSet = attempt.quizSet!;
+
   for (const q of questions) {
+    // TEXT_BLOCK and non-interactive types: skip scoring
+    if (q.questionType === "TEXT_BLOCK") continue;
+
     totalPoints += q.points;
     const answerRecord = answerMap.get(q.id);
     const userAnswer = answerRecord?.answer ?? "";
@@ -68,12 +75,24 @@ export async function POST(
       isCorrect =
         userAnswer.trim().toLowerCase() ===
         (q.correctAnswer ?? "").trim().toLowerCase();
-    } else if (q.questionType === "SHORT_ANSWER") {
+    } else if (q.questionType === "SHORT_ANSWER" || q.questionType === "FILL_BLANK") {
       // Simple text match
       isCorrect =
         userAnswer.trim().toLowerCase() ===
         (q.correctAnswer ?? "").trim().toLowerCase();
+    } else if (q.questionType === "MULTIPLE_RESPONSE") {
+      // Compare sorted arrays (answers separated by ||)
+      const userSet = userAnswer
+        .split("||")
+        .map((s) => s.trim().toLowerCase())
+        .sort();
+      const correctSet = (q.correctAnswer ?? "")
+        .split("||")
+        .map((s) => s.trim().toLowerCase())
+        .sort();
+      isCorrect = JSON.stringify(userSet) === JSON.stringify(correctSet);
     }
+    // ESSAY, LONG_ANSWER, MATCHING: not auto-graded (isCorrect remains false, earnedPoints = 0)
 
     const earned = isCorrect ? q.points : 0;
     earnedPoints += earned;
@@ -90,15 +109,21 @@ export async function POST(
       });
     }
 
+    // Include correctAnswer and explanation based on quiz settings
+    // Always include for feedback purposes (frontend filters display based on settings)
+    const showCorrect = quizSet.showAnswers || quizSet.showCorrectAnswers;
+
     gradedAnswers.push({
       questionId: q.id,
       stem: q.stem,
       answer: userAnswer,
       correct: isCorrect,
-      correctAnswer: attempt.quizSet!.showAnswers ? (q.correctAnswer ?? "") : "",
+      isCorrect,
+      correctAnswer: showCorrect ? (q.correctAnswer ?? "") : "",
       points: q.points,
       earnedPoints: earned,
-      explanation: attempt.quizSet!.showAnswers ? q.explanation : null,
+      marksAwarded: earned,
+      explanation: quizSet.showAnswers ? q.explanation : null,
     });
   }
 
@@ -106,8 +131,8 @@ export async function POST(
     totalPoints > 0 ? Math.round((earnedPoints / totalPoints) * 100) : 0;
 
   const passed =
-    attempt.quizSet!.passMark !== null
-      ? scorePercentage >= attempt.quizSet!.passMark
+    quizSet.passMark !== null
+      ? scorePercentage >= quizSet.passMark
       : null;
 
   // Finalize attempt
@@ -128,13 +153,14 @@ export async function POST(
     },
   });
 
-  const quizSet = attempt.quizSet!;
-
   return NextResponse.json({
     attemptId: params.attemptId,
     score: scorePercentage,
+    pct: scorePercentage,
     earnedPoints,
     totalPoints,
+    totalScore: earnedPoints,
+    maxScore: totalPoints,
     passed,
     timeTaken,
     passMessage: passed ? quizSet.passMessage : quizSet.failMessage,

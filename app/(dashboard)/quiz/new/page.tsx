@@ -1,7 +1,7 @@
 'use client'
 
-import { useState, useRef } from 'react'
-import { useRouter } from 'next/navigation'
+import { useState, useRef, useEffect } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 import { useForm } from 'react-hook-form'
 import { zodResolver } from '@hookform/resolvers/zod'
 import { z } from 'zod'
@@ -72,9 +72,18 @@ type Step3Form = z.infer<typeof step3Schema>
 
 export default function NewQuizPage() {
   const router = useRouter()
+  const searchParams = useSearchParams()
   const { toast } = useToast()
   const [step, setStep] = useState<Step>(1)
   const [source, setSource] = useState<'upload' | 'paste' | 'manual' | null>(null)
+
+  // Handle ?mode=manual: pre-select manual mode and jump to step 2
+  useEffect(() => {
+    if (searchParams.get('mode') === 'manual') {
+      setSource('manual')
+      setStep(2)
+    }
+  }, [])
   const [uploadedFile, setUploadedFile] = useState<File | null>(null)
   const [pastedText, setPastedText] = useState('')
   const [uploadedDocId, setUploadedDocId] = useState<string | null>(null)

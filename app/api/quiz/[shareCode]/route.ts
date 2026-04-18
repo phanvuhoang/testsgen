@@ -9,12 +9,11 @@ export async function GET(
   const quizSet = await db.quizSet.findFirst({
     where: {
       shareCode: params.shareCode,
-      access: { in: ["PUBLIC", "PASSCODE"] },
       status: "OPEN",
     },
     include: {
       questions: {
-        orderBy: { createdAt: "asc" },
+        orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
         select: {
           id: true,
           stem: true,
@@ -22,7 +21,9 @@ export async function GET(
           options: true,
           difficulty: true,
           points: true,
-          // Do NOT expose correctAnswer or explanation
+          sortOrder: true,
+          poolTag: true,
+          // Do NOT expose correctAnswer or explanation here
         },
       },
       createdBy: {
@@ -33,6 +34,11 @@ export async function GET(
 
   if (!quizSet) {
     return NextResponse.json({ error: "Quiz not found or not available" }, { status: 404 });
+  }
+
+  // Check access
+  if (quizSet.access === "EMAIL_LIST") {
+    // handled at attempt start
   }
 
   // Check expiry
@@ -57,6 +63,29 @@ export async function GET(
     passMessage: quizSet.passMessage,
     failMessage: quizSet.failMessage,
     identifyBy: quizSet.identifyBy,
+    introText: quizSet.introText,
+    conclusionText: quizSet.conclusionText,
+    // Per-question feedback settings
+    feedbackShowCorrect: quizSet.feedbackShowCorrect,
+    feedbackShowAnswer: quizSet.feedbackShowAnswer,
+    feedbackShowExplanation: quizSet.feedbackShowExplanation,
+    // Certificate
+    certificateEnabled: quizSet.certificateEnabled,
+    certificateTitle: quizSet.certificateTitle,
+    certificateMessage: quizSet.certificateMessage,
+    // Theme
+    themeColor: quizSet.themeColor,
+    themeFont: quizSet.themeFont,
+    themeLogo: quizSet.themeLogo,
+    // Anti-cheat
+    disableRightClick: quizSet.disableRightClick,
+    disableCopyPaste: quizSet.disableCopyPaste,
+    disableTranslate: quizSet.disableTranslate,
+    disablePrint: quizSet.disablePrint,
+    // Review settings
+    showScore: quizSet.showScore,
+    showOutline: quizSet.showOutline,
+    showCorrectAnswers: quizSet.showCorrectAnswers,
     questionCount: quizSet.questions.length,
     questions: quizSet.questions,
     createdBy: quizSet.createdBy?.name ?? "Unknown",

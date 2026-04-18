@@ -1,6 +1,6 @@
 'use client'
 
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useParams } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -13,7 +13,7 @@ import { Separator } from '@/components/ui/separator'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Badge } from '@/components/ui/badge'
 import { useToast } from '@/components/ui/use-toast'
-import { Save, Loader2, Globe, Lock, Mail, Copy, ExternalLink } from 'lucide-react'
+import { Save, Loader2, Globe, Lock, Mail, Copy, ExternalLink, Upload } from 'lucide-react'
 
 type QuizSettings = {
   title: string
@@ -30,6 +30,10 @@ type QuizSettings = {
   displayMode: string
   allowBlankAnswers: boolean
   penalizeIncorrect: boolean
+  // Per-question feedback
+  feedbackShowCorrect: boolean
+  feedbackShowAnswer: boolean
+  feedbackShowExplanation: boolean
   // Review settings
   passMark: number
   showScore: boolean
@@ -54,6 +58,14 @@ type QuizSettings = {
   // Notifications
   notificationEmail: string
   shareCode: string
+  // Certificate
+  certificateEnabled: boolean
+  certificateTitle: string
+  certificateMessage: string
+  // Theme
+  themeColor: string
+  themeFont: string
+  themeLogo: string
 }
 
 const DEFAULTS: QuizSettings = {
@@ -70,6 +82,9 @@ const DEFAULTS: QuizSettings = {
   displayMode: 'ONE_AT_ONCE',
   allowBlankAnswers: false,
   penalizeIncorrect: false,
+  feedbackShowCorrect: false,
+  feedbackShowAnswer: false,
+  feedbackShowExplanation: false,
   passMark: 50,
   showScore: true,
   showOutline: true,
@@ -89,14 +104,28 @@ const DEFAULTS: QuizSettings = {
   disablePrint: false,
   notificationEmail: '',
   shareCode: '',
+  certificateEnabled: false,
+  certificateTitle: 'Certificate of Completion',
+  certificateMessage: '',
+  themeColor: '#028a39',
+  themeFont: 'Inter',
+  themeLogo: '',
 }
 
 export default function QuizSettingsPage() {
   const params = useParams()
   const { toast } = useToast()
+  const logoInputRef = useRef<HTMLInputElement>(null)
   const [settings, setSettings] = useState<QuizSettings>(DEFAULTS)
   const [isLoading, setIsLoading] = useState(true)
   const [isSaving, setIsSaving] = useState(false)
+  const [isUploadingLogo, setIsUploadingLogo] = useState(false)
+
+  // Derived: feedbackShowNothing = all three feedback flags are false
+  const feedbackShowNothing =
+    !settings.feedbackShowCorrect &&
+    !settings.feedbackShowAnswer &&
+    !settings.feedbackShowExplanation
 
   useEffect(() => {
     fetchSettings()
@@ -122,6 +151,9 @@ export default function QuizSettingsPage() {
           displayMode: data.displayMode ?? 'ONE_AT_ONCE',
           allowBlankAnswers: data.allowBlankAnswers ?? false,
           penalizeIncorrect: data.penalizeIncorrect ?? false,
+          feedbackShowCorrect: data.feedbackShowCorrect ?? false,
+          feedbackShowAnswer: data.feedbackShowAnswer ?? false,
+          feedbackShowExplanation: data.feedbackShowExplanation ?? false,
           passMark: data.passMark ?? 50,
           showScore: data.showScore ?? true,
           showOutline: data.showOutline ?? true,
@@ -141,6 +173,12 @@ export default function QuizSettingsPage() {
           disablePrint: data.disablePrint ?? false,
           notificationEmail: data.notificationEmail ?? '',
           shareCode: data.shareCode ?? '',
+          certificateEnabled: data.certificateEnabled ?? false,
+          certificateTitle: data.certificateTitle ?? 'Certificate of Completion',
+          certificateMessage: data.certificateMessage ?? '',
+          themeColor: data.themeColor ?? '#028a39',
+          themeFont: data.themeFont ?? 'Inter',
+          themeLogo: data.themeLogo ?? '',
         })
       }
     } finally {
@@ -168,6 +206,27 @@ export default function QuizSettingsPage() {
       toast({ title: 'Failed to save settings', variant: 'destructive' })
     } finally {
       setIsSaving(false)
+    }
+  }
+
+  const handleLogoUpload = async (file: File) => {
+    setIsUploadingLogo(true)
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+      const res = await fetch(`/api/quiz-sets/${params.quizId}/logo`, {
+        method: 'POST',
+        body: formData,
+      })
+      if (!res.ok) throw new Error()
+      const data = await res.json()
+      set('themeLogo', data.url || data.path || '')
+      toast({ title: 'Logo uploaded' })
+    } catch {
+      toast({ title: 'Failed to upload logo', variant: 'destructive' })
+    } finally {
+      setIsUploadingLogo(false)
+      if (logoInputRef.current) logoInputRef.current.value = ''
     }
   }
 
@@ -306,6 +365,81 @@ export default function QuizSettingsPage() {
         </CardContent>
       </Card>
 
+      {/* After Each Question (per-question feedback) */}
+      <Card className="mb-4">
+        <CardHeader>
+          <CardTitle className="text-sm font-semibold text-gray-600 uppercase tracking-wide">After Each Question</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-3">
+          <p className="text-xs text-gray-500">
+            In &quot;one at a time&quot; mode, choose what to show the student immediately after they answer each question.
+          </p>
+          <div className="space-y-2">
+            <div className="flex items-center gap-2">
+              <Checkbox
+                id="feedbackShowCorrect"
+                checked={settings.feedbackShowCorrect}
+                disabled={feedbackShowNothing && !settings.feedbackShowCorrect}
+                onCheckedChange={(c) => {
+                  set('feedbackShowCorrect', c)
+                }}
+              />
+              <Label htmlFor="feedbackShowCorrect" className="font-normal">
+                Indicate if the student&apos;s response was correct or incorrect
+              </Label>
+            </div>
+            <div className="flex items-center gap-2">
+              <Checkbox
+                id="feedbackShowAnswer"
+                checked={settings.feedbackShowAnswer}
+                onCheckedChange={(c) => {
+                  set('feedbackShowAnswer', c)
+                }}
+              />
+              <Label htmlFor="feedbackShowAnswer" className="font-normal">
+                Display the correct answer
+              </Label>
+            </div>
+            <div className="flex items-center gap-2">
+              <Checkbox
+                id="feedbackShowExplanation"
+                checked={settings.feedbackShowExplanation}
+                onCheckedChange={(c) => {
+                  set('feedbackShowExplanation', c)
+                }}
+              />
+              <Label htmlFor="feedbackShowExplanation" className="font-normal">
+                Show the explanation (if there is one)
+              </Label>
+            </div>
+
+            <Separator className="my-1" />
+
+            <div className="flex items-center gap-2">
+              <Checkbox
+                id="feedbackShowNothing"
+                checked={feedbackShowNothing}
+                onCheckedChange={(c) => {
+                  if (c) {
+                    // Uncheck all three
+                    setSettings((prev) => ({
+                      ...prev,
+                      feedbackShowCorrect: false,
+                      feedbackShowAnswer: false,
+                      feedbackShowExplanation: false,
+                    }))
+                  }
+                  // If unchecking "nothing", leave all three as false (user can check individually)
+                }}
+              />
+              <Label htmlFor="feedbackShowNothing" className="font-normal text-gray-600">
+                Don&apos;t show anything. Just move on to the next question.
+              </Label>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
       {/* Review / After submission */}
       <Card className="mb-4">
         <CardHeader><CardTitle className="text-sm font-semibold text-gray-600 uppercase tracking-wide">After Submission</CardTitle></CardHeader>
@@ -325,15 +459,16 @@ export default function QuizSettingsPage() {
             {[
               { key: 'showScore', label: 'Show score to student' },
               { key: 'showOutline', label: 'Show test outline (per-question result)' },
-              { key: 'showCorrectAnswers', label: 'Show correct answers' },
+              { key: 'showCorrectAnswers', label: 'Indicate if their response was correct or incorrect' },
+              { key: 'showAnswers', label: 'Display the correct answer and explanation' },
             ].map(({ key, label }) => (
               <div key={key} className="flex items-center gap-2">
                 <Checkbox
-                  id={key}
+                  id={`review-${key}`}
                   checked={settings[key as keyof QuizSettings] as boolean}
                   onCheckedChange={(c) => set(key as keyof QuizSettings, c)}
                 />
-                <Label htmlFor={key} className="font-normal">{label}</Label>
+                <Label htmlFor={`review-${key}`} className="font-normal">{label}</Label>
               </div>
             ))}
           </div>
@@ -354,6 +489,135 @@ export default function QuizSettingsPage() {
                 onChange={(e) => set('failMessage', e.target.value)}
               />
             </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Certificate */}
+      <Card className="mb-4">
+        <CardHeader><CardTitle className="text-sm font-semibold text-gray-600 uppercase tracking-wide">Certificate</CardTitle></CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex items-center gap-2">
+            <Checkbox
+              id="certificateEnabled"
+              checked={settings.certificateEnabled}
+              onCheckedChange={(c) => set('certificateEnabled', c)}
+            />
+            <Label htmlFor="certificateEnabled" className="font-normal">
+              Issue a certificate upon quiz completion (when student passes)
+            </Label>
+          </div>
+
+          {settings.certificateEnabled && (
+            <div className="space-y-3 pl-6">
+              <div className="space-y-1.5">
+                <Label>Certificate Title</Label>
+                <Input
+                  placeholder="Certificate of Completion"
+                  value={settings.certificateTitle}
+                  onChange={(e) => set('certificateTitle', e.target.value)}
+                />
+              </div>
+              <div className="space-y-1.5">
+                <Label>Certificate Message</Label>
+                <Textarea
+                  rows={3}
+                  placeholder="This is to certify that {name} has successfully completed {quiz}."
+                  value={settings.certificateMessage}
+                  onChange={(e) => set('certificateMessage', e.target.value)}
+                />
+                <p className="text-xs text-gray-500">
+                  Use <code className="bg-gray-100 px-1 rounded">{'{name}'}</code> for the student name and{' '}
+                  <code className="bg-gray-100 px-1 rounded">{'{quiz}'}</code> for the quiz title.
+                </p>
+              </div>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Customize Theme */}
+      <Card className="mb-4">
+        <CardHeader><CardTitle className="text-sm font-semibold text-gray-600 uppercase tracking-wide">Customize Theme</CardTitle></CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-1.5">
+              <Label>Accent Color</Label>
+              <div className="flex items-center gap-2">
+                <input
+                  type="color"
+                  value={settings.themeColor}
+                  onChange={(e) => set('themeColor', e.target.value)}
+                  className="h-9 w-12 rounded border border-input cursor-pointer p-0.5"
+                />
+                <Input
+                  value={settings.themeColor}
+                  onChange={(e) => set('themeColor', e.target.value)}
+                  placeholder="#028a39"
+                  className="h-9 flex-1 font-mono text-sm"
+                />
+              </div>
+            </div>
+            <div className="space-y-1.5">
+              <Label>Font</Label>
+              <Select value={settings.themeFont} onValueChange={(v) => set('themeFont', v)}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="Inter">Inter</SelectItem>
+                  <SelectItem value="Roboto">Roboto</SelectItem>
+                  <SelectItem value="Open Sans">Open Sans</SelectItem>
+                  <SelectItem value="Lato">Lato</SelectItem>
+                  <SelectItem value="Georgia">Georgia</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
+          <div className="space-y-1.5">
+            <Label>Logo</Label>
+            <div className="flex items-center gap-3">
+              {settings.themeLogo && (
+                <img
+                  src={settings.themeLogo}
+                  alt="Quiz logo"
+                  className="h-10 w-auto max-w-[120px] object-contain border rounded"
+                />
+              )}
+              <input
+                ref={logoInputRef}
+                type="file"
+                accept="image/*"
+                className="hidden"
+                onChange={(e) => {
+                  const f = e.target.files?.[0]
+                  if (f) handleLogoUpload(f)
+                }}
+              />
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => logoInputRef.current?.click()}
+                disabled={isUploadingLogo}
+              >
+                {isUploadingLogo ? (
+                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                ) : (
+                  <Upload className="h-4 w-4 mr-2" />
+                )}
+                {settings.themeLogo ? 'Replace Logo' : 'Upload Logo'}
+              </Button>
+              {settings.themeLogo && (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="text-red-500 hover:text-red-600"
+                  onClick={() => set('themeLogo', '')}
+                >
+                  Remove
+                </Button>
+              )}
+            </div>
+            <p className="text-xs text-gray-500">Logo will be shown in the quiz header. Recommended: PNG or SVG, max 200px height.</p>
           </div>
         </CardContent>
       </Card>
@@ -392,7 +656,7 @@ export default function QuizSettingsPage() {
               <Label>Allowed emails (one per line, wildcards like *@company.com supported)</Label>
               <Textarea
                 rows={4}
-                placeholder="student@school.edu&#10;*@mycompany.com"
+                placeholder={"student@school.edu\n*@mycompany.com"}
                 value={settings.allowedEmails}
                 onChange={(e) => set('allowedEmails', e.target.value)}
               />
@@ -496,7 +760,7 @@ export default function QuizSettingsPage() {
 
       {/* Share */}
       {settings.shareCode && (
-        <Card>
+        <Card className="mb-4">
           <CardHeader><CardTitle className="text-sm font-semibold text-gray-600 uppercase tracking-wide">Share</CardTitle></CardHeader>
           <CardContent>
             <div className="flex items-center gap-2">

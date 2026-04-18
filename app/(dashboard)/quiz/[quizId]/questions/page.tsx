@@ -32,11 +32,13 @@ type Question = {
   id: string
   stem: string
   questionType: string
-  options: string[] | null
+  options: string[] | { left: string[]; right: string[] } | null
   correctAnswer: string | null
   explanation: string | null
   difficulty: string
   points: number
+  sortOrder: number
+  poolTag: string | null
   createdAt: string
 }
 
@@ -47,10 +49,35 @@ type AIModel = {
   model: string
 }
 
+const ALL_QUESTION_TYPES = [
+  { value: 'MCQ', label: 'Multiple Choice (choose one)' },
+  { value: 'MULTIPLE_RESPONSE', label: 'Multiple Response (choose many)' },
+  { value: 'TRUE_FALSE', label: 'True/False' },
+  { value: 'FILL_BLANK', label: 'Fill in the Blank' },
+  { value: 'MATCHING', label: 'Matching' },
+  { value: 'TEXT_BLOCK', label: 'Text Block / Header' },
+  { value: 'ESSAY', label: 'Essay (ungraded)' },
+  { value: 'LONG_ANSWER', label: 'Long Answer (ungraded)' },
+  { value: 'SHORT_ANSWER', label: 'Short Answer' },
+]
+
+const TYPE_LABEL: Record<string, string> = {
+  MCQ: 'MCQ',
+  MULTIPLE_RESPONSE: 'Multi-select',
+  TRUE_FALSE: 'True/False',
+  FILL_BLANK: 'Fill blank',
+  MATCHING: 'Matching',
+  TEXT_BLOCK: 'Text block',
+  ESSAY: 'Essay',
+  LONG_ANSWER: 'Long answer',
+  SHORT_ANSWER: 'Short answer',
+}
+
 export default function QuizQuestionsPage() {
   const params = useParams()
   const { toast } = useToast()
   const fileInputRef = useRef<HTMLInputElement>(null)
+  const importFileRef = useRef<HTMLInputElement>(null)
 
   const [questions, setQuestions] = useState<Question[]>([])
   const [isLoading, setIsLoading] = useState(true)
@@ -60,6 +87,10 @@ export default function QuizQuestionsPage() {
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editForm, setEditForm] = useState<Partial<Question>>({})
+  // Matching edit state
+  const [editMatchLeft, setEditMatchLeft] = useState<string[]>([])
+  const [editMatchRight, setEditMatchRight] = useState<string[]>([])
+
   // Documents state
   const [documents, setDocuments] = useState<{ id: string; fileName: string; fileType: string; fileSize: number }[]>([])
   const [selectedDocIds, setSelectedDocIds] = useState<string[]>([])
@@ -67,6 +98,7 @@ export default function QuizQuestionsPage() {
   const [isDeletingDoc, setIsDeletingDoc] = useState<string | null>(null)
   const docInputRef = useRef<HTMLInputElement>(null)
 
+  // Add question form
   const [isAdding, setIsAdding] = useState(false)
   const [newQuestion, setNewQuestion] = useState({
     stem: '',
@@ -76,6 +108,10 @@ export default function QuizQuestionsPage() {
     explanation: '',
     difficulty: 'MEDIUM',
     points: 2,
+    poolTag: '',
+    // Matching state
+    matchLeft: ['', ''],
+    matchRight: ['', ''],
   })
 
   // AI generate state
@@ -175,10 +211,19 @@ export default function QuizQuestionsPage() {
 
   const handleSaveEdit = async (id: string) => {
     try {
+      // Build options/correctAnswer for MATCHING
+      let patchData = { ...editForm }
+      if (editForm.questionType === 'MATCHING') {
+        patchData = {
+          ...patchData,
+          options: { left: editMatchLeft, right: editMatchRight },
+          correctAnswer: editForm.correctAnswer || '',
+        }
+      }
       const res = await fetch(`/api/quiz-sets/${params.quizId}/questions/${id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(editForm),
+        body: JSON.stringify(patchData),
       })
       if (!res.ok) throw new Error()
       const updated = await res.json()
@@ -190,24 +235,75 @@ export default function QuizQuestionsPage() {
     }
   }
 
+  // Build options payload for add form
+  const buildAddPayload = () => {
+    const qt = newQuestion.questionType
+    let options: unknown = null
+    let correctAnswer: string | null = newQuestion.correctAnswer || null
+    let points = newQuestion.points
+
+    if (qt === 'MCQ' || qt === 'MULTIPLE_RESPONSE') {
+      options = newQuestion.options.filter((o) => o.trim())
+    } else if (qt === 'MATCHING') {
+      options = { left: newQuestion.matchLeft, right: newQuestion.matchRight }
+    } else if (qt === 'TRUE_FALSE') {
+      options = ['True', 'False']
+    } else if (qt === 'TEXT_BLOCK') {
+      options = null
+      correctAnswer = null
+      points = 0
+    } else {
+      options = null
+    }
+
+    return {
+      stem: newQuestion.stem,
+      questionType: qt,
+      options,
+      correctAnswer,
+      explanation: newQuestion.explanation || null,
+      difficulty: newQuestion.difficulty,
+      points,
+      poolTag: newQuestion.poolTag || null,
+    }
+  }
+
   const handleAddQuestion = async () => {
+    if (!newQuestion.stem.trim()) {
+      toast({ title: 'Question text is required', variant: 'destructive' })
+      return
+    }
     try {
+      const payload = buildAddPayload()
       const res = await fetch(`/api/quiz-sets/${params.quizId}/questions`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          ...newQuestion,
-          options: newQuestion.questionType === 'MCQ' ? newQuestion.options : null,
-        }),
+        body: JSON.stringify(payload),
       })
       if (!res.ok) throw new Error()
       const q = await res.json()
-      setQuestions((prev) => [q, ...prev])
+      setQuestions((prev) => [...prev, q])
       setIsAdding(false)
+      resetNewQuestion()
       toast({ title: 'Question added' })
     } catch {
       toast({ title: 'Failed to add question', variant: 'destructive' })
     }
+  }
+
+  const resetNewQuestion = () => {
+    setNewQuestion({
+      stem: '',
+      questionType: 'MCQ',
+      options: ['', '', '', ''],
+      correctAnswer: '',
+      explanation: '',
+      difficulty: 'MEDIUM',
+      points: 2,
+      poolTag: '',
+      matchLeft: ['', ''],
+      matchRight: ['', ''],
+    })
   }
 
   // ── AI Generate ──────────────────────────────────────────────────────────────
@@ -332,7 +428,7 @@ export default function QuizQuestionsPage() {
       toast({ title: 'Import failed', description: String(err), variant: 'destructive' })
     } finally {
       setIsImporting(false)
-      if (fileInputRef.current) fileInputRef.current.value = ''
+      if (importFileRef.current) importFileRef.current.value = ''
     }
   }
 
@@ -355,9 +451,276 @@ export default function QuizQuestionsPage() {
     )
   }
 
+  // Parse matching options
+  const parseMatchingOptions = (options: unknown): { left: string[]; right: string[] } => {
+    if (!options) return { left: [], right: [] }
+    if (typeof options === 'string') {
+      try { return JSON.parse(options) } catch { return { left: [], right: [] } }
+    }
+    if (typeof options === 'object' && !Array.isArray(options)) {
+      return options as { left: string[]; right: string[] }
+    }
+    return { left: [], right: [] }
+  }
+
+  // Render question content for viewing
+  const renderQuestionView = (q: Question) => {
+    if (q.questionType === 'TEXT_BLOCK') {
+      return (
+        <div className="p-3 bg-blue-50 border border-blue-200 rounded text-blue-800 text-sm italic">
+          {q.stem}
+        </div>
+      )
+    }
+
+    if (q.questionType === 'MATCHING') {
+      const opts = parseMatchingOptions(q.options)
+      let pairs: string[][] = []
+      try {
+        pairs = q.correctAnswer ? JSON.parse(q.correctAnswer) : []
+      } catch {}
+      return (
+        <div className="space-y-2">
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <p className="text-xs font-semibold text-gray-500 mb-1">Left</p>
+              {opts.left.map((l, i) => (
+                <div key={i} className="text-sm px-2 py-1 bg-gray-100 rounded mb-1">{l}</div>
+              ))}
+            </div>
+            <div>
+              <p className="text-xs font-semibold text-gray-500 mb-1">Right</p>
+              {opts.right.map((r, i) => (
+                <div key={i} className="text-sm px-2 py-1 bg-gray-100 rounded mb-1">{r}</div>
+              ))}
+            </div>
+          </div>
+          {pairs.length > 0 && (
+            <div>
+              <p className="text-xs font-semibold text-gray-500 mb-1">Correct matches</p>
+              {pairs.map(([l, r], i) => (
+                <div key={i} className="text-xs text-[#028a39]">{l} → {r}</div>
+              ))}
+            </div>
+          )}
+        </div>
+      )
+    }
+
+    const options = Array.isArray(q.options) ? q.options as string[] : null
+
+    return (
+      <div className="space-y-2 text-sm">
+        {options && options.map((opt, i) => (
+          <div
+            key={i}
+            className={`px-3 py-1.5 rounded text-sm ${
+              opt === q.correctAnswer
+                ? 'bg-[#028a39]/10 text-[#028a39] font-medium'
+                : 'text-gray-700'
+            }`}
+          >
+            {String.fromCharCode(65 + i)}. {opt}
+            {opt === q.correctAnswer && ' ✓'}
+          </div>
+        ))}
+        {q.correctAnswer && !options && (
+          <p className="text-[#028a39] font-medium">Answer: {q.correctAnswer}</p>
+        )}
+        {q.explanation && (
+          <div className="mt-2 p-3 bg-blue-50 rounded text-blue-800 text-xs">
+            <p className="font-semibold mb-1">Explanation</p>
+            {q.explanation}
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  // Render edit form for a question
+  const renderEditForm = (q: Question) => {
+    const qt = editForm.questionType || q.questionType
+    const options = Array.isArray(editForm.options) ? editForm.options as string[] : (Array.isArray(q.options) ? q.options as string[] : null)
+
+    return (
+      <div className="space-y-3">
+        {/* Question text */}
+        <Textarea
+          value={editForm.stem || ''}
+          onChange={(e) => setEditForm({ ...editForm, stem: e.target.value })}
+          className="min-h-[80px]"
+          placeholder="Question text..."
+        />
+
+        {/* Type + Difficulty + Points */}
+        <div className="grid grid-cols-3 gap-2">
+          <Select
+            value={qt}
+            onValueChange={(v) => {
+              const newEditForm = { ...editForm, questionType: v }
+              setEditForm(newEditForm)
+              if (v === 'MATCHING') {
+                const mo = parseMatchingOptions(q.options)
+                setEditMatchLeft(mo.left.length ? mo.left : ['', ''])
+                setEditMatchRight(mo.right.length ? mo.right : ['', ''])
+              }
+            }}
+          >
+            <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              {ALL_QUESTION_TYPES.map((t) => (
+                <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <Select
+            value={editForm.difficulty || q.difficulty}
+            onValueChange={(v) => setEditForm({ ...editForm, difficulty: v })}
+          >
+            <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="EASY">Easy</SelectItem>
+              <SelectItem value="MEDIUM">Medium</SelectItem>
+              <SelectItem value="HARD">Hard</SelectItem>
+            </SelectContent>
+          </Select>
+          <Input
+            type="number"
+            className="h-8 text-xs"
+            placeholder="Points"
+            value={editForm.points ?? q.points}
+            onChange={(e) => setEditForm({ ...editForm, points: Number(e.target.value) })}
+          />
+        </div>
+
+        {/* Pool tag */}
+        <Input
+          placeholder="Question Pool (optional)"
+          value={editForm.poolTag ?? q.poolTag ?? ''}
+          onChange={(e) => setEditForm({ ...editForm, poolTag: e.target.value })}
+          className="h-8 text-xs"
+        />
+
+        {/* Type-specific fields */}
+        {(qt === 'MCQ' || qt === 'MULTIPLE_RESPONSE') && options && (
+          <div className="space-y-1">
+            {options.map((opt: string, i: number) => (
+              <Input
+                key={i}
+                value={opt}
+                onChange={(e) => {
+                  const opts = [...(Array.isArray(editForm.options) ? editForm.options as string[] : options)]
+                  opts[i] = e.target.value
+                  setEditForm({ ...editForm, options: opts })
+                }}
+                placeholder={`Option ${String.fromCharCode(65 + i)}`}
+                className="h-8 text-xs"
+              />
+            ))}
+            <Input
+              value={editForm.correctAnswer || ''}
+              onChange={(e) => setEditForm({ ...editForm, correctAnswer: e.target.value })}
+              placeholder={qt === 'MULTIPLE_RESPONSE' ? 'Correct answers (separated by ||)' : 'Correct answer (exact text)'}
+              className="h-8 text-xs"
+            />
+          </div>
+        )}
+
+        {qt === 'TRUE_FALSE' && (
+          <Input
+            value={editForm.correctAnswer || ''}
+            onChange={(e) => setEditForm({ ...editForm, correctAnswer: e.target.value })}
+            placeholder="Correct answer: True or False"
+            className="h-8 text-xs"
+          />
+        )}
+
+        {(qt === 'SHORT_ANSWER' || qt === 'FILL_BLANK') && (
+          <Input
+            value={editForm.correctAnswer || ''}
+            onChange={(e) => setEditForm({ ...editForm, correctAnswer: e.target.value })}
+            placeholder="Correct answer"
+            className="h-8 text-xs"
+          />
+        )}
+
+        {qt === 'MATCHING' && (
+          <div className="space-y-2">
+            <div className="grid grid-cols-2 gap-3">
+              <div>
+                <Label className="text-xs text-gray-600 mb-1 block">Left items</Label>
+                {editMatchLeft.map((v, i) => (
+                  <Input
+                    key={i}
+                    value={v}
+                    onChange={(e) => {
+                      const l = [...editMatchLeft]; l[i] = e.target.value; setEditMatchLeft(l)
+                    }}
+                    placeholder={`Left ${i + 1}`}
+                    className="h-8 text-xs mb-1"
+                  />
+                ))}
+                <Button type="button" variant="ghost" size="sm" className="h-7 text-xs" onClick={() => setEditMatchLeft([...editMatchLeft, ''])}>
+                  + Add left
+                </Button>
+              </div>
+              <div>
+                <Label className="text-xs text-gray-600 mb-1 block">Right items</Label>
+                {editMatchRight.map((v, i) => (
+                  <Input
+                    key={i}
+                    value={v}
+                    onChange={(e) => {
+                      const r = [...editMatchRight]; r[i] = e.target.value; setEditMatchRight(r)
+                    }}
+                    placeholder={`Right ${i + 1}`}
+                    className="h-8 text-xs mb-1"
+                  />
+                ))}
+                <Button type="button" variant="ghost" size="sm" className="h-7 text-xs" onClick={() => setEditMatchRight([...editMatchRight, ''])}>
+                  + Add right
+                </Button>
+              </div>
+            </div>
+            <Input
+              value={editForm.correctAnswer || ''}
+              onChange={(e) => setEditForm({ ...editForm, correctAnswer: e.target.value })}
+              placeholder='Correct pairs JSON e.g. [["A","1"],["B","2"]]'
+              className="h-8 text-xs font-mono"
+            />
+          </div>
+        )}
+
+        {/* Explanation */}
+        {qt !== 'TEXT_BLOCK' && (
+          <Textarea
+            value={editForm.explanation || ''}
+            onChange={(e) => setEditForm({ ...editForm, explanation: e.target.value })}
+            placeholder="Explanation (optional)..."
+            className="min-h-[60px] text-xs"
+          />
+        )}
+
+        <div className="flex gap-2 justify-end">
+          <Button variant="outline" size="sm" onClick={() => setEditingId(null)}>
+            Cancel
+          </Button>
+          <Button
+            size="sm"
+            className="bg-[#028a39] hover:bg-[#026d2e] text-white"
+            onClick={() => handleSaveEdit(q.id)}
+          >
+            <Check className="h-4 w-4 mr-1" />
+            Save
+          </Button>
+        </div>
+      </div>
+    )
+  }
+
   return (
     <div className="p-6 max-w-7xl mx-auto">
-      {/* Documents Panel (always visible) */}
+      {/* Documents Panel */}
       {documents.length > 0 && (
         <Card className="mb-4 border-gray-200">
           <CardHeader className="pb-2 pt-3">
@@ -371,7 +734,7 @@ export default function QuizQuestionsPage() {
                 type="file"
                 accept=".pdf,.docx,.doc,.txt"
                 className="hidden"
-                onChange={(e) => { const f = e.target.files?.[0]; if (f) handleDocUpload(f); }}
+                onChange={(e) => { const f = e.target.files?.[0]; if (f) handleDocUpload(f); e.target.value = '' }}
               />
               <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => docInputRef.current?.click()} disabled={isUploadingDoc}>
                 {isUploadingDoc ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <Upload className="h-3 w-3 mr-1" />}
@@ -420,25 +783,25 @@ export default function QuizQuestionsPage() {
         <div className="flex gap-2 flex-wrap">
           {/* Upload Document for AI */}
           <input
-            ref={docInputRef}
+            ref={fileInputRef}
             type="file"
             accept=".pdf,.docx,.doc,.txt"
             className="hidden"
-            onChange={(e) => { const f = e.target.files?.[0]; if (f) handleDocUpload(f) }}
+            onChange={(e) => { const f = e.target.files?.[0]; if (f) handleDocUpload(f); e.target.value = '' }}
           />
           <Button
             variant="outline"
             size="sm"
-            onClick={() => docInputRef.current?.click()}
+            onClick={() => fileInputRef.current?.click()}
             disabled={isUploadingDoc}
           >
             {isUploadingDoc ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <Upload className="h-4 w-4 mr-2" />}
             Upload Document
           </Button>
 
-          {/* Import TestMoz */}
+          {/* Import Excel */}
           <input
-            ref={fileInputRef}
+            ref={importFileRef}
             type="file"
             accept=".xlsx,.xls,.csv"
             className="hidden"
@@ -450,7 +813,7 @@ export default function QuizQuestionsPage() {
           <Button
             variant="outline"
             size="sm"
-            onClick={() => fileInputRef.current?.click()}
+            onClick={() => importFileRef.current?.click()}
             disabled={isImporting}
           >
             {isImporting ? (
@@ -458,7 +821,7 @@ export default function QuizQuestionsPage() {
             ) : (
               <FileSpreadsheet className="h-4 w-4 mr-2" />
             )}
-            Import Questions
+            Import Excel
           </Button>
 
           {/* Export */}
@@ -484,7 +847,7 @@ export default function QuizQuestionsPage() {
           </Button>
 
           {/* Add Manual */}
-          <Button variant="outline" size="sm" onClick={() => setIsAdding(true)}>
+          <Button variant="outline" size="sm" onClick={() => { setIsAdding(true); resetNewQuestion() }}>
             <Plus className="h-4 w-4 mr-2" />
             Add Question
           </Button>
@@ -569,8 +932,8 @@ export default function QuizQuestionsPage() {
               </Label>
               <Textarea
                 placeholder={documents.length > 0
-                  ? 'Optional: add specific topic, chapter, or instructions to focus the questions...'
-                  : 'Paste document content, paste text, or describe the topic to generate questions about...'}
+                  ? 'Optional: add specific topic, chapter, or instructions...'
+                  : 'Paste document content, paste text, or describe the topic...'}
                 className="min-h-[100px] text-sm"
                 value={aiTopic}
                 onChange={(e) => setAITopic(e.target.value)}
@@ -600,7 +963,7 @@ export default function QuizQuestionsPage() {
               <div className="space-y-1.5">
                 <Label className="text-xs text-gray-600">Question types</Label>
                 <div className="flex gap-1.5 flex-wrap pt-1">
-                  {['MCQ', 'TRUE_FALSE', 'SHORT_ANSWER'].map((type) => (
+                  {['MCQ', 'TRUE_FALSE', 'SHORT_ANSWER', 'FILL_BLANK', 'ESSAY'].map((type) => (
                     <button
                       key={type}
                       onClick={() => toggleAIType(type)}
@@ -611,7 +974,7 @@ export default function QuizQuestionsPage() {
                           : 'bg-white text-gray-600 border-gray-200 hover:border-[#028a39]'
                       }`}
                     >
-                      {type === 'MCQ' ? 'MCQ' : type === 'TRUE_FALSE' ? 'True/False' : 'Short Answer'}
+                      {TYPE_LABEL[type] || type}
                     </button>
                   ))}
                 </div>
@@ -687,21 +1050,21 @@ export default function QuizQuestionsPage() {
             <SelectValue placeholder="Difficulty" />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">All</SelectItem>
+            <SelectItem value="all">All Difficulties</SelectItem>
             <SelectItem value="EASY">Easy</SelectItem>
             <SelectItem value="MEDIUM">Medium</SelectItem>
             <SelectItem value="HARD">Hard</SelectItem>
           </SelectContent>
         </Select>
         <Select value={typeFilter} onValueChange={setTypeFilter}>
-          <SelectTrigger className="w-36">
+          <SelectTrigger className="w-44">
             <SelectValue placeholder="Type" />
           </SelectTrigger>
           <SelectContent>
-            <SelectItem value="all">All</SelectItem>
-            <SelectItem value="MCQ">MCQ</SelectItem>
-            <SelectItem value="TRUE_FALSE">True/False</SelectItem>
-            <SelectItem value="SHORT_ANSWER">Short Answer</SelectItem>
+            <SelectItem value="all">All Types</SelectItem>
+            {ALL_QUESTION_TYPES.map((t) => (
+              <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>
+            ))}
           </SelectContent>
         </Select>
       </div>
@@ -710,74 +1073,244 @@ export default function QuizQuestionsPage() {
         {filtered.length} / {questions.length} questions
       </p>
 
-      {/* Add Question Form */}
+      {/* Add Question Form (Modal-like inline panel) */}
       {isAdding && (
-        <Card className="mb-4 border-[#028a39]/40">
+        <Card className="mb-4 border-[#028a39]/40 shadow-md">
+          <CardHeader className="pb-2 pt-4 flex flex-row items-center justify-between">
+            <CardTitle className="text-sm font-semibold flex items-center gap-2">
+              <Plus className="h-4 w-4 text-[#028a39]" />
+              Add New Question
+            </CardTitle>
+            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setIsAdding(false)}>
+              <X className="h-4 w-4" />
+            </Button>
+          </CardHeader>
           <CardContent className="p-4 space-y-3">
-            <h3 className="font-semibold text-sm">New Question</h3>
+            {/* Question type selector */}
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-2 mb-1">
+              {ALL_QUESTION_TYPES.map((t) => (
+                <button
+                  key={t.value}
+                  type="button"
+                  onClick={() => setNewQuestion({ ...newQuestion, questionType: t.value, options: ['', '', '', ''], correctAnswer: '', matchLeft: ['', ''], matchRight: ['', ''] })}
+                  className={`text-xs px-2.5 py-1.5 rounded border transition-colors text-left ${
+                    newQuestion.questionType === t.value
+                      ? 'bg-[#028a39] text-white border-[#028a39]'
+                      : 'border-gray-200 text-gray-600 hover:border-[#028a39]'
+                  }`}
+                >
+                  {t.label}
+                </button>
+              ))}
+            </div>
+
+            {/* Question text */}
             <Textarea
-              placeholder="Question content..."
+              placeholder={newQuestion.questionType === 'TEXT_BLOCK' ? 'Header / instruction text...' : 'Question text...'}
               value={newQuestion.stem}
               onChange={(e) => setNewQuestion({ ...newQuestion, stem: e.target.value })}
               className="min-h-[80px]"
             />
-            <div className="grid grid-cols-3 gap-2">
-              <Select
-                value={newQuestion.questionType}
-                onValueChange={(v) => setNewQuestion({ ...newQuestion, questionType: v })}
-              >
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="MCQ">MCQ</SelectItem>
-                  <SelectItem value="TRUE_FALSE">True/False</SelectItem>
-                  <SelectItem value="SHORT_ANSWER">Short Answer</SelectItem>
-                </SelectContent>
-              </Select>
-              <Select
-                value={newQuestion.difficulty}
-                onValueChange={(v) => setNewQuestion({ ...newQuestion, difficulty: v })}
-              >
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="EASY">Easy</SelectItem>
-                  <SelectItem value="MEDIUM">Medium</SelectItem>
-                  <SelectItem value="HARD">Hard</SelectItem>
-                </SelectContent>
-              </Select>
-              <Input
-                type="number"
-                placeholder="Points"
-                value={newQuestion.points}
-                onChange={(e) => setNewQuestion({ ...newQuestion, points: Number(e.target.value) })}
-              />
-            </div>
-            {newQuestion.questionType === 'MCQ' && (
-              <div className="space-y-2">
-                {newQuestion.options.map((opt, i) => (
-                  <Input
-                    key={i}
-                    placeholder={`Option ${String.fromCharCode(65 + i)}`}
-                    value={opt}
-                    onChange={(e) => {
-                      const opts = [...newQuestion.options]
-                      opts[i] = e.target.value
-                      setNewQuestion({ ...newQuestion, options: opts })
-                    }}
-                  />
-                ))}
+
+            {/* Difficulty, Points */}
+            {newQuestion.questionType !== 'TEXT_BLOCK' && (
+              <div className="grid grid-cols-2 gap-2">
+                <Select
+                  value={newQuestion.difficulty}
+                  onValueChange={(v) => setNewQuestion({ ...newQuestion, difficulty: v })}
+                >
+                  <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="EASY">Easy</SelectItem>
+                    <SelectItem value="MEDIUM">Medium</SelectItem>
+                    <SelectItem value="HARD">Hard</SelectItem>
+                  </SelectContent>
+                </Select>
                 <Input
-                  placeholder="Correct answer (enter the exact text of the correct option)"
-                  value={newQuestion.correctAnswer}
-                  onChange={(e) => setNewQuestion({ ...newQuestion, correctAnswer: e.target.value })}
+                  type="number"
+                  placeholder="Points"
+                  value={newQuestion.points}
+                  onChange={(e) => setNewQuestion({ ...newQuestion, points: Number(e.target.value) })}
+                  className="h-9"
                 />
               </div>
             )}
-            <Textarea
-              placeholder="Explanation (optional)..."
-              value={newQuestion.explanation}
-              onChange={(e) => setNewQuestion({ ...newQuestion, explanation: e.target.value })}
+
+            {/* Pool tag */}
+            <Input
+              placeholder="Question Pool (optional) e.g. Pool A, Chapter 1"
+              value={newQuestion.poolTag}
+              onChange={(e) => setNewQuestion({ ...newQuestion, poolTag: e.target.value })}
+              className="h-9 text-sm"
             />
-            <div className="flex gap-2 justify-end">
+
+            {/* MCQ / MULTIPLE_RESPONSE options */}
+            {(newQuestion.questionType === 'MCQ' || newQuestion.questionType === 'MULTIPLE_RESPONSE') && (
+              <div className="space-y-2">
+                <Label className="text-xs text-gray-600">Options</Label>
+                {newQuestion.options.map((opt, i) => (
+                  <div key={i} className="flex gap-2">
+                    <Input
+                      placeholder={`Option ${String.fromCharCode(65 + i)}`}
+                      value={opt}
+                      onChange={(e) => {
+                        const opts = [...newQuestion.options]
+                        opts[i] = e.target.value
+                        setNewQuestion({ ...newQuestion, options: opts })
+                      }}
+                      className="h-9"
+                    />
+                    {newQuestion.options.length > 2 && (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-9 w-9 shrink-0"
+                        onClick={() => {
+                          const opts = newQuestion.options.filter((_, j) => j !== i)
+                          setNewQuestion({ ...newQuestion, options: opts })
+                        }}
+                      >
+                        <X className="h-3 w-3" />
+                      </Button>
+                    )}
+                  </div>
+                ))}
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="h-8 text-xs"
+                  onClick={() => setNewQuestion({ ...newQuestion, options: [...newQuestion.options, ''] })}
+                >
+                  + Add option
+                </Button>
+                <Input
+                  placeholder={newQuestion.questionType === 'MULTIPLE_RESPONSE' ? 'Correct answers (separated by ||)' : 'Correct answer (exact text of correct option)'}
+                  value={newQuestion.correctAnswer}
+                  onChange={(e) => setNewQuestion({ ...newQuestion, correctAnswer: e.target.value })}
+                  className="h-9"
+                />
+              </div>
+            )}
+
+            {/* TRUE_FALSE */}
+            {newQuestion.questionType === 'TRUE_FALSE' && (
+              <div className="space-y-2">
+                <Label className="text-xs text-gray-600">Correct answer</Label>
+                <div className="flex gap-2">
+                  {['True', 'False'].map((opt) => (
+                    <button
+                      key={opt}
+                      type="button"
+                      onClick={() => setNewQuestion({ ...newQuestion, correctAnswer: opt })}
+                      className={`flex-1 py-2 rounded border font-medium text-sm transition-colors ${
+                        newQuestion.correctAnswer === opt
+                          ? 'bg-[#028a39] text-white border-[#028a39]'
+                          : 'border-gray-200 text-gray-600 hover:border-gray-300'
+                      }`}
+                    >
+                      {opt}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* FILL_BLANK / SHORT_ANSWER */}
+            {(newQuestion.questionType === 'FILL_BLANK' || newQuestion.questionType === 'SHORT_ANSWER') && (
+              <div className="space-y-1.5">
+                <Label className="text-xs text-gray-600">Correct answer</Label>
+                <Input
+                  placeholder="Correct answer"
+                  value={newQuestion.correctAnswer}
+                  onChange={(e) => setNewQuestion({ ...newQuestion, correctAnswer: e.target.value })}
+                  className="h-9"
+                />
+              </div>
+            )}
+
+            {/* MATCHING */}
+            {newQuestion.questionType === 'MATCHING' && (
+              <div className="space-y-2">
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <Label className="text-xs text-gray-600 mb-1 block">Left items</Label>
+                    {newQuestion.matchLeft.map((v, i) => (
+                      <div key={i} className="flex gap-1 mb-1">
+                        <Input
+                          value={v}
+                          onChange={(e) => {
+                            const l = [...newQuestion.matchLeft]; l[i] = e.target.value
+                            setNewQuestion({ ...newQuestion, matchLeft: l })
+                          }}
+                          placeholder={`Left ${i + 1}`}
+                          className="h-8 text-sm"
+                        />
+                        {newQuestion.matchLeft.length > 1 && (
+                          <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0" onClick={() => {
+                            const l = newQuestion.matchLeft.filter((_, j) => j !== i)
+                            setNewQuestion({ ...newQuestion, matchLeft: l })
+                          }}>
+                            <X className="h-3 w-3" />
+                          </Button>
+                        )}
+                      </div>
+                    ))}
+                    <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => setNewQuestion({ ...newQuestion, matchLeft: [...newQuestion.matchLeft, ''] })}>
+                      + Add
+                    </Button>
+                  </div>
+                  <div>
+                    <Label className="text-xs text-gray-600 mb-1 block">Right items</Label>
+                    {newQuestion.matchRight.map((v, i) => (
+                      <div key={i} className="flex gap-1 mb-1">
+                        <Input
+                          value={v}
+                          onChange={(e) => {
+                            const r = [...newQuestion.matchRight]; r[i] = e.target.value
+                            setNewQuestion({ ...newQuestion, matchRight: r })
+                          }}
+                          placeholder={`Right ${i + 1}`}
+                          className="h-8 text-sm"
+                        />
+                        {newQuestion.matchRight.length > 1 && (
+                          <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0" onClick={() => {
+                            const r = newQuestion.matchRight.filter((_, j) => j !== i)
+                            setNewQuestion({ ...newQuestion, matchRight: r })
+                          }}>
+                            <X className="h-3 w-3" />
+                          </Button>
+                        )}
+                      </div>
+                    ))}
+                    <Button variant="ghost" size="sm" className="h-7 text-xs" onClick={() => setNewQuestion({ ...newQuestion, matchRight: [...newQuestion.matchRight, ''] })}>
+                      + Add
+                    </Button>
+                  </div>
+                </div>
+                <div className="space-y-1">
+                  <Label className="text-xs text-gray-600">Correct pairs (JSON)</Label>
+                  <Input
+                    placeholder='e.g. [["A","1"],["B","2"]]'
+                    value={newQuestion.correctAnswer}
+                    onChange={(e) => setNewQuestion({ ...newQuestion, correctAnswer: e.target.value })}
+                    className="h-9 font-mono text-xs"
+                  />
+                  <p className="text-xs text-gray-500">Format: array of [left, right] pairs</p>
+                </div>
+              </div>
+            )}
+
+            {/* Explanation (not for TEXT_BLOCK) */}
+            {newQuestion.questionType !== 'TEXT_BLOCK' && (
+              <Textarea
+                placeholder="Explanation (optional)..."
+                value={newQuestion.explanation}
+                onChange={(e) => setNewQuestion({ ...newQuestion, explanation: e.target.value })}
+                className="min-h-[60px] text-sm"
+              />
+            )}
+
+            <div className="flex gap-2 justify-end pt-1">
               <Button variant="outline" size="sm" onClick={() => setIsAdding(false)}>
                 Cancel
               </Button>
@@ -786,7 +1319,8 @@ export default function QuizQuestionsPage() {
                 className="bg-[#028a39] hover:bg-[#026d2e] text-white"
                 onClick={handleAddQuestion}
               >
-                Add
+                <Plus className="h-4 w-4 mr-1" />
+                Add Question
               </Button>
             </div>
           </CardContent>
@@ -808,139 +1342,93 @@ export default function QuizQuestionsPage() {
       ) : filtered.length === 0 ? (
         <div className="text-center py-16 text-gray-400">
           <p className="text-sm">No questions yet</p>
-          <p className="text-xs mt-1">Use AI to generate, import from TestMoz Excel, or add manually</p>
+          <p className="text-xs mt-1">Use AI to generate, import from Excel, or add manually</p>
         </div>
       ) : (
         <div className="space-y-2">
-          {filtered.map((q) => (
-            <Card key={q.id} className="overflow-hidden">
-              <div
-                className="p-4 flex items-start justify-between gap-2 cursor-pointer hover:bg-gray-50"
-                onClick={() => setExpandedId(expandedId === q.id ? null : q.id)}
-              >
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium line-clamp-2">{q.stem}</p>
-                  <div className="flex gap-2 mt-1">
-                    <Badge variant="outline" className="text-xs">{q.questionType}</Badge>
-                    <span className={`text-xs px-2 py-0.5 rounded-full ${difficultyColor[q.difficulty]}`}>
-                      {q.difficulty}
-                    </span>
-                    <span className="text-xs text-gray-500">{q.points} pts</span>
-                  </div>
-                </div>
-                <div className="flex items-center gap-1 shrink-0">
-                  <Button
-                    size="icon"
-                    variant="ghost"
-                    className="h-7 w-7"
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      setEditingId(q.id)
-                      setEditForm(q)
-                      setExpandedId(q.id)
-                    }}
-                  >
-                    <Pencil className="h-3 w-3" />
-                  </Button>
-                  <Button
-                    size="icon"
-                    variant="ghost"
-                    className="h-7 w-7 text-red-500"
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      handleDelete(q.id)
-                    }}
-                  >
-                    <Trash2 className="h-3 w-3" />
-                  </Button>
-                  {expandedId === q.id ? (
-                    <ChevronUp className="h-4 w-4 text-gray-400" />
-                  ) : (
-                    <ChevronDown className="h-4 w-4 text-gray-400" />
-                  )}
-                </div>
-              </div>
+          {filtered.map((q, index) => {
+            // Find the original index (sort order number)
+            const questionNumber = (q.sortOrder ?? 0) + 1
 
-              {expandedId === q.id && (
-                <div className="border-t p-4 bg-gray-50">
-                  {editingId === q.id ? (
-                    <div className="space-y-3">
-                      <Textarea
-                        value={editForm.stem || ''}
-                        onChange={(e) => setEditForm({ ...editForm, stem: e.target.value })}
-                        className="min-h-[80px]"
-                      />
-                      {q.options && (
-                        <div className="space-y-1">
-                          {(editForm.options || q.options).map((opt: string, i: number) => (
-                            <Input
-                              key={i}
-                              value={opt}
-                              onChange={(e) => {
-                                const opts = [...(editForm.options || q.options || [])]
-                                opts[i] = e.target.value
-                                setEditForm({ ...editForm, options: opts })
-                              }}
-                              placeholder={`Option ${String.fromCharCode(65 + i)}`}
-                            />
-                          ))}
-                          <Input
-                            value={editForm.correctAnswer || ''}
-                            onChange={(e) => setEditForm({ ...editForm, correctAnswer: e.target.value })}
-                            placeholder="Correct answer"
-                          />
-                        </div>
-                      )}
-                      <Textarea
-                        value={editForm.explanation || ''}
-                        onChange={(e) => setEditForm({ ...editForm, explanation: e.target.value })}
-                        placeholder="Explanation..."
-                      />
-                      <div className="flex gap-2 justify-end">
-                        <Button variant="outline" size="sm" onClick={() => setEditingId(null)}>
-                          Cancel
-                        </Button>
-                        <Button
-                          size="sm"
-                          className="bg-[#028a39] hover:bg-[#026d2e] text-white"
-                          onClick={() => handleSaveEdit(q.id)}
-                        >
-                          <Check className="h-4 w-4 mr-1" />
-                          Save
-                        </Button>
+            return (
+              <Card key={q.id} className="overflow-hidden">
+                <div
+                  className="p-4 flex items-start justify-between gap-2 cursor-pointer hover:bg-gray-50"
+                  onClick={() => setExpandedId(expandedId === q.id ? null : q.id)}
+                >
+                  <div className="flex items-start gap-3 flex-1 min-w-0">
+                    {/* Question number badge */}
+                    <span className="shrink-0 mt-0.5 bg-gray-100 text-gray-700 text-xs font-bold rounded px-1.5 py-0.5 min-w-[2rem] text-center">
+                      #{questionNumber}
+                    </span>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium line-clamp-2">{q.stem}</p>
+                      <div className="flex flex-wrap gap-1.5 mt-1.5">
+                        <Badge variant="outline" className="text-xs py-0">{TYPE_LABEL[q.questionType] || q.questionType}</Badge>
+                        <span className={`text-xs px-2 py-0.5 rounded-full ${difficultyColor[q.difficulty] || 'bg-gray-100 text-gray-600'}`}>
+                          {q.difficulty}
+                        </span>
+                        <span className="text-xs text-gray-500">{q.points} pts</span>
+                        {q.poolTag && (
+                          <Badge variant="secondary" className="text-xs py-0 bg-purple-100 text-purple-700">
+                            {q.poolTag}
+                          </Badge>
+                        )}
+                        {q.questionType === 'TEXT_BLOCK' && (
+                          <Badge className="text-xs py-0 bg-blue-100 text-blue-700 border-blue-200">
+                            non-interactive
+                          </Badge>
+                        )}
                       </div>
                     </div>
-                  ) : (
-                    <div className="space-y-2 text-sm">
-                      {q.options &&
-                        q.options.map((opt, i) => (
-                          <div
-                            key={i}
-                            className={`px-3 py-1.5 rounded text-sm ${
-                              opt === q.correctAnswer
-                                ? 'bg-[#028a39]/10 text-[#028a39] font-medium'
-                                : 'text-gray-700'
-                            }`}
-                          >
-                            {String.fromCharCode(65 + i)}. {opt}
-                            {opt === q.correctAnswer && ' ✓'}
-                          </div>
-                        ))}
-                      {q.correctAnswer && !q.options && (
-                        <p className="text-[#028a39] font-medium">Answer: {q.correctAnswer}</p>
-                      )}
-                      {q.explanation && (
-                        <div className="mt-2 p-3 bg-blue-50 rounded text-blue-800 text-xs">
-                          <p className="font-semibold mb-1">Explanation</p>
-                          {q.explanation}
-                        </div>
-                      )}
-                    </div>
-                  )}
+                  </div>
+                  <div className="flex items-center gap-1 shrink-0">
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      className="h-7 w-7"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        setEditingId(q.id)
+                        setEditForm({ ...q })
+                        setExpandedId(q.id)
+                        // Init matching state
+                        if (q.questionType === 'MATCHING') {
+                          const mo = parseMatchingOptions(q.options)
+                          setEditMatchLeft(mo.left.length ? mo.left : ['', ''])
+                          setEditMatchRight(mo.right.length ? mo.right : ['', ''])
+                        }
+                      }}
+                    >
+                      <Pencil className="h-3 w-3" />
+                    </Button>
+                    <Button
+                      size="icon"
+                      variant="ghost"
+                      className="h-7 w-7 text-red-500"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        handleDelete(q.id)
+                      }}
+                    >
+                      <Trash2 className="h-3 w-3" />
+                    </Button>
+                    {expandedId === q.id ? (
+                      <ChevronUp className="h-4 w-4 text-gray-400" />
+                    ) : (
+                      <ChevronDown className="h-4 w-4 text-gray-400" />
+                    )}
+                  </div>
                 </div>
-              )}
-            </Card>
-          ))}
+
+                {expandedId === q.id && (
+                  <div className="border-t p-4 bg-gray-50">
+                    {editingId === q.id ? renderEditForm(q) : renderQuestionView(q)}
+                  </div>
+                )}
+              </Card>
+            )
+          })}
         </div>
       )}
     </div>

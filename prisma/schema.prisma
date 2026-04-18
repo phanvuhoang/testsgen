@@ -85,6 +85,9 @@ enum QuizQuestionType {
   SHORT_ANSWER
   FILL_BLANK
   ESSAY
+  MATCHING
+  TEXT_BLOCK          // non-interactive instruction/header block
+  LONG_ANSWER         // ungraded long answer
 }
 
 enum IdentifyBy {
@@ -321,10 +324,16 @@ model QuizSet {
   expiresAt           DateTime?
   tags                Json?         @default("[]")
   theme               String?       @default("default")
+  themeColor          String?       @default("#028a39")  // primary accent color
+  themeFont           String?       @default("Inter")    // font family
+  themeLogo           String?                             // URL/path to custom logo
   passMessage         String?
   failMessage         String?
   introText           String?       // Introduction shown before test starts
   conclusionText      String?       // Text shown after submission
+  certificateEnabled  Boolean       @default(false)
+  certificateTitle    String?       @default("Certificate of Completion")
+  certificateMessage  String?
   // Difficulty mix settings
   easyPercent         Int           @default(20)
   mediumPercent       Int           @default(60)
@@ -335,6 +344,10 @@ model QuizSet {
   showScore           Boolean       @default(true)
   showOutline         Boolean       @default(true)
   showCorrectAnswers  Boolean       @default(true)
+  // Per-question feedback (shown immediately after each question is answered)
+  feedbackShowCorrect Boolean       @default(false)  // indicate correct/incorrect
+  feedbackShowAnswer  Boolean       @default(false)  // display the correct answer
+  feedbackShowExplanation Boolean   @default(false)  // show explanation
   notificationEmail   String?       // comma-separated emails for completion notifications
   disableRightClick   Boolean       @default(false)
   disableCopyPaste    Boolean       @default(false)
@@ -374,11 +387,13 @@ model QuizQuestion {
   quizSetId     String
   stem          String
   questionType  QuizQuestionType @default(MCQ)
-  options       Json?
-  correctAnswer String?
+  options       Json?            // For MCQ/MULTIPLE_RESPONSE: string[]; For MATCHING: {left: string[], right: string[]}
+  correctAnswer String?          // For MCQ: string; For MULTIPLE_RESPONSE: "||" delimited; For MATCHING: "left||right" pairs
   explanation   String?
   difficulty    Difficulty       @default(MEDIUM)
   points        Int              @default(1)
+  sortOrder     Int              @default(0)  // for numbering/ordering
+  poolTag       String?          // question pool tag (e.g. "Pool A")
   createdAt     DateTime         @default(now())
 
   // Relations

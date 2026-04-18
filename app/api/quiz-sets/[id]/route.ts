@@ -20,7 +20,7 @@ export async function GET(
     where,
     include: {
       questions: {
-        orderBy: { createdAt: "asc" },
+        orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
       },
       _count: {
         select: { attempts: true },
@@ -94,6 +94,18 @@ export async function PATCH(
     language,
     introText,
     conclusionText,
+    // Per-question feedback
+    feedbackShowCorrect,
+    feedbackShowAnswer,
+    feedbackShowExplanation,
+    // Certificate
+    certificateEnabled,
+    certificateTitle,
+    certificateMessage,
+    // Theme
+    themeColor,
+    themeFont,
+    themeLogo,
   } = body;
 
   const updated = await db.quizSet.update({
@@ -136,6 +148,18 @@ export async function PATCH(
       ...(language !== undefined && { language }),
       ...(introText !== undefined && { introText }),
       ...(conclusionText !== undefined && { conclusionText }),
+      // Per-question feedback
+      ...(feedbackShowCorrect !== undefined && { feedbackShowCorrect }),
+      ...(feedbackShowAnswer !== undefined && { feedbackShowAnswer }),
+      ...(feedbackShowExplanation !== undefined && { feedbackShowExplanation }),
+      // Certificate
+      ...(certificateEnabled !== undefined && { certificateEnabled }),
+      ...(certificateTitle !== undefined && { certificateTitle }),
+      ...(certificateMessage !== undefined && { certificateMessage }),
+      // Theme
+      ...(themeColor !== undefined && { themeColor }),
+      ...(themeFont !== undefined && { themeFont }),
+      ...(themeLogo !== undefined && { themeLogo }),
     },
     include: {
       _count: { select: { questions: true, attempts: true } },
