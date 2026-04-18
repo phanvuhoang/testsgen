@@ -47,6 +47,7 @@ export async function POST(
     hardPoints = 1,
     questionTypes = ["MCQ"],
     aiInstructions,
+    modelId,  // optional AI model override e.g. "openrouter:qwen/qwen3-plus"
   } = body;
 
   if (!topic) {
@@ -87,7 +88,7 @@ export async function POST(
         hardPoints,
         questionTypes,
         aiInstructions,
-      });
+      }, modelId);
 
       for await (const q of gen) {
         const difficultyValue = (

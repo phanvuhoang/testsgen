@@ -12,6 +12,7 @@ import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Progress } from '@/components/ui/progress'
 import { useToast } from '@/components/ui/use-toast'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Sparkles, Loader2, CheckCircle2, XCircle } from 'lucide-react'
 
 type Section = {
@@ -46,9 +47,12 @@ export default function GeneratePage() {
   const [isGenerating, setIsGenerating] = useState(false)
   const [generated, setGenerated] = useState<GeneratedQ[]>([])
   const [isDone, setIsDone] = useState(false)
+  const [selectedModel, setSelectedModel] = useState('deepseek:deepseek-reasoner')
+  const [aiModels, setAIModels] = useState<{id:string;label:string}[]>([])
 
   useEffect(() => {
     fetchSections()
+    fetch('/api/ai-models').then(r => r.ok ? r.json() : []).then(setAIModels).catch(() => {})
   }, [])
 
   const fetchSections = async () => {
@@ -93,6 +97,7 @@ export default function GeneratePage() {
             count: counts[s.id],
           })),
           extraInstructions,
+          modelId: selectedModel,
         }),
       })
 
@@ -196,6 +201,30 @@ export default function GeneratePage() {
                   </CardContent>
                 </Card>
               ))}
+
+              <div className="space-y-2">
+                <Label>AI Model</Label>
+                <Select value={selectedModel} onValueChange={setSelectedModel}>
+                  <SelectTrigger className="h-9">
+                    <SelectValue placeholder="Chọn AI model..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {aiModels.length > 0 ? (
+                      aiModels.map((m) => (
+                        <SelectItem key={m.id} value={m.id}>{m.label}</SelectItem>
+                      ))
+                    ) : (
+                      <>
+                        <SelectItem value="deepseek:deepseek-reasoner">DeepSeek Reasoner (Default)</SelectItem>
+                        <SelectItem value="openrouter:xiaomi/mimo-v2-pro">OpenRouter — xiaomi/mimo-v2-pro</SelectItem>
+                        <SelectItem value="openrouter:qwen/qwen3-plus">OpenRouter — qwen/qwen3-plus</SelectItem>
+                        <SelectItem value="anthropic:claude-haiku-4-5">Anthropic — Claude Haiku 4.5</SelectItem>
+                        <SelectItem value="anthropic:claude-sonnet-4-5">Anthropic — Claude Sonnet 4.5</SelectItem>
+                      </>
+                    )}
+                  </SelectContent>
+                </Select>
+              </div>
 
               <div className="space-y-2">
                 <Label>Extra instructions (optional)</Label>

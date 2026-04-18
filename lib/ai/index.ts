@@ -6,6 +6,63 @@ import type { GenerationConfig, ExamGenerationConfig, GradingConfig } from './pr
 
 export type { GenerationConfig, ExamGenerationConfig, GradingConfig }
 
+// ─── AI Model Choices ──────────────────────────────────────────────────────────
+// These are the selectable AI models exposed to the user in the UI.
+// provider:model format — parsed by callAI()
+
+export type AIModelChoice = {
+  id: string           // value stored/sent in requests
+  label: string        // display label
+  provider: string
+  model: string
+}
+
+export function getAvailableModels(): AIModelChoice[] {
+  const openrouterModel1 = process.env.OPENROUTER_MODEL1 || 'xiaomi/mimo-v2-pro'
+  const openrouterModel2 = process.env.OPENROUTER_MODEL2 || 'qwen/qwen3-plus'
+
+  return [
+    {
+      id: 'deepseek:deepseek-reasoner',
+      label: 'DeepSeek Reasoner (Default)',
+      provider: 'deepseek',
+      model: 'deepseek-reasoner',
+    },
+    {
+      id: `openrouter:${openrouterModel1}`,
+      label: `OpenRouter — ${openrouterModel1}`,
+      provider: 'openrouter',
+      model: openrouterModel1,
+    },
+    {
+      id: `openrouter:${openrouterModel2}`,
+      label: `OpenRouter — ${openrouterModel2}`,
+      provider: 'openrouter',
+      model: openrouterModel2,
+    },
+    {
+      id: 'anthropic:claude-haiku-4-5',
+      label: 'Anthropic — Claude Haiku 4.5',
+      provider: 'anthropic',
+      model: 'claude-haiku-4-5',
+    },
+    {
+      id: 'anthropic:claude-sonnet-4-5',
+      label: 'Anthropic — Claude Sonnet 4.5',
+      provider: 'anthropic',
+      model: 'claude-sonnet-4-5',
+    },
+  ]
+}
+
+/** Parse a model choice id like "deepseek:deepseek-reasoner" → { provider, model } */
+export function parseModelId(modelId: string): { provider: string; model: string } {
+  const idx = modelId.indexOf(':')
+  if (idx === -1) return { provider: 'deepseek', model: modelId }
+  return { provider: modelId.slice(0, idx), model: modelId.slice(idx + 1) }
+}
+
+// ─── Settings (fallback from DB / env) ────────────────────────────────────────
 async function getAISettings() {
   const settings = await db.systemSetting.findMany({
     where: { key: { in: ['ai_provider', 'ai_model_generation', 'ai_model_grading'] } },
@@ -13,39 +70,31 @@ async function getAISettings() {
   const map: Record<string, string> = {}
   settings.forEach((s) => { map[s.key] = s.value })
   return {
-    provider: map.ai_provider || process.env.AI_PROVIDER || 'openrouter',
-    generationModel: map.ai_model_generation || process.env.AI_MODEL_GENERATION || 'google/gemini-2.0-flash-001',
-    gradingModel: map.ai_model_grading || process.env.AI_MODEL_GRADING || 'google/gemini-2.0-flash-001',
+    provider: map.ai_provider || process.env.AI_PROVIDER || 'deepseek',
+    generationModel: map.ai_model_generation || process.env.AI_MODEL_GENERATION || 'deepseek-reasoner',
+    gradingModel: map.ai_model_grading || process.env.AI_MODEL_GRADING || 'deepseek-reasoner',
   }
 }
 
-function getOpenAICompatibleClient(provider: string): { client: OpenAI; baseURL: string } {
+// ─── Provider Clients ──────────────────────────────────────────────────────────
+function getOpenAICompatibleClient(provider: string): OpenAI {
   switch (provider) {
     case 'openrouter':
-      return {
-        client: new OpenAI({
-          apiKey: process.env.OPENROUTER_API_KEY || '',
-          baseURL: 'https://openrouter.ai/api/v1',
-          defaultHeaders: {
-            'HTTP-Referer': process.env.NEXTAUTH_URL || 'https://testsgen.com',
-            'X-Title': 'TestsGen',
-          },
-        }),
+      return new OpenAI({
+        apiKey: process.env.OPENROUTER_API_KEY || '',
         baseURL: 'https://openrouter.ai/api/v1',
-      }
+        defaultHeaders: {
+          'HTTP-Referer': process.env.NEXTAUTH_URL || 'https://testsgen.gpt4vn.com',
+          'X-Title': 'TestsGen',
+        },
+      })
     case 'deepseek':
-      return {
-        client: new OpenAI({
-          apiKey: process.env.DEEPSEEK_API_KEY || '',
-          baseURL: 'https://api.deepseek.com',
-        }),
-        baseURL: 'https://api.deepseek.com',
-      }
+      return new OpenAI({
+        apiKey: process.env.DEEPSEEK_API_KEY || '',
+        baseURL: 'https://api.deepseek.com/v1',  // Fixed: must use /v1 for OpenAI-compat
+      })
     case 'openai':
-      return {
-        client: new OpenAI({ apiKey: process.env.OPENAI_API_KEY || '' }),
-        baseURL: 'https://api.openai.com/v1',
-      }
+      return new OpenAI({ apiKey: process.env.OPENAI_API_KEY || '' })
     default:
       throw new Error(`Provider ${provider} not supported via OpenAI client`)
   }
@@ -56,7 +105,7 @@ async function generateWithOpenAICompat(
   model: string,
   prompt: string
 ): Promise<string> {
-  const { client } = getOpenAICompatibleClient(provider)
+  const client = getOpenAICompatibleClient(provider)
   const response = await client.chat.completions.create({
     model,
     messages: [{ role: 'user', content: prompt }],
@@ -83,14 +132,13 @@ async function callAI(provider: string, model: string, prompt: string): Promise<
   return generateWithOpenAICompat(provider, model, prompt)
 }
 
+// ─── JSON Parser ───────────────────────────────────────────────────────────────
 function parseJSONFromResponse(text: string): unknown[] {
-  // Try direct parse
   try {
     const parsed = JSON.parse(text)
     return Array.isArray(parsed) ? parsed : [parsed]
   } catch {}
-  
-  // Try extracting JSON array from markdown code blocks
+
   const codeBlockMatch = text.match(/```(?:json)?\s*([\s\S]*?)```/)
   if (codeBlockMatch) {
     try {
@@ -98,8 +146,7 @@ function parseJSONFromResponse(text: string): unknown[] {
       return Array.isArray(parsed) ? parsed : [parsed]
     } catch {}
   }
-  
-  // Try extracting raw JSON array
+
   const arrayMatch = text.match(/\[[\s\S]*\]/)
   if (arrayMatch) {
     try {
@@ -107,33 +154,59 @@ function parseJSONFromResponse(text: string): unknown[] {
       return Array.isArray(parsed) ? parsed : []
     } catch {}
   }
-  
+
   return []
 }
 
+// ─── Public API ────────────────────────────────────────────────────────────────
+
 export async function* generateQuizQuestions(
-  config: GenerationConfig
+  config: GenerationConfig,
+  modelId?: string   // optional override e.g. "openrouter:qwen/qwen3-plus"
 ): AsyncGenerator<Record<string, unknown>> {
-  const settings = await getAISettings()
+  let provider: string
+  let model: string
+
+  if (modelId) {
+    const parsed = parseModelId(modelId)
+    provider = parsed.provider
+    model = parsed.model
+  } else {
+    const settings = await getAISettings()
+    provider = settings.provider
+    model = settings.generationModel
+  }
+
   const prompt = buildQuizGenerationPrompt(config)
-  
-  const text = await callAI(settings.provider, settings.generationModel, prompt)
+  const text = await callAI(provider, model, prompt)
   const questions = parseJSONFromResponse(text)
-  
+
   for (const q of questions) {
     yield q as Record<string, unknown>
   }
 }
 
 export async function* generateExamQuestions(
-  config: ExamGenerationConfig
+  config: ExamGenerationConfig,
+  modelId?: string
 ): AsyncGenerator<Record<string, unknown>> {
-  const settings = await getAISettings()
+  let provider: string
+  let model: string
+
+  if (modelId) {
+    const parsed = parseModelId(modelId)
+    provider = parsed.provider
+    model = parsed.model
+  } else {
+    const settings = await getAISettings()
+    provider = settings.provider
+    model = settings.generationModel
+  }
+
   const prompt = buildExamQuestionPrompt(config)
-  
-  const text = await callAI(settings.provider, settings.generationModel, prompt)
+  const text = await callAI(provider, model, prompt)
   const questions = parseJSONFromResponse(text)
-  
+
   for (const q of questions) {
     yield q as Record<string, unknown>
   }
@@ -147,15 +220,13 @@ export async function gradeWrittenAnswer(config: GradingConfig): Promise<{
 }> {
   const settings = await getAISettings()
   const prompt = buildGradingPrompt(config)
-  
   const text = await callAI(settings.provider, settings.gradingModel, prompt)
-  
+
   try {
     const parsed = parseJSONFromResponse(text)
     if (parsed[0]) return parsed[0] as { marksAwarded: number; feedback: string }
   } catch {}
-  
-  // Fallback
+
   return {
     marksAwarded: 0,
     feedback: 'Unable to grade automatically. Please review manually.',

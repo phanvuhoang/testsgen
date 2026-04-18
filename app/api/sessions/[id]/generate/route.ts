@@ -34,7 +34,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   if (!session?.user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const body = await req.json()
-  const { sections: sectionConfigs, extraInstructions } = body
+  const { sections: sectionConfigs, extraInstructions, modelId } = body
 
   if (!sectionConfigs || sectionConfigs.length === 0) {
     return NextResponse.json({ error: 'No sections selected' }, { status: 400 })
@@ -74,7 +74,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
           documentContent: documentContent.slice(0, 30000),
         }
 
-        for await (const q of generateExamQuestions(generatorConfig)) {
+        for await (const q of generateExamQuestions(generatorConfig, modelId)) {
           // Save to DB
           try {
             const saved = await db.question.create({
