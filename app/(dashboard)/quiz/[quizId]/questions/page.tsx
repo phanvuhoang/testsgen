@@ -63,7 +63,7 @@ export default function QuizQuestionsPage() {
   const fetchQuestions = async () => {
     setIsLoading(true)
     try {
-      const res = await fetch(`/api/quiz-sets/${params.id}/questions`)
+      const res = await fetch(`/api/quiz-sets/${params.quizId}/questions`)
       if (!res.ok) throw new Error()
       const data = await res.json()
       setQuestions(data)
@@ -77,7 +77,7 @@ export default function QuizQuestionsPage() {
   const handleDelete = async (id: string) => {
     if (!confirm('Delete this question?')) return
     try {
-      const res = await fetch(`/api/quiz-sets/${params.id}/questions/${id}`, { method: 'DELETE' })
+      const res = await fetch(`/api/quiz-sets/${params.quizId}/questions/${id}`, { method: 'DELETE' })
       if (!res.ok) throw new Error()
       setQuestions((prev) => prev.filter((q) => q.id !== id))
       toast({ title: 'Question deleted' })
@@ -88,7 +88,7 @@ export default function QuizQuestionsPage() {
 
   const handleSaveEdit = async (id: string) => {
     try {
-      const res = await fetch(`/api/quiz-sets/${params.id}/questions/${id}`, {
+      const res = await fetch(`/api/quiz-sets/${params.quizId}/questions/${id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(editForm),
@@ -105,7 +105,7 @@ export default function QuizQuestionsPage() {
 
   const handleAddQuestion = async () => {
     try {
-      const res = await fetch(`/api/quiz-sets/${params.id}/questions`, {
+      const res = await fetch(`/api/quiz-sets/${params.quizId}/questions`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -124,7 +124,7 @@ export default function QuizQuestionsPage() {
   }
 
   const handleExport = async () => {
-    const res = await fetch(`/api/quiz-sets/${params.id}/questions/export`)
+    const res = await fetch(`/api/quiz-sets/${params.quizId}/questions/export`)
     if (!res.ok) return
     const blob = await res.blob()
     const url = URL.createObjectURL(blob)

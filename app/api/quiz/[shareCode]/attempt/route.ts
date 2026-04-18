@@ -125,7 +125,7 @@ export async function POST(
       userId: session?.user?.id ?? null,
       guestName: guestName ?? session?.user?.name ?? null,
       guestEmail: guestEmail ?? session?.user?.email ?? null,
-      questionsSnapshot,
+      questionsSnapshot: questionsSnapshot as any,
       status: "IN_PROGRESS",
     },
   });

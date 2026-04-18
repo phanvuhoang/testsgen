@@ -62,7 +62,7 @@ export default function QuizResultsPage() {
   const fetchData = async () => {
     setIsLoading(true)
     try {
-      const res = await fetch(`/api/quiz-sets/${params.id}/attempts`)
+      const res = await fetch(`/api/quiz-sets/${params.quizId}/attempts`)
       if (res.ok) {
         const data = await res.json()
         setAttempts(data.attempts || [])
@@ -76,7 +76,7 @@ export default function QuizResultsPage() {
   }
 
   const handleExport = async (format: 'points' | 'responses') => {
-    const res = await fetch(`/api/quiz-sets/${params.id}/attempts/export?format=${format}`)
+    const res = await fetch(`/api/quiz-sets/${params.quizId}/attempts/export?format=${format}`)
     if (!res.ok) return
     const blob = await res.blob()
     const url = URL.createObjectURL(blob)

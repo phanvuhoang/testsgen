@@ -19,8 +19,8 @@ import { formatDateTime } from '@/lib/utils'
 
 async function getDashboardStats(userId: string, role: string) {
   const [projectCount, quizSetCount, attemptCount, recentAttempts] = await Promise.all([
-    db.project.count(role === 'ADMIN' ? {} : { where: { createdById: userId } }),
-    db.quizSet.count(role === 'ADMIN' ? {} : { where: { createdById: userId } }),
+    db.project.count(role === 'ADMIN' ? undefined : { where: { createdById: userId } }),
+    db.quizSet.count(role === 'ADMIN' ? undefined : { where: { createdById: userId } }),
     db.attempt.count({
       where: {
         startedAt: {

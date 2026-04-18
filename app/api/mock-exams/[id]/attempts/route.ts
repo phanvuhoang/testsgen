@@ -98,7 +98,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       userId: session.user.id,
       mockExamId: params.id,
       status: 'IN_PROGRESS',
-      questionsSnapshot: drawnQuestions,
+      questionsSnapshot: drawnQuestions as any,
     },
   })
 

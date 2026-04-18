@@ -82,7 +82,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
                 sessionId: params.id,
                 sectionId: sectionConfig.sectionId,
                 stem: String(q.stem || ''),
-                options: q.options as string[] | null,
+                options: q.options as any,
                 correctAnswer: String(q.correctAnswer || ''),
                 markingScheme: String(q.markingScheme || ''),
                 modelAnswer: String(q.modelAnswer || ''),

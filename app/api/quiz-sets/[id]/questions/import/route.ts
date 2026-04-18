@@ -74,7 +74,6 @@ export async function POST(
     const questionTypeMap: Record<string, string> = {
       mcq: "MCQ",
       "true_false": "TRUE_FALSE",
-      true_false: "TRUE_FALSE",
       short_answer: "SHORT_ANSWER",
       short: "SHORT_ANSWER",
     };
@@ -100,11 +99,11 @@ export async function POST(
         data: {
           quizSetId: params.id,
           stem: stemText.trim(),
-          questionType,
-          options,
+          questionType: questionType as any,
+          options: options as any,
           correctAnswer: correctAnswer.trim(),
           explanation: explanation?.trim() || null,
-          difficulty,
+          difficulty: difficulty as any,
           points,
         },
       });

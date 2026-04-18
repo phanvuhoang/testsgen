@@ -29,16 +29,16 @@ export default function QuizSharePage() {
   const [isLoading, setIsLoading] = useState(true)
 
   useEffect(() => {
-    fetch(`/api/quiz-sets/${params.id}`)
+    fetch(`/api/quiz-sets/${params.quizId}`)
       .then((r) => r.json())
       .then((d) => setQuiz(d))
       .finally(() => setIsLoading(false))
-  }, [params.id])
+  }, [params.quizId])
 
   const appUrl = process.env.NEXT_PUBLIC_APP_URL || window.location.origin
-  const quizUrl = quiz ? `${appUrl}/quiz/${quiz.shareCode}` : ''
+  const quizUrl = quiz ? `${appUrl}/q/${quiz.shareCode}` : ''
   const embedCode = quiz
-    ? `<iframe src="${appUrl}/quiz/${quiz.shareCode}" width="100%" height="600" frameborder="0"></iframe>`
+    ? `<iframe src="${appUrl}/q/${quiz.shareCode}" width="100%" height="600" frameborder="0"></iframe>`
     : ''
 
   const copy = (text: string, label: string) => {
@@ -49,7 +49,7 @@ export default function QuizSharePage() {
   const toggleStatus = async () => {
     if (!quiz) return
     const newStatus = quiz.status === 'OPEN' ? 'CLOSED' : 'OPEN'
-    const res = await fetch(`/api/quiz-sets/${params.id}`, {
+    const res = await fetch(`/api/quiz-sets/${params.quizId}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ status: newStatus }),
