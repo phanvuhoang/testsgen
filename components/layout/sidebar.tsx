@@ -12,7 +12,7 @@ import {
   ClipboardList,
   Puzzle,
   List,
-  Play,
+  BarChart2,
   Users,
   Settings,
   ChevronLeft,
@@ -20,6 +20,7 @@ import {
   LogOut,
   User,
   GraduationCap,
+  History,
 } from 'lucide-react'
 import {
   DropdownMenu,
@@ -61,7 +62,7 @@ const navSections: NavSection[] = [
     label: 'Module 2 — Quiz Generator',
     items: [
       { href: '/quiz', label: 'My Quiz Sets', icon: Puzzle },
-      { href: '/take-quiz', label: 'Take a Quiz', icon: Play },
+      { href: '/my-results', label: 'My Results', icon: History },
     ],
   },
   {

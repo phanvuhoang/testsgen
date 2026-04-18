@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none">
+  <!-- Background rounded square -->
+  <rect width="32" height="32" rx="7" fill="#028a39"/>
+  <!-- Stylized T + checkmark mark: document with a tick -->
+  <!-- Document lines -->
+  <rect x="8" y="8" width="16" height="2" rx="1" fill="white"/>
+  <rect x="8" y="13" width="10" height="2" rx="1" fill="white"/>
+  <rect x="8" y="18" width="7" height="2" rx="1" fill="white"/>
+  <!-- Checkmark (bottom right) -->
+  <path d="M18 21 L21 25 L27 17" stroke="white" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

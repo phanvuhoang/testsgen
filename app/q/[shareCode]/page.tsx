@@ -41,6 +41,7 @@ type Question = {
   stem: string
   questionType: string
   options: string[] | null
+  correctAnswer: string | null
   points: number
 }
 
@@ -65,6 +66,8 @@ export default function PublicQuizPage() {
   const [attemptId, setAttemptId] = useState<string | null>(null)
   const [questions, setQuestions] = useState<Question[]>([])
   const [answers, setAnswers] = useState<Record<string, string>>({})
+  // Multiple response: store as comma-separated selected options
+  const [multiAnswers, setMultiAnswers] = useState<Record<string, string[]>>({})
   const [currentIndex, setCurrentIndex] = useState(0)
   const [timeLeft, setTimeLeft] = useState<number | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
@@ -151,6 +154,25 @@ export default function PublicQuizPage() {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ quizQuestionId: questionId, answer }),
+    })
+  }
+
+  const toggleMultiAnswer = async (questionId: string, opt: string) => {
+    if (!attemptId) return
+    setMultiAnswers((prev) => {
+      const current = prev[questionId] || []
+      const next = current.includes(opt)
+        ? current.filter((o) => o !== opt)
+        : [...current, opt]
+      const answer = next.join('||')
+      // Persist
+      fetch(`/api/quiz/${shareCode}/attempt/${attemptId}/answer`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ quizQuestionId: questionId, answer }),
+      })
+      setAnswers((a) => ({ ...a, [questionId]: answer }))
+      return { ...prev, [questionId]: next }
     })
   }
 
@@ -314,14 +336,64 @@ export default function PublicQuizPage() {
                     >
                       {currentQ.options.map((opt, i) => (
                         <div key={i} className="flex items-center gap-3 p-3 rounded-lg border hover:bg-gray-50 cursor-pointer">
-                          <RadioGroupItem value={opt} id={`opt-${i}`} />
-                          <Label htmlFor={`opt-${i}`} className="cursor-pointer flex-1">
+                          <RadioGroupItem value={opt} id={`q${currentQ.quizQuestionId}-opt-${i}`} />
+                          <Label htmlFor={`q${currentQ.quizQuestionId}-opt-${i}`} className="cursor-pointer flex-1">
                             <span className="font-medium mr-2">{String.fromCharCode(65 + i)}.</span>
                             {opt}
                           </Label>
                         </div>
                       ))}
                     </RadioGroup>
+                  )}
+
+                  {currentQ.questionType === 'MULTIPLE_RESPONSE' && currentQ.options && (
+                    <div className="space-y-2">
+                      <p className="text-xs text-gray-500 mb-3">Select all that apply</p>
+                      {currentQ.options.map((opt, i) => {
+                        const selected = (multiAnswers[currentQ.quizQuestionId] || []).includes(opt)
+                        return (
+                          <div
+                            key={i}
+                            onClick={() => toggleMultiAnswer(currentQ.quizQuestionId, opt)}
+                            className={`flex items-center gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${
+                              selected ? 'border-primary bg-primary/5' : 'hover:bg-gray-50'
+                            }`}
+                          >
+                            <div className={`w-4 h-4 rounded border-2 flex items-center justify-center shrink-0 ${
+                              selected ? 'border-primary bg-primary' : 'border-gray-400'
+                            }`}>
+                              {selected && <span className="text-white text-xs font-bold">✓</span>}
+                            </div>
+                            <span className="text-sm">
+                              <span className="font-medium mr-2">{String.fromCharCode(65 + i)}.</span>
+                              {opt}
+                            </span>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )}
+
+                  {currentQ.questionType === 'FILL_BLANK' && (
+                    <div className="space-y-2">
+                      <p className="text-xs text-gray-500">Fill in the blank</p>
+                      <input
+                        type="text"
+                        className="w-full border border-gray-300 rounded-lg px-4 py-3 text-base focus:outline-none focus:ring-2 focus:ring-primary/50"
+                        placeholder="Your answer..."
+                        value={answers[currentQ.quizQuestionId] || ''}
+                        onChange={(e) => saveAnswer(currentQ.quizQuestionId, e.target.value)}
+                      />
+                    </div>
+                  )}
+
+                  {currentQ.questionType === 'ESSAY' && (
+                    <Textarea
+                      placeholder="Write your answer here..."
+                      value={answers[currentQ.quizQuestionId] || ''}
+                      onChange={(e) => saveAnswer(currentQ.quizQuestionId, e.target.value)}
+                      className="min-h-[180px]"
+                    />
                   )}
 
                   {currentQ.questionType === 'TRUE_FALSE' && (
@@ -398,13 +470,57 @@ export default function PublicQuizPage() {
                       >
                         {q.options.map((opt, j) => (
                           <div key={j} className="flex items-center gap-3 p-2 rounded hover:bg-gray-50 cursor-pointer">
-                            <RadioGroupItem value={opt} id={`q${i}-opt${j}`} />
-                            <Label htmlFor={`q${i}-opt${j}`} className="cursor-pointer">
+                            <RadioGroupItem value={opt} id={`q${q.quizQuestionId}-opt${j}`} />
+                            <Label htmlFor={`q${q.quizQuestionId}-opt${j}`} className="cursor-pointer">
                               {String.fromCharCode(65 + j)}. {opt}
                             </Label>
                           </div>
                         ))}
                       </RadioGroup>
+                    )}
+
+                    {q.questionType === 'MULTIPLE_RESPONSE' && q.options && (
+                      <div className="space-y-1.5">
+                        <p className="text-xs text-gray-500 mb-2">Select all that apply</p>
+                        {q.options.map((opt, j) => {
+                          const selected = (multiAnswers[q.quizQuestionId] || []).includes(opt)
+                          return (
+                            <div
+                              key={j}
+                              onClick={() => toggleMultiAnswer(q.quizQuestionId, opt)}
+                              className={`flex items-center gap-3 p-2 rounded border cursor-pointer transition-colors ${
+                                selected ? 'border-primary bg-primary/5' : 'hover:bg-gray-50'
+                              }`}
+                            >
+                              <div className={`w-4 h-4 rounded border-2 flex items-center justify-center shrink-0 ${
+                                selected ? 'border-primary bg-primary' : 'border-gray-400'
+                              }`}>
+                                {selected && <span className="text-white text-xs font-bold">✓</span>}
+                              </div>
+                              <span className="text-sm">{String.fromCharCode(65 + j)}. {opt}</span>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    )}
+
+                    {q.questionType === 'FILL_BLANK' && (
+                      <input
+                        type="text"
+                        className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/50"
+                        placeholder="Your answer..."
+                        value={answers[q.quizQuestionId] || ''}
+                        onChange={(e) => saveAnswer(q.quizQuestionId, e.target.value)}
+                      />
+                    )}
+
+                    {q.questionType === 'ESSAY' && (
+                      <Textarea
+                        placeholder="Write your answer here..."
+                        value={answers[q.quizQuestionId] || ''}
+                        onChange={(e) => saveAnswer(q.quizQuestionId, e.target.value)}
+                        className="min-h-[140px]"
+                      />
                     )}
 
                     {q.questionType === 'TRUE_FALSE' && (

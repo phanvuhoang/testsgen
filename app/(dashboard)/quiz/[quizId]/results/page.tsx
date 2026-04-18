@@ -8,16 +8,7 @@ import { Badge } from '@/components/ui/badge'
 import { Input } from '@/components/ui/input'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useToast } from '@/components/ui/use-toast'
-import {
-  BarChart,
-  Bar,
-  XAxis,
-  YAxis,
-  CartesianGrid,
-  Tooltip,
-  ResponsiveContainer,
-} from 'recharts'
-import { Download, Search, Users, TrendingUp, Clock, Award } from 'lucide-react'
+import { Download, Search, Users, TrendingUp, CheckCircle2, Award } from 'lucide-react'
 
 type Attempt = {
   id: string
@@ -32,19 +23,11 @@ type Attempt = {
 }
 
 type Stats = {
-  totalAttempts: number
-  avgScore: number
-  minScore: number
-  maxScore: number
-  avgTimeMinutes: number
-  passRate: number
-  histogram: { range: string; count: number }[]
-  questionAnalytics: {
-    id: string
-    stem: string
-    correctRate: number
-    attemptRate: number
-  }[]
+  total: number
+  submitted: number
+  avgScore: number | null
+  passCount: number | null
+  passRate: number | null
 }
 
 export default function QuizResultsPage() {
@@ -75,15 +58,16 @@ export default function QuizResultsPage() {
     }
   }
 
-  const handleExport = async (format: 'points' | 'responses') => {
-    const res = await fetch(`/api/quiz-sets/${params.quizId}/attempts/export?format=${format}`)
+  const handleExport = async () => {
+    const res = await fetch(`/api/quiz-sets/${params.quizId}/attempts/export`)
     if (!res.ok) return
     const blob = await res.blob()
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
     a.href = url
-    a.download = `results-${format}.csv`
+    a.download = `results.csv`
     a.click()
+    URL.revokeObjectURL(url)
   }
 
   const filtered = attempts.filter((a) => {
@@ -111,33 +95,35 @@ export default function QuizResultsPage() {
   return (
     <div className="p-6 max-w-7xl mx-auto">
       <div className="flex items-center justify-between mb-6">
-        <h1 className="text-2xl font-bold">Results</h1>
-        <div className="flex gap-2">
-          <Button variant="outline" size="sm" onClick={() => handleExport('points')}>
-            <Download className="h-4 w-4 mr-2" />
-            Point Grid CSV
-          </Button>
-          <Button variant="outline" size="sm" onClick={() => handleExport('responses')}>
-            <Download className="h-4 w-4 mr-2" />
-            Response Grid CSV
-          </Button>
-        </div>
+        <h1 className="text-xl font-bold">Results & Analytics</h1>
+        <Button variant="outline" size="sm" onClick={handleExport}>
+          <Download className="h-4 w-4 mr-2" />
+          Export CSV
+        </Button>
       </div>
 
       {/* Stats */}
       {stats && (
         <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
           {[
-            { label: 'Total Attempts', value: stats.totalAttempts, icon: Users },
-            { label: 'Average Score', value: `${stats.avgScore.toFixed(1)}%`, icon: TrendingUp },
-            { label: 'Avg Time', value: `${stats.avgTimeMinutes.toFixed(0)} min`, icon: Clock },
-            { label: 'Pass Rate', value: `${stats.passRate.toFixed(1)}%`, icon: Award },
+            { label: 'Total Attempts', value: stats.total ?? 0, icon: Users },
+            { label: 'Submitted', value: stats.submitted ?? 0, icon: CheckCircle2 },
+            {
+              label: 'Average Score',
+              value: stats.avgScore != null ? `${stats.avgScore}%` : '—',
+              icon: TrendingUp,
+            },
+            {
+              label: 'Pass Rate',
+              value: stats.passRate != null ? `${stats.passRate}%` : '—',
+              icon: Award,
+            },
           ].map((s) => {
             const Icon = s.icon
             return (
               <Card key={s.label}>
                 <CardContent className="p-4 flex items-center gap-3">
-                  <Icon className="h-8 w-8 text-primary" />
+                  <Icon className="h-8 w-8 text-primary shrink-0" />
                   <div>
                     <p className="text-xl font-bold">{s.value}</p>
                     <p className="text-xs text-gray-500">{s.label}</p>
@@ -149,31 +135,13 @@ export default function QuizResultsPage() {
         </div>
       )}
 
-      {/* Histogram */}
-      {stats?.histogram && stats.histogram.length > 0 && (
-        <Card className="mb-6">
-          <CardHeader>
-            <CardTitle className="text-base">Score Distribution</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <ResponsiveContainer width="100%" height={200}>
-              <BarChart data={stats.histogram}>
-                <CartesianGrid strokeDasharray="3 3" />
-                <XAxis dataKey="range" />
-                <YAxis allowDecimals={false} />
-                <Tooltip />
-                <Bar dataKey="count" fill="#028a39" radius={[4, 4, 0, 0]} />
-              </BarChart>
-            </ResponsiveContainer>
-          </CardContent>
-        </Card>
-      )}
-
       {/* Attempts Table */}
       <Card>
         <CardHeader>
           <div className="flex items-center justify-between">
-            <CardTitle className="text-base">Attempts ({filtered.length})</CardTitle>
+            <CardTitle className="text-base">
+              Attempts ({filtered.length})
+            </CardTitle>
             <div className="relative w-64">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
               <Input
@@ -197,30 +165,33 @@ export default function QuizResultsPage() {
                     <th className="text-left p-3">Email</th>
                     <th className="text-right p-3">Score</th>
                     <th className="text-right p-3">%</th>
-                    <th className="text-left p-3">Started</th>
+                    <th className="text-left p-3">Date</th>
                     <th className="text-left p-3">Status</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y">
                   {filtered.map((attempt) => {
-                    const pct = attempt.totalScore !== null && attempt.maxScore
-                      ? Math.round((attempt.totalScore / attempt.maxScore) * 100)
-                      : null
+                    const pct =
+                      attempt.totalScore !== null &&
+                      attempt.maxScore != null &&
+                      attempt.maxScore > 0
+                        ? Math.round((attempt.totalScore / attempt.maxScore) * 100)
+                        : null
                     return (
                       <tr key={attempt.id} className="hover:bg-gray-50">
                         <td className="p-3 font-medium">
                           {attempt.user?.name || attempt.guestName || 'Guest'}
                         </td>
                         <td className="p-3 text-gray-500">
-                          {attempt.user?.email || attempt.guestEmail || '-'}
+                          {attempt.user?.email || attempt.guestEmail || '—'}
                         </td>
                         <td className="p-3 text-right">
                           {attempt.totalScore !== null && attempt.maxScore !== null
                             ? `${attempt.totalScore}/${attempt.maxScore}`
-                            : '-'}
+                            : '—'}
                         </td>
                         <td className="p-3 text-right font-semibold">
-                          {pct !== null ? `${pct}%` : '-'}
+                          {pct !== null ? `${pct}%` : '—'}
                         </td>
                         <td className="p-3 text-gray-500">
                           {new Date(attempt.startedAt).toLocaleDateString()}
