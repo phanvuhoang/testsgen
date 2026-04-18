@@ -5,12 +5,11 @@ RUN apk add --no-cache libc6-compat openssl
 
 WORKDIR /app
 
-# Copy package files
 COPY package.json package-lock.json* ./
 COPY prisma ./prisma/
 
-# Install ALL dependencies (including devDeps needed for build)
-# NODE_ENV must NOT be set here — production mode skips devDependencies
+# Install ALL deps (including devDeps needed for build)
+# Do NOT set NODE_ENV here — production mode skips devDependencies
 RUN npm ci --legacy-peer-deps
 
 # Generate Prisma client
@@ -26,10 +25,10 @@ WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 COPY . .
 
-# Do NOT set NODE_ENV=production here — Next.js build needs devDependencies
+# Do NOT set NODE_ENV=production during build (breaks devDep resolution)
 ENV NEXT_TELEMETRY_DISABLED=1
 
-# Build Next.js app
+# Build Next.js (standard build, not standalone)
 RUN npm run build
 
 # ─── Stage 3: Runner ──────────────────────────────────────────────────────────
@@ -39,32 +38,28 @@ RUN apk add --no-cache libc6-compat openssl
 
 WORKDIR /app
 
-# Only set NODE_ENV=production in the runtime stage
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
 
 # Create non-root user
-RUN addgroup --system --gid 1001 nodejs
-RUN adduser --system --uid 1001 nextjs
+RUN addgroup --system --gid 1001 nodejs && \
+    adduser --system --uid 1001 nextjs
 
-# Copy built assets from builder
+# Copy everything needed to run the app
 COPY --from=builder /app/public ./public
-COPY --from=builder /app/.next/standalone ./
-COPY --from=builder /app/.next/static ./.next/static
-
-# Copy Prisma files for migrations at runtime
-COPY --from=builder /app/prisma ./prisma
-COPY --from=builder /app/node_modules/.prisma ./node_modules/.prisma
-COPY --from=builder /app/node_modules/@prisma ./node_modules/@prisma
-
-# Copy startup script and its dependencies
-COPY --from=builder /app/scripts ./scripts
+COPY --from=builder /app/.next ./.next
 COPY --from=builder /app/node_modules ./node_modules
 COPY --from=builder /app/package.json ./package.json
+COPY --from=builder /app/next.config.mjs ./next.config.mjs
+
+# Copy Prisma files for db push at startup
+COPY --from=builder /app/prisma ./prisma
+COPY --from=builder /app/scripts ./scripts
 COPY --from=builder /app/tsconfig.json ./tsconfig.json
 
-# Create uploads directory with correct ownership
-RUN mkdir -p public/uploads && chown -R nextjs:nodejs public/uploads
+# Create uploads directory
+RUN mkdir -p public/uploads && chown -R nextjs:nodejs public/uploads && \
+    chown -R nextjs:nodejs .next
 
 USER nextjs
 
@@ -73,6 +68,5 @@ EXPOSE 3000
 ENV PORT=3000
 ENV HOSTNAME="0.0.0.0"
 
-# On startup: push schema to DB (creates tables if not exist) → seed admin → start Next.js
-# Using db push instead of migrate deploy because there are no migration files in this image
-CMD ["sh", "-c", "npx prisma db push --accept-data-loss --skip-generate && npx tsx scripts/startup.ts && node server.js"]
+# On startup: sync DB schema → seed admin → start Next.js
+CMD ["sh", "-c", "npx prisma db push --accept-data-loss --skip-generate && npx tsx scripts/startup.ts && npx next start -p 3000"]
