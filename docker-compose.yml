@@ -18,17 +18,23 @@ services:
       NEXTAUTH_SECRET: ${NEXTAUTH_SECRET}
       AUTH_SECRET: ${NEXTAUTH_SECRET}
 
-      # AI Provider — OpenRouter (default)
-      AI_PROVIDER: ${AI_PROVIDER:-openrouter}
-      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
-      OPENROUTER_MODELS: ${OPENROUTER_MODELS:-google/gemini-2.0-flash-001,anthropic/claude-3.5-haiku,meta-llama/llama-3.3-70b-instruct,deepseek/deepseek-chat-v3-0324,mistralai/mistral-small-3.1-24b-instruct}
-      AI_MODEL_GENERATION: ${AI_MODEL_GENERATION:-google/gemini-2.0-flash-001}
-      AI_MODEL_GRADING: ${AI_MODEL_GRADING:-google/gemini-2.0-flash-001}
+      # AI Provider — DeepSeek (default)
+      AI_PROVIDER: ${AI_PROVIDER:-deepseek}
+      AI_MODEL_GENERATION: ${AI_MODEL_GENERATION:-deepseek-reasoner}
+      AI_MODEL_GRADING: ${AI_MODEL_GRADING:-deepseek-reasoner}
 
-      # Optional alternative AI providers
-      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
-      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      # DeepSeek (default provider)
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}
+
+      # OpenRouter
+      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      OPENROUTER_MODELS: ${OPENROUTER_MODELS:-xiaomi/mimo-v2-pro,qwen/qwen3-plus,anthropic/claude-haiku-4-5}
+
+      # Anthropic
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+
+      # OpenAI (optional)
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
 
       # Email (optional)
       SMTP_HOST: ${SMTP_HOST:-}

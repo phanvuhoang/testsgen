@@ -40,11 +40,11 @@ async function seedAdmin() {
 
   // Initialize default system settings if not present
   const defaultSettings = [
-    { key: 'ai_provider', value: process.env.AI_PROVIDER || 'openrouter' },
-    { key: 'ai_model_generation', value: process.env.AI_MODEL_GENERATION || 'google/gemini-2.0-flash-001' },
-    { key: 'ai_model_grading', value: process.env.AI_MODEL_GRADING || 'google/gemini-2.0-flash-001' },
+    { key: 'ai_provider', value: process.env.AI_PROVIDER || 'deepseek' },
+    { key: 'ai_model_generation', value: process.env.AI_MODEL_GENERATION || 'deepseek-reasoner' },
+    { key: 'ai_model_grading', value: process.env.AI_MODEL_GRADING || 'deepseek-reasoner' },
     { key: 'app_name', value: 'TestsGen' },
-    { key: 'openrouter_models', value: process.env.OPENROUTER_MODELS || 'google/gemini-2.0-flash-001,anthropic/claude-3.5-haiku,meta-llama/llama-3.3-70b-instruct,deepseek/deepseek-chat-v3-0324,mistralai/mistral-small-3.1-24b-instruct' },
+    { key: 'openrouter_models', value: process.env.OPENROUTER_MODELS || 'xiaomi/mimo-v2-pro,qwen/qwen3-plus,anthropic/claude-haiku-4-5' },
   ]
 
   for (const setting of defaultSettings) {
