@@ -93,7 +93,8 @@ export default function PublicQuizPage() {
   const params = useParams()
   const shareCode = params.shareCode as string
   const printRef = useRef<HTMLDivElement>(null)
-  const { status: sessionStatus } = useSession()
+  const sessionData = useSession()
+  const sessionStatus = sessionData?.status ?? 'loading'
 
   const [phase, setPhase] = useState<Phase>('landing')
   const [quiz, setQuiz] = useState<QuizInfo | null>(null)

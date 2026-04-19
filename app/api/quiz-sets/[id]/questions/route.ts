@@ -36,6 +36,8 @@ export async function GET(
       points: true,
       sortOrder: true,
       poolTag: true,
+      topic: true,
+      tags: true,
       createdAt: true,
     },
   });

@@ -222,6 +222,8 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
             difficulty: difficultyValue,
             points: (q.points as number) ?? 1,
             sortOrder: nextSortOrder,
+            topic: (q.topic as string) || null,
+            tags: (q.tags as string) || null,
           },
         })
 

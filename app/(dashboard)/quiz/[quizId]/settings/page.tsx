@@ -77,6 +77,13 @@ type QuizSettings = {
   themeColor: string
   themeFont: string
   themeLogo: string
+  // Question selection filters
+  easyCount: number | null
+  mediumCount: number | null
+  hardCount: number | null
+  questionTypeMix: string
+  filterTopics: string
+  filterTags: string
 }
 
 const DEFAULTS: QuizSettings = {
@@ -131,6 +138,13 @@ const DEFAULTS: QuizSettings = {
   themeColor: '#028a39',
   themeFont: 'Inter',
   themeLogo: '',
+  // Question selection filters
+  easyCount: null,
+  mediumCount: null,
+  hardCount: null,
+  questionTypeMix: '',
+  filterTopics: '',
+  filterTags: '',
 }
 
 export default function QuizSettingsPage() {
@@ -210,6 +224,13 @@ export default function QuizSettingsPage() {
           themeColor: data.themeColor ?? '#028a39',
           themeFont: data.themeFont ?? 'Inter',
           themeLogo: data.themeLogo ?? '',
+          // Question selection filters
+          easyCount: data.easyCount ?? null,
+          mediumCount: data.mediumCount ?? null,
+          hardCount: data.hardCount ?? null,
+          questionTypeMix: data.questionTypeMix ?? '',
+          filterTopics: data.filterTopics ? (() => { try { return JSON.parse(data.filterTopics).join(', ') } catch { return '' } })() : '',
+          filterTags: data.filterTags ? (() => { try { return JSON.parse(data.filterTags).join(', ') } catch { return '' } })() : '',
         })
       }
     } finally {
@@ -225,6 +246,14 @@ export default function QuizSettingsPage() {
         timeLimitMinutes: settings.timeLimitMinutes || null,
         maxAttempts: settings.maxAttempts || null,
         expiresAt: settings.expiresAt || null,
+        // Serialize question filter fields
+        filterTopics: settings.filterTopics.trim()
+          ? JSON.stringify(settings.filterTopics.split(',').map((s: string) => s.trim()).filter(Boolean))
+          : null,
+        filterTags: settings.filterTags.trim()
+          ? JSON.stringify(settings.filterTags.split(',').map((s: string) => s.trim()).filter(Boolean))
+          : null,
+        questionTypeMix: settings.questionTypeMix || null,
       }
       const res = await fetch(`/api/quiz-sets/${params.quizId}`, {
         method: 'PATCH',
@@ -406,6 +435,95 @@ export default function QuizSettingsPage() {
                 <Label htmlFor={key} className="font-normal">{label}</Label>
               </div>
             ))}
+          </div>
+
+          {/* Question Selection Filters */}
+          <div className="border-t pt-4 mt-2">
+            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide mb-3">Question Selection Filters (optional)</p>
+            <p className="text-xs text-gray-400 mb-3">Leave blank to let the system auto-select. Fill in to enforce specific counts.</p>
+
+            {/* Difficulty counts */}
+            <div className="space-y-2 mb-4">
+              <Label className="text-sm">Questions by difficulty</Label>
+              <div className="grid grid-cols-3 gap-2">
+                <div>
+                  <Label className="text-xs text-gray-500">Easy</Label>
+                  <Input type="number" min="0" placeholder="Auto"
+                    value={settings.easyCount ?? ''}
+                    onChange={e => set('easyCount', e.target.value ? Number(e.target.value) : null)}
+                  />
+                </div>
+                <div>
+                  <Label className="text-xs text-gray-500">Medium</Label>
+                  <Input type="number" min="0" placeholder="Auto"
+                    value={settings.mediumCount ?? ''}
+                    onChange={e => set('mediumCount', e.target.value ? Number(e.target.value) : null)}
+                  />
+                </div>
+                <div>
+                  <Label className="text-xs text-gray-500">Hard</Label>
+                  <Input type="number" min="0" placeholder="Auto"
+                    value={settings.hardCount ?? ''}
+                    onChange={e => set('hardCount', e.target.value ? Number(e.target.value) : null)}
+                  />
+                </div>
+              </div>
+            </div>
+
+            {/* Question type mix */}
+            <div className="space-y-1.5 mb-4">
+              <Label className="text-sm">Questions by type</Label>
+              <p className="text-xs text-gray-400">Set how many questions of each type to include. Leave 0 or blank to not restrict that type.</p>
+              <div className="grid grid-cols-2 gap-2">
+                {[
+                  { type: 'MCQ', label: 'MCQ (single correct)' },
+                  { type: 'MULTIPLE_RESPONSE', label: 'Multiple correct' },
+                  { type: 'TRUE_FALSE', label: 'True / False' },
+                  { type: 'FILL_BLANK', label: 'Fill in the blank' },
+                  { type: 'SHORT_ANSWER', label: 'Short answer' },
+                  { type: 'ESSAY', label: 'Essay' },
+                ].map(({ type, label }) => {
+                  const mix: Record<string, string> = settings.questionTypeMix ? (() => { try { return JSON.parse(settings.questionTypeMix) } catch { return {} } })() : {}
+                  return (
+                    <div key={type} className="flex items-center gap-2">
+                      <Label className="text-xs w-36 shrink-0">{label}</Label>
+                      <Input
+                        type="number" min="0" placeholder="—" className="h-7 text-xs"
+                        value={mix[type] ?? ''}
+                        onChange={e => {
+                          const newMix = { ...mix }
+                          if (e.target.value) newMix[type] = e.target.value
+                          else delete newMix[type]
+                          set('questionTypeMix', Object.keys(newMix).length > 0 ? JSON.stringify(newMix) : '')
+                        }}
+                      />
+                    </div>
+                  )
+                })}
+              </div>
+            </div>
+
+            {/* Topics filter */}
+            <div className="space-y-1.5 mb-4">
+              <Label className="text-sm">Filter by Topics</Label>
+              <p className="text-xs text-gray-400">Only include questions matching these topics. Comma-separated.</p>
+              <Input
+                placeholder="e.g. Algebra, World War II, Cell Biology"
+                value={settings.filterTopics}
+                onChange={e => set('filterTopics', e.target.value)}
+              />
+            </div>
+
+            {/* Tags filter */}
+            <div className="space-y-1.5">
+              <Label className="text-sm">Filter by Tags</Label>
+              <p className="text-xs text-gray-400">Only include questions with these tags. Comma-separated.</p>
+              <Input
+                placeholder="e.g. math, grade10, equations"
+                value={settings.filterTags}
+                onChange={e => set('filterTags', e.target.value)}
+              />
+            </div>
           </div>
         </CardContent>
       </Card>

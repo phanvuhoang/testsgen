@@ -59,7 +59,9 @@ Return a JSON array where each question object has:
   "correctAnswer": "The correct option text or answer (for MULTIPLE_RESPONSE: answers separated by ||)",
   "explanation": "Why this is correct",
   "difficulty": "EASY" | "MEDIUM" | "HARD",
-  "points": number
+  "points": number,
+  "topic": "the main topic/subject this question belongs to (e.g. 'Algebra', 'Vietnam War', 'Cell Biology')",
+  "tags": "comma-separated relevant tags (e.g. 'math,equations,quadratic' or 'history,vietnam,1975')"
 }
 
 RULES FOR EACH TYPE:

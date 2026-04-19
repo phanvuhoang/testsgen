@@ -30,7 +30,7 @@ export async function PATCH(
   }
 
   const body = await req.json();
-  const { stem, questionType, options, correctAnswer, explanation, difficulty, points } = body;
+  const { stem, questionType, options, correctAnswer, explanation, difficulty, points, sortOrder, topic, tags } = body;
 
   const updated = await db.quizQuestion.update({
     where: { id: params.qId },
@@ -42,6 +42,9 @@ export async function PATCH(
       ...(explanation !== undefined && { explanation }),
       ...(difficulty !== undefined && { difficulty }),
       ...(points !== undefined && { points }),
+      ...(sortOrder !== undefined && { sortOrder }),
+      ...(topic !== undefined && { topic: topic || null }),
+      ...(tags !== undefined && { tags: tags || null }),
     },
   });
 

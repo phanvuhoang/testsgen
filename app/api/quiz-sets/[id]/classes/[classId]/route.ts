@@ -33,6 +33,35 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
       ...(body.fixedQuestionIds !== undefined && { fixedQuestionIds: body.fixedQuestionIds ? JSON.stringify(body.fixedQuestionIds) : null }),
       ...(body.autoSendResults !== undefined && { autoSendResults: body.autoSendResults }),
       ...(body.autoSendResultType !== undefined && { autoSendResultType: body.autoSendResultType }),
+      // Feedback
+      ...(body.feedbackShowCorrect !== undefined && { feedbackShowCorrect: body.feedbackShowCorrect }),
+      ...(body.feedbackShowAnswer !== undefined && { feedbackShowAnswer: body.feedbackShowAnswer }),
+      ...(body.feedbackShowExplanation !== undefined && { feedbackShowExplanation: body.feedbackShowExplanation }),
+      ...(body.passMessage !== undefined && { passMessage: body.passMessage }),
+      ...(body.failMessage !== undefined && { failMessage: body.failMessage }),
+      // Content
+      ...(body.introText !== undefined && { introText: body.introText }),
+      ...(body.conclusionText !== undefined && { conclusionText: body.conclusionText }),
+      // Access
+      ...(body.accessType !== undefined && { accessType: body.accessType }),
+      ...(body.passcode !== undefined && { passcode: body.passcode }),
+      // Certificate
+      ...(body.certificateEnabled !== undefined && { certificateEnabled: body.certificateEnabled }),
+      ...(body.certificateTitle !== undefined && { certificateTitle: body.certificateTitle }),
+      ...(body.certificateMessage !== undefined && { certificateMessage: body.certificateMessage }),
+      ...(body.certificateBorderColor !== undefined && { certificateBorderColor: body.certificateBorderColor }),
+      ...(body.certificateFont !== undefined && { certificateFont: body.certificateFont }),
+      ...(body.certificateShowScore !== undefined && { certificateShowScore: body.certificateShowScore }),
+      ...(body.certificateShowDate !== undefined && { certificateShowDate: body.certificateShowDate }),
+      ...(body.certificateIssuerName !== undefined && { certificateIssuerName: body.certificateIssuerName }),
+      ...(body.certificateIssuerTitle !== undefined && { certificateIssuerTitle: body.certificateIssuerTitle }),
+      // Question filters
+      ...(body.easyCount !== undefined && { easyCount: body.easyCount }),
+      ...(body.mediumCount !== undefined && { mediumCount: body.mediumCount }),
+      ...(body.hardCount !== undefined && { hardCount: body.hardCount }),
+      ...(body.questionTypeMix !== undefined && { questionTypeMix: body.questionTypeMix }),
+      ...(body.filterTopics !== undefined && { filterTopics: body.filterTopics }),
+      ...(body.filterTags !== undefined && { filterTags: body.filterTags }),
     }
   })
   return NextResponse.json(cls)

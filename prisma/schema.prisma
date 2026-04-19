@@ -352,6 +352,13 @@ model QuizSet {
   easyPercent         Int           @default(20)
   mediumPercent       Int           @default(60)
   hardPercent         Int           @default(20)
+  // Question selection mix (optional override)
+  easyCount             Int?
+  mediumCount           Int?
+  hardCount             Int?
+  questionTypeMix       String?   // JSON: {type: count, ...}
+  filterTopics          String?   // JSON: string[] of topics to include
+  filterTags            String?   // JSON: string[] of tags to include
   // Testmoz-parity settings
   allowBlankAnswers        Boolean       @default(false)
   penalizeIncorrect        Boolean       @default(false)
@@ -411,6 +418,8 @@ model QuizQuestion {
   points        Int              @default(1)
   sortOrder     Int              @default(0)  // for numbering/ordering
   poolTag       String?          // question pool tag (e.g. "Pool A")
+  topic         String?          // e.g. "Algebra", "World War II"
+  tags          String?          // comma-separated tags e.g. "math,equations,grade10"
   createdAt     DateTime         @default(now())
 
   // Relations
@@ -472,10 +481,44 @@ model QuizClass {
   // null = use all questions from parent (with randomization/pool settings)
   fixedQuestionIds      String?
   
+  // Feedback settings
+  feedbackShowCorrect   Boolean   @default(false)
+  feedbackShowAnswer    Boolean   @default(false)
+  feedbackShowExplanation Boolean @default(false)
+  passMessage           String?
+  failMessage           String?
+
+  // Content
+  introText             String?
+  conclusionText        String?
+
+  // Access
+  accessType            String?   @default("PUBLIC")
+  passcode              String?
+
+  // Certificate
+  certificateEnabled    Boolean   @default(false)
+  certificateTitle      String?   @default("Certificate of Completion")
+  certificateMessage    String?
+  certificateBorderColor String?  @default("#028a39")
+  certificateFont       String?   @default("Georgia")
+  certificateShowScore  Boolean   @default(true)
+  certificateShowDate   Boolean   @default(true)
+  certificateIssuerName String?
+  certificateIssuerTitle String?
+
+  // Question difficulty/type mix (Fix 4)
+  easyCount             Int?
+  mediumCount           Int?
+  hardCount             Int?
+  questionTypeMix       String?   // JSON: {type: count, ...}
+  filterTopics          String?   // JSON: string[] of topics to include
+  filterTags            String?   // JSON: string[] of tags to include
+
   // Email settings
   autoSendResults       Boolean   @default(false)
   autoSendResultType    String?   @default("comprehensive")
-  
+
   attempts        Attempt[]   @relation("ClassAttempts")
   
   createdAt       DateTime  @default(now())

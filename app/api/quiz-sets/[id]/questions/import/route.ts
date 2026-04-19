@@ -25,6 +25,8 @@ type QuestionRow = {
   difficulty: 'EASY' | 'MEDIUM' | 'HARD'
   points: number
   partialCredit: boolean
+  topic?: string
+  tags?: string
 }
 
 function parseTestMozExcel(buffer: Buffer): QuestionRow[] {
@@ -341,6 +343,8 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
           explanation: q.explanation,
           difficulty: q.difficulty,
           points: q.points,
+          topic: q.topic || null,
+          tags: q.tags || null,
         },
       })
       created.push({ id: saved.id })

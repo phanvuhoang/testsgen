@@ -48,6 +48,8 @@ type Question = {
   points: number
   sortOrder: number
   poolTag: string | null
+  topic?: string | null
+  tags?: string | null
   createdAt: string
 }
 
@@ -245,7 +247,11 @@ export default function QuizQuestionsPage() {
       const res = await fetch(`/api/quiz-sets/${params.quizId}/questions/${id}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(patchData),
+        body: JSON.stringify({
+          ...patchData,
+          topic: editForm.topic?.trim() || null,
+          tags: editForm.tags?.trim() || null,
+        }),
       })
       if (!res.ok) throw new Error()
       const updated = await res.json()
@@ -812,6 +818,25 @@ export default function QuizQuestionsPage() {
             className="min-h-[60px] text-xs"
           />
         )}
+
+        <div className="grid grid-cols-2 gap-3">
+          <div className="space-y-1.5">
+            <Label>Topic</Label>
+            <Input
+              placeholder="e.g. Algebra, World War II"
+              value={editForm.topic ?? ''}
+              onChange={(e) => setEditForm({ ...editForm, topic: e.target.value })}
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label>Tags <span className="text-gray-400 font-normal text-xs">(comma-separated)</span></Label>
+            <Input
+              placeholder="e.g. math, grade10, equations"
+              value={editForm.tags ?? ''}
+              onChange={(e) => setEditForm({ ...editForm, tags: e.target.value })}
+            />
+          </div>
+        </div>
 
         <div className="flex gap-2 justify-end">
           <Button variant="outline" size="sm" onClick={() => setEditingId(null)}>
@@ -1510,6 +1535,7 @@ export default function QuizQuestionsPage() {
                       <p className="text-sm font-medium line-clamp-2">{q.stem}</p>
                       <div className="flex flex-wrap gap-1.5 mt-1.5">
                         <Badge variant="outline" className="text-xs py-0">{TYPE_LABEL[q.questionType] || q.questionType}</Badge>
+                        {q.topic && <Badge variant="outline" className="text-xs bg-blue-50 text-blue-600 border-blue-200">{q.topic}</Badge>}
                         <span className={`text-xs px-2 py-0.5 rounded-full ${difficultyColor[q.difficulty] || 'bg-gray-100 text-gray-600'}`}>
                           {q.difficulty}
                         </span>

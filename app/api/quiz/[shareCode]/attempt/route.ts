@@ -20,7 +20,7 @@ export async function POST(
     include: {
       questions: {
         orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
-        select: { id: true, difficulty: true, sortOrder: true },
+        select: { id: true, difficulty: true, sortOrder: true, topic: true, tags: true, questionType: true },
       },
     },
   });
@@ -34,7 +34,7 @@ export async function POST(
           include: {
             questions: {
               orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
-              select: { id: true, difficulty: true, sortOrder: true },
+              select: { id: true, difficulty: true, sortOrder: true, topic: true, tags: true, questionType: true },
             },
           },
         },
@@ -145,6 +145,85 @@ export async function POST(
     }
   } else {
     selectedQuestions = allQuestions.slice(0, totalToSelect);
+  }
+
+  // Apply class/quiz filters if set
+  const effectiveClassForFilters = resolvedClassId
+    ? await db.quizClass.findFirst({ where: { id: resolvedClassId } }).catch(() => null)
+    : null
+  const filterConfig: any = effectiveClassForFilters || quizSet
+
+  // Filter by topics
+  if (filterConfig.filterTopics) {
+    try {
+      const topics: string[] = JSON.parse(filterConfig.filterTopics)
+      if (topics.length > 0) {
+        selectedQuestions = selectedQuestions.filter((q: any) => q.topic && topics.some((t: string) => q.topic.toLowerCase().includes(t.toLowerCase())))
+      }
+    } catch {}
+  }
+
+  // Filter by tags
+  if (filterConfig.filterTags) {
+    try {
+      const tags: string[] = JSON.parse(filterConfig.filterTags)
+      if (tags.length > 0) {
+        selectedQuestions = selectedQuestions.filter((q: any) => {
+          if (!q.tags) return false
+          const qTags = q.tags.toLowerCase().split(',').map((t: string) => t.trim())
+          return tags.some((t: string) => qTags.includes(t.toLowerCase()))
+        })
+      }
+    } catch {}
+  }
+
+  // Apply difficulty counts
+  const easyCountFilter = filterConfig.easyCount
+  const mediumCountFilter = filterConfig.mediumCount
+  const hardCountFilter = filterConfig.hardCount
+  if (easyCountFilter != null || mediumCountFilter != null || hardCountFilter != null) {
+    const pickByDifficulty = (diff: string, count: number | null) => {
+      if (count == null) return []
+      return selectedQuestions
+        .filter((q: any) => q.difficulty === diff)
+        .sort(() => Math.random() - 0.5)
+        .slice(0, count)
+    }
+    const easy = pickByDifficulty('EASY', easyCountFilter)
+    const medium = pickByDifficulty('MEDIUM', mediumCountFilter)
+    const hard = pickByDifficulty('HARD', hardCountFilter)
+    const picked = [...easy, ...medium, ...hard]
+    const remaining = selectedQuestions.filter((q: any) => !picked.find((p: any) => p.id === q.id))
+    const total = filterConfig.questionsPerAttempt ?? quizSet.questionsPerAttempt ?? selectedQuestions.length
+    if (picked.length < total) {
+      const fill = remaining.sort(() => Math.random() - 0.5).slice(0, total - picked.length)
+      selectedQuestions = [...picked, ...fill].sort(() => Math.random() - 0.5)
+    } else {
+      selectedQuestions = picked.sort(() => Math.random() - 0.5)
+    }
+  }
+
+  // Apply question type mix
+  if (filterConfig.questionTypeMix) {
+    try {
+      const typeMix: Record<string, number> = JSON.parse(filterConfig.questionTypeMix)
+      const typePicked: any[] = []
+      for (const [qType, count] of Object.entries(typeMix)) {
+        const matching = selectedQuestions.filter((q: any) => q.questionType === qType)
+        typePicked.push(...matching.sort(() => Math.random() - 0.5).slice(0, count))
+      }
+      if (typePicked.length > 0) {
+        const typePickedIds = new Set(typePicked.map((q: any) => q.id))
+        const remainder = selectedQuestions.filter((q: any) => !typePickedIds.has(q.id))
+        const total = filterConfig.questionsPerAttempt ?? quizSet.questionsPerAttempt ?? selectedQuestions.length
+        if (typePicked.length < total) {
+          const fill = remainder.sort(() => Math.random() - 0.5).slice(0, total - typePicked.length)
+          selectedQuestions = [...typePicked, ...fill].sort(() => Math.random() - 0.5)
+        } else {
+          selectedQuestions = typePicked.sort(() => Math.random() - 0.5)
+        }
+      }
+    } catch {}
   }
 
   const questionOrder = selectedQuestions.map((q) => q.id);
