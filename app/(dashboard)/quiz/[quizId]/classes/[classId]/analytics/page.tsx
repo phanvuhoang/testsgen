@@ -77,11 +77,9 @@ export default function ClassAnalyticsPage() {
                     <td className="p-3 text-right font-semibold">{pct != null ? `${pct}%` : '—'}</td>
                     <td className="p-3"><Badge>{a.status}</Badge></td>
                     <td className="p-3 text-right">
-                      {a.answers && (
-                        <Button size="sm" variant="ghost" onClick={() => setSelectedAttempt(a)}>
-                          <Eye className="h-4 w-4" />
-                        </Button>
-                      )}
+                      <Button size="sm" variant="ghost" onClick={() => setSelectedAttempt(a)}>
+                        <Eye className="h-4 w-4" />
+                      </Button>
                     </td>
                   </tr>
                 )

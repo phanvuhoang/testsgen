@@ -57,6 +57,10 @@ type QuizClass = {
   certificateShowDate: boolean
   certificateIssuerName: string | null
   certificateIssuerTitle: string | null
+  // Results display
+  showAnswers: boolean
+  showScore: boolean
+  showCorrectAnswers: boolean
   // Question filters
   easyCount: number | null
   mediumCount: number | null
@@ -112,6 +116,10 @@ const emptyForm = {
   certificateShowDate: 'true',
   certificateIssuerName: '',
   certificateIssuerTitle: '',
+  // Results display
+  showAnswers: 'true',
+  showScore: 'true',
+  showCorrectAnswers: 'true',
   // Question filters
   easyCount: '',
   mediumCount: '',
@@ -128,6 +136,7 @@ export default function ClassesPage() {
   const { toast } = useToast()
   const [classes, setClasses] = useState<QuizClass[]>([])
   const [questions, setQuestions] = useState<QuizQuestion[]>([])
+  const [quizSetDefaults, setQuizSetDefaults] = useState<Record<string, any>>({})
   const [isLoading, setIsLoading] = useState(true)
   const [dialogOpen, setDialogOpen] = useState(false)
   const [editingClass, setEditingClass] = useState<QuizClass | null>(null)
@@ -140,14 +149,19 @@ export default function ClassesPage() {
   const fetchData = async () => {
     setIsLoading(true)
     try {
-      const [classRes, qRes] = await Promise.all([
+      const [classRes, qRes, qsRes] = await Promise.all([
         fetch(`/api/quiz-sets/${params.quizId}/classes`),
-        fetch(`/api/quiz-sets/${params.quizId}/questions`)
+        fetch(`/api/quiz-sets/${params.quizId}/questions`),
+        fetch(`/api/quiz-sets/${params.quizId}`),
       ])
       if (classRes.ok) setClasses(await classRes.json())
       if (qRes.ok) {
         const qData = await qRes.json()
         setQuestions(qData.questions || qData || [])
+      }
+      if (qsRes.ok) {
+        const qsData = await qsRes.json()
+        setQuizSetDefaults(qsData)
       }
     } catch (err) {
       toast({ title: 'Failed to load classes', variant: 'destructive' })
@@ -158,7 +172,30 @@ export default function ClassesPage() {
 
   const openNew = () => {
     setEditingClass(null)
-    setForm({ ...emptyForm })
+    // Pre-populate with QuizSet defaults so new Class inherits them
+    const qs = quizSetDefaults
+    setForm({
+      ...emptyForm,
+      timeLimitMinutes: qs.timeLimitMinutes?.toString() ?? '',
+      questionsPerAttempt: qs.questionsPerAttempt?.toString() ?? '',
+      passMark: qs.passMark?.toString() ?? '',
+      randomizeQuestions: String(qs.randomizeQuestions ?? true),
+      shuffleAnswerOptions: String(qs.shuffleAnswerOptions ?? false),
+      disablePrevButton: String(qs.disablePrevButton ?? false),
+      displayMode: qs.displayMode ?? 'ONE_AT_ONCE',
+      requireLogin: String(qs.requireLogin ?? false),
+      maxAttempts: qs.maxAttempts?.toString() ?? '',
+      feedbackShowCorrect: String(qs.feedbackShowCorrect ?? false),
+      feedbackShowAnswer: String(qs.feedbackShowAnswer ?? false),
+      feedbackShowExplanation: String(qs.feedbackShowExplanation ?? false),
+      showAnswers: String(qs.showAnswers ?? true),
+      showScore: String(qs.showScore ?? true),
+      showCorrectAnswers: String(qs.showCorrectAnswers ?? true),
+      passMessage: qs.passMessage ?? '',
+      failMessage: qs.failMessage ?? '',
+      introText: qs.introText ?? '',
+      conclusionText: qs.conclusionText ?? '',
+    })
     setSettingsTab('general')
     setDialogOpen(true)
   }
@@ -202,6 +239,10 @@ export default function ClassesPage() {
       certificateShowDate: String(c.certificateShowDate ?? true),
       certificateIssuerName: c.certificateIssuerName ?? '',
       certificateIssuerTitle: c.certificateIssuerTitle ?? '',
+      // Results display
+      showAnswers: String(c.showAnswers ?? true),
+      showScore: String(c.showScore ?? true),
+      showCorrectAnswers: String(c.showCorrectAnswers ?? true),
       // Question filters
       easyCount: c.easyCount?.toString() ?? '',
       mediumCount: c.mediumCount?.toString() ?? '',
@@ -255,6 +296,10 @@ export default function ClassesPage() {
         certificateShowDate: form.certificateShowDate === 'true',
         certificateIssuerName: form.certificateIssuerName.trim() || null,
         certificateIssuerTitle: form.certificateIssuerTitle.trim() || null,
+        // Results display
+        showAnswers: form.showAnswers === 'true',
+        showScore: form.showScore === 'true',
+        showCorrectAnswers: form.showCorrectAnswers === 'true',
         // Question filters
         easyCount: form.easyCount ? parseInt(form.easyCount) : null,
         mediumCount: form.mediumCount ? parseInt(form.mediumCount) : null,
@@ -588,21 +633,41 @@ export default function ClassesPage() {
           {/* Feedback tab */}
           {settingsTab === 'feedback' && (
             <div className="space-y-4">
-              <p className="text-xs text-gray-500">
-                In &quot;one at a time&quot; mode, choose what to show the student immediately after they answer each question.
-              </p>
-              <div className="space-y-2">
-                {[
-                  { key: 'feedbackShowCorrect', label: 'Indicate if the student\'s response was correct or incorrect' },
-                  { key: 'feedbackShowAnswer', label: 'Display the correct answer' },
-                  { key: 'feedbackShowExplanation', label: 'Show the explanation (if there is one)' },
-                ].map(({ key, label }) => (
-                  <div key={key} className="flex items-center gap-2">
-                    <Checkbox id={key} checked={form[key as keyof typeof form] === 'true'}
-                      onCheckedChange={c => setForm({ ...form, [key]: c ? 'true' : 'false' })} />
-                    <Label htmlFor={key} className="font-normal text-sm">{label}</Label>
-                  </div>
-                ))}
+              <div>
+                <p className="text-xs font-semibold text-gray-600 uppercase tracking-wide mb-2">Per-question feedback</p>
+                <p className="text-xs text-gray-500 mb-2">
+                  In &quot;one at a time&quot; mode, choose what to show the student immediately after they answer each question.
+                </p>
+                <div className="space-y-2">
+                  {[
+                    { key: 'feedbackShowCorrect', label: 'Indicate if the student\'s response was correct or incorrect' },
+                    { key: 'feedbackShowAnswer', label: 'Display the correct answer' },
+                    { key: 'feedbackShowExplanation', label: 'Show the explanation (if there is one)' },
+                  ].map(({ key, label }) => (
+                    <div key={key} className="flex items-center gap-2">
+                      <Checkbox id={key} checked={form[key as keyof typeof form] === 'true'}
+                        onCheckedChange={c => setForm({ ...form, [key]: c ? 'true' : 'false' })} />
+                      <Label htmlFor={key} className="font-normal text-sm">{label}</Label>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <div>
+                <p className="text-xs font-semibold text-gray-600 uppercase tracking-wide mb-2">Results page</p>
+                <p className="text-xs text-gray-500 mb-2">What to show students on the results screen after submission.</p>
+                <div className="space-y-2">
+                  {[
+                    { key: 'showScore', label: 'Show the student their score' },
+                    { key: 'showAnswers', label: 'Show the student their answers' },
+                    { key: 'showCorrectAnswers', label: 'Show correct answers alongside student answers' },
+                  ].map(({ key, label }) => (
+                    <div key={key} className="flex items-center gap-2">
+                      <Checkbox id={`res-${key}`} checked={form[key as keyof typeof form] === 'true'}
+                        onCheckedChange={c => setForm({ ...form, [key]: c ? 'true' : 'false' })} />
+                      <Label htmlFor={`res-${key}`} className="font-normal text-sm">{label}</Label>
+                    </div>
+                  ))}
+                </div>
               </div>
               <div className="space-y-3 pt-2">
                 <div className="space-y-1.5">

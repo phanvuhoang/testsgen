@@ -14,7 +14,10 @@ export async function GET(
 
   if (quizClass) {
     const quizSet = quizClass.quizSet
-    // Build response with class settings overriding parent
+    // Build response: Class settings take full precedence over Quiz Set.
+    // For nullable overrides (timeLimitMinutes, questionsPerAttempt, passMark, maxAttempts,
+    // displayMode) fall back to quizSet only when class value is null (not yet customised).
+    // For boolean flags that exist on QuizClass, always use the class value.
     return NextResponse.json({
       id: quizSet.id,
       title: quizSet.title,
@@ -22,7 +25,7 @@ export async function GET(
       shareCode: params.shareCode, // class shareCode
       classId: quizClass.id,
       className: quizClass.name,
-      // Settings from class (override parent)
+      // ── Class-owned settings (always from class) ─────────────────────────
       timeLimitMinutes: quizClass.timeLimitMinutes ?? quizSet.timeLimitMinutes,
       questionsPerAttempt: quizClass.questionsPerAttempt ?? quizSet.questionsPerAttempt,
       passMark: quizClass.passMark ?? quizSet.passMark,
@@ -33,35 +36,41 @@ export async function GET(
       requireLogin: quizClass.requireLogin,
       maxAttempts: quizClass.maxAttempts ?? quizSet.maxAttempts,
       fixedQuestionIds: quizClass.fixedQuestionIds ? JSON.parse(quizClass.fixedQuestionIds) : null,
-      // From parent quiz set
-      accessType: quizSet.access,
-      access: quizSet.access,
-      passcode: quizSet.passcode,
-      introText: quizSet.introText,
-      conclusionText: quizSet.conclusionText,
-      passMessage: quizSet.passMessage,
-      failMessage: quizSet.failMessage,
-      certificateEnabled: quizSet.certificateEnabled,
-      certificateTitle: quizSet.certificateTitle,
-      certificateMessage: quizSet.certificateMessage,
-      certificateBorderColor: quizSet.certificateBorderColor,
-      certificateFont: quizSet.certificateFont,
+      // ── Per-question feedback (from class) ───────────────────────────────
+      feedbackShowCorrect: quizClass.feedbackShowCorrect,
+      feedbackShowAnswer: quizClass.feedbackShowAnswer,
+      feedbackShowExplanation: quizClass.feedbackShowExplanation,
+      // ── Results display (from class) ─────────────────────────────────────
+      showAnswers: quizClass.showAnswers ?? quizSet.showAnswers,
+      showScore: quizClass.showScore ?? quizSet.showScore,
+      showCorrectAnswers: quizClass.showCorrectAnswers ?? quizSet.showCorrectAnswers,
+      // ── Pass/Fail messages (from class if set, else quizSet) ─────────────
+      passMessage: quizClass.passMessage ?? quizSet.passMessage,
+      failMessage: quizClass.failMessage ?? quizSet.failMessage,
+      // ── Content (from class if set, else quizSet) ────────────────────────
+      introText: quizClass.introText ?? quizSet.introText,
+      conclusionText: quizClass.conclusionText ?? quizSet.conclusionText,
+      // ── Access (from class if set, else quizSet) ─────────────────────────
+      accessType: quizClass.accessType ?? quizSet.access,
+      access: quizClass.accessType ?? quizSet.access,
+      passcode: quizClass.passcode ?? quizSet.passcode,
+      // ── Certificate (from class) ─────────────────────────────────────────
+      certificateEnabled: quizClass.certificateEnabled,
+      certificateTitle: quizClass.certificateTitle ?? quizSet.certificateTitle,
+      certificateMessage: quizClass.certificateMessage ?? quizSet.certificateMessage,
+      certificateBorderColor: quizClass.certificateBorderColor ?? quizSet.certificateBorderColor,
+      certificateFont: quizClass.certificateFont ?? quizSet.certificateFont,
       certificateShowLogo: quizSet.certificateShowLogo,
-      certificateShowScore: quizSet.certificateShowScore,
-      certificateShowDate: quizSet.certificateShowDate,
-      certificateIssuerName: quizSet.certificateIssuerName,
-      certificateIssuerTitle: quizSet.certificateIssuerTitle,
-      feedbackShowCorrect: quizSet.feedbackShowCorrect,
-      feedbackShowAnswer: quizSet.feedbackShowAnswer,
-      feedbackShowExplanation: quizSet.feedbackShowExplanation,
+      certificateShowScore: quizClass.certificateShowScore,
+      certificateShowDate: quizClass.certificateShowDate,
+      certificateIssuerName: quizClass.certificateIssuerName ?? quizSet.certificateIssuerName,
+      certificateIssuerTitle: quizClass.certificateIssuerTitle ?? quizSet.certificateIssuerTitle,
+      // ── Theme & other display (from quizSet — shared branding) ───────────
       themeColor: quizSet.themeColor,
       themeFont: quizSet.themeFont,
       themeLogo: quizSet.themeLogo,
       partialCredits: quizSet.partialCredits,
-      showAnswers: quizSet.showAnswers,
-      showScore: quizSet.showScore,
       showOutline: quizSet.showOutline,
-      showCorrectAnswers: quizSet.showCorrectAnswers,
       identifyBy: quizSet.identifyBy,
       expiresAt: quizSet.expiresAt,
       disableRightClick: quizSet.disableRightClick,

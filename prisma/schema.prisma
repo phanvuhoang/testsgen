@@ -515,6 +515,11 @@ model QuizClass {
   filterTopics          String?   // JSON: string[] of topics to include
   filterTags            String?   // JSON: string[] of tags to include
 
+  // Results display settings (override quizSet)
+  showAnswers           Boolean   @default(true)
+  showScore             Boolean   @default(true)
+  showCorrectAnswers    Boolean   @default(true)
+
   // Email settings
   autoSendResults       Boolean   @default(false)
   autoSendResultType    String?   @default("comprehensive")

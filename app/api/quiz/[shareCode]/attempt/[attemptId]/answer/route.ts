@@ -7,10 +7,34 @@ export async function POST(
   req: NextRequest,
   { params }: { params: { shareCode: string; attemptId: string } }
 ) {
+  // shareCode may be either a QuizSet shareCode or a QuizClass shareCode.
+  // Resolve quizSetId so we can find the attempt regardless of which shareCode is used.
+  let resolvedQuizSetId: string | null = null;
+
+  const quizSetByCode = await db.quizSet.findFirst({
+    where: { shareCode: params.shareCode },
+    select: { id: true },
+  });
+  if (quizSetByCode) {
+    resolvedQuizSetId = quizSetByCode.id;
+  } else {
+    const quizClassByCode = await db.quizClass.findFirst({
+      where: { shareCode: params.shareCode },
+      select: { quizSetId: true },
+    }).catch(() => null);
+    if (quizClassByCode) {
+      resolvedQuizSetId = quizClassByCode.quizSetId;
+    }
+  }
+
+  if (!resolvedQuizSetId) {
+    return NextResponse.json({ error: "Quiz not found" }, { status: 404 });
+  }
+
   const attempt = await db.attempt.findFirst({
     where: {
       id: params.attemptId,
-      quizSet: { shareCode: params.shareCode },
+      quizSetId: resolvedQuizSetId,
     },
   });
 
