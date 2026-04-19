@@ -111,6 +111,8 @@ export async function POST(
       stem: true,
       questionType: true,
       options: true,
+      correctAnswer: true,   // included for per-question feedback
+      explanation: true,     // included for per-question feedback
       difficulty: true,
       points: true,
       sortOrder: true,

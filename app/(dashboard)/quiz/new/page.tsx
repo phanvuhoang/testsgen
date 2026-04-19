@@ -28,7 +28,7 @@ import {
   Bot,
 } from 'lucide-react'
 
-type Step = 1 | 2 | 3 | 4
+type Step = 1 | 2 | 3
 
 type QuestionCard = {
   id: string
@@ -68,21 +68,8 @@ type AIModelChoice = {
   model: string
 }
 
-const step3Schema = z.object({
-  questionsPerAttempt: z.number().min(1),
-  timeLimitMinutes: z.number().optional().nullable(),
-  showAnswers: z.boolean(),
-  passMark: z.number().min(0).max(100),
-  maxAttempts: z.number().optional().nullable(),
-  identifyBy: z.enum(['NAME', 'EMAIL', 'ID']),
-  access: z.enum(['PUBLIC', 'PASSCODE', 'EMAIL_LIST']),
-  passcode: z.string().optional(),
-  randomizeQuestions: z.boolean(),
-  displayMode: z.enum(['ALL_AT_ONCE', 'ONE_AT_ONCE']),
-})
-
 type Step2Form = z.infer<typeof step2Schema>
-type Step3Form = z.infer<typeof step3Schema>
+type Step3Form = { questionsPerAttempt: number; passMark: number; access: string }  // minimal, kept for compat
 
 export default function NewQuizPage() {
   const router = useRouter()
@@ -158,22 +145,6 @@ export default function NewQuizPage() {
     },
   })
 
-  const step3Form = useForm<Step3Form>({
-    resolver: zodResolver(step3Schema),
-    defaultValues: {
-      questionsPerAttempt: 20,
-      timeLimitMinutes: 30,
-      showAnswers: true,
-      passMark: 50,
-      maxAttempts: undefined,
-      identifyBy: 'EMAIL',
-      access: 'PUBLIC',
-      passcode: '',
-      randomizeQuestions: true,
-      displayMode: 'ONE_AT_ONCE',
-    },
-  })
-
   const handleFileUpload = async (file: File) => {
     setIsUploading(true)
     try {
@@ -191,10 +162,8 @@ export default function NewQuizPage() {
   }
 
   const handleStep2Submit = async (data: Step2Form) => {
-    if (source !== 'manual') {
-      setStep(3)
-    } else {
-      // Create quiz set without generation
+    if (source === 'manual') {
+      // Create quiz set without generation, go directly to questions page
       try {
         const res = await fetch('/api/quiz-sets', {
           method: 'POST',
@@ -212,30 +181,33 @@ export default function NewQuizPage() {
       } catch {
         toast({ title: 'Failed to create quiz set', variant: 'destructive' })
       }
+      return
     }
-  }
 
-  const handleStep3Submit = async (data: Step3Form) => {
-    const step2Data = step2Form.getValues()
+    // AI / upload / paste: create quiz set with sensible defaults then generate
     try {
       const res = await fetch('/api/quiz-sets', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          title: step2Data.title,
-          ...data,
-          easyPercent: Math.round((step2Data.easyCount / step2Data.totalQuestions) * 100),
-          mediumPercent: Math.round((step2Data.mediumCount / step2Data.totalQuestions) * 100),
-          hardPercent: Math.round((step2Data.hardCount / step2Data.totalQuestions) * 100),
+          title: data.title,
+          questionsPerAttempt: data.totalQuestions,
+          passMark: 50,
+          access: 'PUBLIC',
+          randomizeQuestions: true,
+          displayMode: 'ONE_AT_ONCE',
+          easyPercent: Math.round((data.easyCount / data.totalQuestions) * 100),
+          mediumPercent: Math.round((data.mediumCount / data.totalQuestions) * 100),
+          hardPercent: Math.round((data.hardCount / data.totalQuestions) * 100),
         }),
       })
       if (!res.ok) throw new Error()
       const quiz = await res.json()
       setQuizSetId(quiz.id)
       setCreatedQuizSetId(quiz.id)
-      setStep(4)
+      setStep(3)
 
-      // Upload the document to the new quiz set if user chose file upload
+      // Upload document if file was chosen
       let resolvedDocId: string | null = null
       if (source === 'upload' && uploadedFile && uploadedDocId === 'pending') {
         try {
@@ -250,12 +222,10 @@ export default function NewQuizPage() {
             resolvedDocId = doc.id
             setUploadedDocId(doc.id)
           }
-        } catch {
-          // fallback: generation will use pastedText if doc upload fails
-        }
+        } catch {}
       }
 
-      startGeneration(quiz.id, step2Data, data, resolvedDocId)
+      startGeneration(quiz.id, data, {} as Step3Form, resolvedDocId)
     } catch {
       toast({ title: 'Failed to create quiz set', variant: 'destructive' })
     }
@@ -305,36 +275,44 @@ export default function NewQuizPage() {
       let buffer = ''
       let savedCount = 0
 
+      const processLine = (line: string) => {
+        if (!line.startsWith('data: ')) return
+        const data = line.slice(6).trim()
+        if (data === '[DONE]') {
+          setGenerationComplete(true)
+          saveProgressToStorage(qsId, savedCount, step2Data.totalQuestions, true)
+          return
+        }
+        try {
+          const event = JSON.parse(data)
+          if (event.type === 'question' && event.question) {
+            setGeneratedQuestions((prev) => [...prev, event.question])
+            savedCount++
+            setGenProgress(savedCount)
+            saveProgressToStorage(qsId, savedCount, step2Data.totalQuestions, false)
+          } else if (event.type === 'complete') {
+            setGenerationComplete(true)
+            saveProgressToStorage(qsId, savedCount, step2Data.totalQuestions, true)
+          } else if (event.type === 'error') {
+            throw new Error(event.message)
+          }
+        } catch {
+          // ignore parse errors for non-JSON lines
+        }
+      }
+
       while (true) {
         const { done, value } = await reader.read()
-        if (done) break
+        if (done) {
+          // Flush any remaining buffered data
+          if (buffer.trim()) processLine(buffer.trim())
+          break
+        }
         buffer += decoder.decode(value, { stream: true })
         const lines = buffer.split('\n')
         buffer = lines.pop() ?? ''
         for (const line of lines) {
-          if (!line.startsWith('data: ')) continue
-          const data = line.slice(6).trim()
-          if (data === '[DONE]') {
-            setGenerationComplete(true)
-            saveProgressToStorage(qsId, savedCount, step2Data.totalQuestions, true)
-            break
-          }
-          try {
-            const event = JSON.parse(data)
-            if (event.type === 'question' && event.question) {
-              setGeneratedQuestions((prev) => [...prev, event.question])
-              savedCount++
-              setGenProgress(savedCount)
-              saveProgressToStorage(qsId, savedCount, step2Data.totalQuestions, false)
-            } else if (event.type === 'complete') {
-              setGenerationComplete(true)
-              saveProgressToStorage(qsId, savedCount, step2Data.totalQuestions, true)
-            } else if (event.type === 'error') {
-              throw new Error(event.message)
-            }
-          } catch (parseErr) {
-            // ignore parse errors for non-JSON lines
-          }
+          processLine(line)
         }
       }
     } catch (e) {
@@ -344,14 +322,14 @@ export default function NewQuizPage() {
     }
   }
 
-  const stepLabels = ['Source', 'AI Config', 'Delivery', 'Generate']
-  const progressValue = (step / 4) * 100
+  const stepLabels = ['Choose Source', 'AI Config', 'Generating']
+  const progressValue = (step / 3) * 100
 
   return (
     <div className="p-6 max-w-3xl mx-auto">
       <div className="mb-6">
         <h1 className="text-2xl font-bold text-gray-900">Create New Quiz Set</h1>
-        <p className="text-gray-500">Step {step} of 4 — {stepLabels[step - 1]}</p>
+        <p className="text-gray-500">Step {step} of 3 — {stepLabels[step - 1]}</p>
       </div>
 
       <Progress value={progressValue} className="mb-6 h-2" />
@@ -581,142 +559,8 @@ export default function NewQuizPage() {
         </form>
       )}
 
-      {/* Step 3: Delivery Config */}
+      {/* Step 3: Generation */}
       {step === 3 && (
-        <form onSubmit={step3Form.handleSubmit(handleStep3Submit)} className="space-y-6">
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label>Questions per attempt</Label>
-              <Input type="number" {...step3Form.register('questionsPerAttempt', { valueAsNumber: true })} />
-            </div>
-            <div className="space-y-2">
-              <Label>Time limit (minutes, blank = unlimited)</Label>
-              <Input
-                type="number"
-                placeholder="e.g. 30"
-                {...step3Form.register('timeLimitMinutes', { valueAsNumber: true })}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label>Pass mark (%)</Label>
-              <Input type="number" {...step3Form.register('passMark', { valueAsNumber: true })} />
-            </div>
-            <div className="space-y-2">
-              <Label>Max attempts (blank = unlimited)</Label>
-              <Input
-                type="number"
-                placeholder="e.g. 3"
-                {...step3Form.register('maxAttempts', { valueAsNumber: true })}
-              />
-            </div>
-          </div>
-
-          <div>
-            <Label className="mb-2 block">How students identify themselves</Label>
-            <div className="grid grid-cols-3 gap-2">
-              {(['NAME', 'EMAIL', 'ID'] as const).map((opt) => (
-                <button
-                  key={opt}
-                  type="button"
-                  onClick={() => step3Form.setValue('identifyBy', opt)}
-                  className={`p-3 rounded-lg border text-sm font-medium transition-colors ${
-                    step3Form.watch('identifyBy') === opt
-                      ? 'border-primary bg-primary/5 text-primary'
-                      : 'border-gray-200'
-                  }`}
-                >
-                  {opt === 'NAME' ? 'Name only' : opt === 'EMAIL' ? 'Email address' : 'Student ID'}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div>
-            <Label className="mb-2 block">Test access</Label>
-            <div className="grid grid-cols-3 gap-2">
-              {([
-                { value: 'PUBLIC', label: 'Public' },
-                { value: 'PASSCODE', label: 'Passcode' },
-                { value: 'EMAIL_LIST', label: 'Email list' },
-              ] as const).map((opt) => (
-                <button
-                  key={opt.value}
-                  type="button"
-                  onClick={() => step3Form.setValue('access', opt.value)}
-                  className={`p-3 rounded-lg border text-sm font-medium transition-colors ${
-                    step3Form.watch('access') === opt.value
-                      ? 'border-primary bg-primary/5 text-primary'
-                      : 'border-gray-200'
-                  }`}
-                >
-                  {opt.label}
-                </button>
-              ))}
-            </div>
-            {step3Form.watch('access') === 'PASSCODE' && (
-              <div className="mt-2 space-y-1">
-                <Label className="text-xs">Passcode</Label>
-                <Input placeholder="Enter passcode..." {...step3Form.register('passcode')} />
-              </div>
-            )}
-          </div>
-
-          <div className="space-y-3">
-            {[
-              { field: 'showAnswers', label: 'Show correct answers after submission' },
-              { field: 'randomizeQuestions', label: 'Randomize question order for each attempt' },
-            ].map((opt) => (
-              <div key={opt.field} className="flex items-center gap-2">
-                <Checkbox
-                  id={opt.field}
-                  checked={step3Form.watch(opt.field as keyof Step3Form) as boolean}
-                  onCheckedChange={(checked) =>
-                    step3Form.setValue(opt.field as keyof Step3Form, checked as boolean)
-                  }
-                />
-                <Label htmlFor={opt.field}>{opt.label}</Label>
-              </div>
-            ))}
-          </div>
-
-          <div>
-            <Label className="mb-2 block">Question display mode</Label>
-            <div className="grid grid-cols-2 gap-2">
-              {([
-                { value: 'ONE_AT_ONCE', label: 'One at a time' },
-                { value: 'ALL_AT_ONCE', label: 'All on one page' },
-              ] as const).map((opt) => (
-                <button
-                  key={opt.value}
-                  type="button"
-                  onClick={() => step3Form.setValue('displayMode', opt.value)}
-                  className={`p-3 rounded-lg border text-sm font-medium transition-colors ${
-                    step3Form.watch('displayMode') === opt.value
-                      ? 'border-primary bg-primary/5 text-primary'
-                      : 'border-gray-200'
-                  }`}
-                >
-                  {opt.label}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="flex justify-between">
-            <Button type="button" variant="outline" onClick={() => setStep(2)}>
-              <ChevronLeft className="h-4 w-4 mr-2" />
-              Back
-            </Button>
-            <Button type="submit">
-              <Sparkles className="h-4 w-4 mr-2" />
-              Generate Questions
-            </Button>
-          </div>
-        </form>
-      )}
-
-      {/* Step 4: Generation */}
-      {step === 4 && (
         <div className="space-y-4">
           <div className="flex items-center justify-between">
             <div>

@@ -13,7 +13,8 @@ import { Separator } from '@/components/ui/separator'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Badge } from '@/components/ui/badge'
 import { useToast } from '@/components/ui/use-toast'
-import { Save, Loader2, Globe, Lock, Mail, Copy, ExternalLink, Upload } from 'lucide-react'
+import { Save, Loader2, Globe, Lock, Mail, Copy, ExternalLink, Upload, Palette } from 'lucide-react'
+import { RichTextEditor } from '@/components/ui/rich-text-editor'
 
 type QuizSettings = {
   title: string
@@ -30,6 +31,7 @@ type QuizSettings = {
   displayMode: string
   allowBlankAnswers: boolean
   penalizeIncorrect: boolean
+  partialCredits: boolean   // MULTIPLE_RESPONSE: partial points per correct answer
   // Per-question feedback
   feedbackShowCorrect: boolean
   feedbackShowAnswer: boolean
@@ -62,6 +64,13 @@ type QuizSettings = {
   certificateEnabled: boolean
   certificateTitle: string
   certificateMessage: string
+  certificateBorderColor: string
+  certificateFont: string
+  certificateShowLogo: boolean
+  certificateShowScore: boolean
+  certificateShowDate: boolean
+  certificateIssuerName: string
+  certificateIssuerTitle: string
   // Theme
   themeColor: string
   themeFont: string
@@ -82,6 +91,7 @@ const DEFAULTS: QuizSettings = {
   displayMode: 'ONE_AT_ONCE',
   allowBlankAnswers: false,
   penalizeIncorrect: false,
+  partialCredits: false,
   feedbackShowCorrect: false,
   feedbackShowAnswer: false,
   feedbackShowExplanation: false,
@@ -107,6 +117,13 @@ const DEFAULTS: QuizSettings = {
   certificateEnabled: false,
   certificateTitle: 'Certificate of Completion',
   certificateMessage: '',
+  certificateBorderColor: '#028a39',
+  certificateFont: 'Georgia',
+  certificateShowLogo: true,
+  certificateShowScore: true,
+  certificateShowDate: true,
+  certificateIssuerName: '',
+  certificateIssuerTitle: '',
   themeColor: '#028a39',
   themeFont: 'Inter',
   themeLogo: '',
@@ -151,6 +168,7 @@ export default function QuizSettingsPage() {
           displayMode: data.displayMode ?? 'ONE_AT_ONCE',
           allowBlankAnswers: data.allowBlankAnswers ?? false,
           penalizeIncorrect: data.penalizeIncorrect ?? false,
+          partialCredits: data.partialCredits ?? false,
           feedbackShowCorrect: data.feedbackShowCorrect ?? false,
           feedbackShowAnswer: data.feedbackShowAnswer ?? false,
           feedbackShowExplanation: data.feedbackShowExplanation ?? false,
@@ -176,6 +194,13 @@ export default function QuizSettingsPage() {
           certificateEnabled: data.certificateEnabled ?? false,
           certificateTitle: data.certificateTitle ?? 'Certificate of Completion',
           certificateMessage: data.certificateMessage ?? '',
+          certificateBorderColor: data.certificateBorderColor ?? '#028a39',
+          certificateFont: data.certificateFont ?? 'Georgia',
+          certificateShowLogo: data.certificateShowLogo ?? true,
+          certificateShowScore: data.certificateShowScore ?? true,
+          certificateShowDate: data.certificateShowDate ?? true,
+          certificateIssuerName: data.certificateIssuerName ?? '',
+          certificateIssuerTitle: data.certificateIssuerTitle ?? '',
           themeColor: data.themeColor ?? '#028a39',
           themeFont: data.themeFont ?? 'Inter',
           themeLogo: data.themeLogo ?? '',
@@ -302,20 +327,21 @@ export default function QuizSettingsPage() {
 
           <div className="space-y-1.5">
             <Label>Introduction (shown before test starts)</Label>
-            <Textarea
+            <RichTextEditor
               rows={3}
               placeholder="Welcome to this quiz. Read all questions carefully before answering."
               value={settings.introText}
-              onChange={(e) => set('introText', e.target.value)}
+              onChange={(v) => set('introText', v)}
             />
+            <p className="text-xs text-gray-400">Supports **bold**, *italic*, [links](url), - bullet lists</p>
           </div>
           <div className="space-y-1.5">
             <Label>Conclusion Text (shown after submission)</Label>
-            <Textarea
+            <RichTextEditor
               rows={2}
               placeholder="Thank you for completing this quiz."
               value={settings.conclusionText}
-              onChange={(e) => set('conclusionText', e.target.value)}
+              onChange={(v) => set('conclusionText', v)}
             />
           </div>
         </CardContent>
@@ -351,6 +377,7 @@ export default function QuizSettingsPage() {
               { key: 'randomizeQuestions', label: 'Randomize question order for each attempt' },
               { key: 'allowBlankAnswers', label: 'Allow blank / empty answers' },
               { key: 'penalizeIncorrect', label: 'Penalize incorrect answers (negative marking)' },
+              { key: 'partialCredits', label: 'Partial credits for Multiple Response questions (score proportional to correct selections)' },
             ].map(({ key, label }) => (
               <div key={key} className="flex items-center gap-2">
                 <Checkbox
@@ -472,21 +499,23 @@ export default function QuizSettingsPage() {
               </div>
             ))}
           </div>
-          <div className="grid grid-cols-2 gap-4">
+          <div className="space-y-3">
             <div className="space-y-1.5">
-              <Label>Pass message</Label>
-              <Input
-                placeholder="Congratulations! You passed."
+              <Label>Pass message (shown when student passes)</Label>
+              <RichTextEditor
+                rows={2}
+                placeholder="Congratulations! You passed. **Well done!**"
                 value={settings.passMessage}
-                onChange={(e) => set('passMessage', e.target.value)}
+                onChange={(v) => set('passMessage', v)}
               />
             </div>
             <div className="space-y-1.5">
-              <Label>Fail message</Label>
-              <Input
-                placeholder="You did not reach the passing score."
+              <Label>Fail message (shown when student fails)</Label>
+              <RichTextEditor
+                rows={2}
+                placeholder="You did not reach the passing score. Please try again."
                 value={settings.failMessage}
-                onChange={(e) => set('failMessage', e.target.value)}
+                onChange={(v) => set('failMessage', v)}
               />
             </div>
           </div>
@@ -509,7 +538,8 @@ export default function QuizSettingsPage() {
           </div>
 
           {settings.certificateEnabled && (
-            <div className="space-y-3 pl-6">
+            <div className="space-y-4 pl-6 border-l-2 border-[#028a39]/30 mt-2">
+              {/* Title & Message */}
               <div className="space-y-1.5">
                 <Label>Certificate Title</Label>
                 <Input
@@ -520,16 +550,87 @@ export default function QuizSettingsPage() {
               </div>
               <div className="space-y-1.5">
                 <Label>Certificate Message</Label>
-                <Textarea
+                <RichTextEditor
                   rows={3}
                   placeholder="This is to certify that {name} has successfully completed {quiz}."
                   value={settings.certificateMessage}
-                  onChange={(e) => set('certificateMessage', e.target.value)}
+                  onChange={(v) => set('certificateMessage', v)}
                 />
                 <p className="text-xs text-gray-500">
-                  Use <code className="bg-gray-100 px-1 rounded">{'{name}'}</code> for the student name and{' '}
-                  <code className="bg-gray-100 px-1 rounded">{'{quiz}'}</code> for the quiz title.
+                  Use <code className="bg-gray-100 px-1 rounded">{'{name}'}</code> for student name and{' '}
+                  <code className="bg-gray-100 px-1 rounded">{'{quiz}'}</code> for quiz title.
+                  Supports **bold**, *italic*.
                 </p>
+              </div>
+
+              {/* Designer options */}
+              <div className="pt-1">
+                <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide flex items-center gap-1 mb-3">
+                  <Palette className="h-3.5 w-3.5" /> Certificate Design
+                </p>
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="space-y-1.5">
+                    <Label>Border / Accent Color</Label>
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="color"
+                        value={settings.certificateBorderColor}
+                        onChange={(e) => set('certificateBorderColor', e.target.value)}
+                        className="h-9 w-12 rounded border border-input cursor-pointer p-0.5"
+                      />
+                      <Input
+                        value={settings.certificateBorderColor}
+                        onChange={(e) => set('certificateBorderColor', e.target.value)}
+                        className="h-9 flex-1 font-mono text-sm"
+                      />
+                    </div>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>Certificate Font</Label>
+                    <Select value={settings.certificateFont} onValueChange={(v) => set('certificateFont', v)}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="Georgia">Georgia (Classic)</SelectItem>
+                        <SelectItem value="Times New Roman">Times New Roman (Formal)</SelectItem>
+                        <SelectItem value="Palatino Linotype">Palatino (Elegant)</SelectItem>
+                        <SelectItem value="Arial">Arial (Modern)</SelectItem>
+                        <SelectItem value="Garamond">Garamond (Literary)</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>Issuer Name (signature line)</Label>
+                    <Input
+                      placeholder="e.g. John Smith"
+                      value={settings.certificateIssuerName}
+                      onChange={(e) => set('certificateIssuerName', e.target.value)}
+                    />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label>Issuer Title</Label>
+                    <Input
+                      placeholder="e.g. Course Director"
+                      value={settings.certificateIssuerTitle}
+                      onChange={(e) => set('certificateIssuerTitle', e.target.value)}
+                    />
+                  </div>
+                </div>
+                <div className="space-y-2 mt-3">
+                  {[
+                    { key: 'certificateShowLogo', label: 'Show quiz logo on certificate' },
+                    { key: 'certificateShowScore', label: 'Show student score on certificate' },
+                    { key: 'certificateShowDate', label: 'Show issue date on certificate' },
+                  ].map(({ key, label }) => (
+                    <div key={key} className="flex items-center gap-2">
+                      <Checkbox
+                        id={key}
+                        checked={settings[key as keyof QuizSettings] as boolean}
+                        onCheckedChange={(c) => set(key as keyof QuizSettings, c)}
+                      />
+                      <Label htmlFor={key} className="font-normal text-sm">{label}</Label>
+                    </div>
+                  ))}
+                </div>
               </div>
             </div>
           )}

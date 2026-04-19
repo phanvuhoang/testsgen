@@ -73,6 +73,13 @@ export async function GET(
     certificateEnabled: quizSet.certificateEnabled,
     certificateTitle: quizSet.certificateTitle,
     certificateMessage: quizSet.certificateMessage,
+    certificateBorderColor: quizSet.certificateBorderColor,
+    certificateFont: quizSet.certificateFont,
+    certificateShowLogo: quizSet.certificateShowLogo,
+    certificateShowScore: quizSet.certificateShowScore,
+    certificateShowDate: quizSet.certificateShowDate,
+    certificateIssuerName: quizSet.certificateIssuerName,
+    certificateIssuerTitle: quizSet.certificateIssuerTitle,
     // Theme
     themeColor: quizSet.themeColor,
     themeFont: quizSet.themeFont,

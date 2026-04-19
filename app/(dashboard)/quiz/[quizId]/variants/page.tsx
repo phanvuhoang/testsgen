@@ -182,7 +182,7 @@ export default function QuizVariantsPage() {
   }
 
   const getShareLink = (v: Variant) => {
-    if (!quizSet) return ''
+    if (!quizSet || typeof window === 'undefined') return ''
     // Variant share link encodes the variantId as a query param
     return `${window.location.origin}/q/${quizSet.shareCode}?variant=${v.id}`
   }

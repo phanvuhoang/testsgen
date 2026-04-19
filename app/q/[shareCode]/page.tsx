@@ -21,6 +21,7 @@ import {
   AlertCircle,
   Award,
 } from 'lucide-react'
+import { markdownToHtml } from '@/components/ui/rich-text-editor'
 
 type QuizInfo = {
   title: string
@@ -46,6 +47,13 @@ type QuizInfo = {
   certificateEnabled: boolean
   certificateTitle: string | null
   certificateMessage: string | null
+  certificateBorderColor: string | null
+  certificateFont: string | null
+  certificateShowLogo: boolean
+  certificateShowScore: boolean
+  certificateShowDate: boolean
+  certificateIssuerName: string | null
+  certificateIssuerTitle: string | null
   // Theme
   themeColor: string | null
   themeFont: string | null
@@ -145,6 +153,26 @@ export default function PublicQuizPage() {
       document.documentElement.style.removeProperty('--primary')
     }
   }, [quiz?.themeColor])
+
+  // Load Google Font dynamically to avoid falling back to Times New Roman
+  useEffect(() => {
+    if (!quiz?.themeFont) return
+    const font = quiz.themeFont
+    // Skip system fonts that don't need loading
+    const systemFonts = ['Arial', 'Helvetica', 'Verdana', 'Tahoma', 'Georgia', 'Trebuchet MS', 'Impact', 'Comic Sans MS', 'Courier New']
+    if (systemFonts.includes(font)) return
+    // Check if already loaded
+    const linkId = `quiz-font-${font.replace(/\s+/g, '-')}`
+    if (document.getElementById(linkId)) return
+    const link = document.createElement('link')
+    link.id = linkId
+    link.rel = 'stylesheet'
+    link.href = `https://fonts.googleapis.com/css2?family=${encodeURIComponent(font)}:wght@400;500;600;700&display=swap`
+    document.head.appendChild(link)
+    return () => {
+      document.getElementById(linkId)?.remove()
+    }
+  }, [quiz?.themeFont])
 
   // Anti-cheat
   useEffect(() => {
@@ -355,6 +383,34 @@ export default function PublicQuizPage() {
       .replace('{quiz}', quiz.title)
     const date = new Date().toLocaleDateString('en-US', { year: 'numeric', month: 'long', day: 'numeric' })
 
+    const borderColor = quiz.certificateBorderColor || '#028a39'
+    const certFont = quiz.certificateFont || 'Georgia'
+    const showLogo = quiz.certificateShowLogo !== false
+    const showScore = quiz.certificateShowScore !== false
+    const showDate = quiz.certificateShowDate !== false
+    const issuerName = quiz.certificateIssuerName || ''
+    const issuerTitle = quiz.certificateIssuerTitle || ''
+    const logoHtml = (showLogo && quiz.themeLogo)
+      ? `<img src="${quiz.themeLogo}" alt="logo" style="height:60px;object-fit:contain;margin-bottom:16px;" /><br/>`
+      : ''
+    const scoreHtml = showScore
+      ? `<div class="cert-score">Score: ${results.pct}%</div>`
+      : ''
+    const dateHtml = showDate
+      ? `<div class="cert-date">Issued on ${date}</div>`
+      : ''
+    const issuerHtml = (issuerName || issuerTitle)
+      ? `<div class="cert-issuer">
+          <div class="cert-issuer-line"></div>
+          ${issuerName ? `<div class="cert-issuer-name">${issuerName}</div>` : ''}
+          ${issuerTitle ? `<div class="cert-issuer-title">${issuerTitle}</div>` : ''}
+        </div>`
+      : ''
+    // Convert markdown in certMessage to HTML
+    const certMessageHtml = certMessage
+      .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+      .replace(/(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)/g, '<em>$1</em>')
+
     const printWindow = window.open('', '_blank')
     if (!printWindow) return
     printWindow.document.write(`
@@ -363,9 +419,9 @@ export default function PublicQuizPage() {
         <head>
           <title>${certTitle}</title>
           <style>
-            @page { size: landscape; margin: 1in; }
+            @page { size: landscape; margin: 0.75in; }
             body {
-              font-family: Georgia, serif;
+              font-family: '${certFont}', serif;
               display: flex;
               align-items: center;
               justify-content: center;
@@ -373,61 +429,92 @@ export default function PublicQuizPage() {
               margin: 0;
               background: white;
             }
-            .cert {
-              border: 8px double #028a39;
-              padding: 60px 80px;
-              text-align: center;
-              max-width: 800px;
+            .cert-outer {
+              border: 12px double ${borderColor};
+              padding: 4px;
+              max-width: 820px;
               width: 100%;
             }
+            .cert {
+              border: 2px solid ${borderColor};
+              padding: 50px 70px;
+              text-align: center;
+            }
+            .cert-logo { margin-bottom: 8px; }
             .cert-title {
-              font-size: 42px;
-              color: #028a39;
-              margin-bottom: 16px;
+              font-size: 40px;
+              color: ${borderColor};
+              margin-bottom: 12px;
               font-weight: bold;
+              letter-spacing: 1px;
             }
             .cert-subtitle {
-              font-size: 18px;
-              color: #666;
-              margin-bottom: 40px;
+              font-size: 16px;
+              color: #888;
+              margin-bottom: 30px;
+              text-transform: uppercase;
+              letter-spacing: 2px;
             }
             .cert-name {
-              font-size: 32px;
+              font-size: 34px;
               font-weight: bold;
               color: #111;
-              margin: 24px 0;
-              border-bottom: 2px solid #028a39;
-              padding-bottom: 12px;
+              margin: 20px 0;
+              border-bottom: 2px solid ${borderColor};
+              padding-bottom: 10px;
               display: inline-block;
-              min-width: 300px;
+              min-width: 320px;
             }
             .cert-message {
-              font-size: 16px;
+              font-size: 15px;
               color: #444;
-              margin: 24px 0;
-              line-height: 1.6;
+              margin: 20px 0;
+              line-height: 1.7;
             }
             .cert-score {
-              font-size: 22px;
-              color: #028a39;
+              font-size: 20px;
+              color: ${borderColor};
               font-weight: bold;
-              margin: 16px 0;
+              margin: 14px 0;
             }
             .cert-date {
+              font-size: 13px;
+              color: #aaa;
+              margin-top: 10px;
+            }
+            .cert-issuer {
+              margin-top: 36px;
+              display: inline-block;
+              text-align: center;
+            }
+            .cert-issuer-line {
+              border-top: 1px solid #aaa;
+              width: 200px;
+              margin: 0 auto 6px;
+            }
+            .cert-issuer-name {
               font-size: 14px;
+              font-weight: bold;
+              color: #333;
+            }
+            .cert-issuer-title {
+              font-size: 12px;
               color: #888;
-              margin-top: 40px;
             }
           </style>
         </head>
         <body>
-          <div class="cert">
-            <div class="cert-title">${certTitle}</div>
-            <div class="cert-subtitle">This is to certify that</div>
-            <div class="cert-name">${studentName}</div>
-            <div class="cert-message">${certMessage}</div>
-            <div class="cert-score">Score: ${results.pct}%</div>
-            <div class="cert-date">Issued on ${date}</div>
+          <div class="cert-outer">
+            <div class="cert">
+              <div class="cert-logo">${logoHtml}</div>
+              <div class="cert-title">${certTitle}</div>
+              <div class="cert-subtitle">This is to certify that</div>
+              <div class="cert-name">${studentName}</div>
+              <div class="cert-message">${certMessageHtml}</div>
+              ${scoreHtml}
+              ${dateHtml}
+              ${issuerHtml}
+            </div>
           </div>
         </body>
       </html>
@@ -512,7 +599,10 @@ export default function PublicQuizPage() {
             <CardTitle className="text-2xl">{quiz.title}</CardTitle>
             {quiz.description && <p className="text-gray-500 mt-2">{quiz.description}</p>}
             {quiz.introText && (
-              <p className="text-gray-600 mt-3 text-sm bg-gray-50 rounded p-3 text-left">{quiz.introText}</p>
+              <div
+                className="text-gray-600 mt-3 text-sm bg-gray-50 rounded p-3 text-left leading-relaxed prose prose-sm max-w-none"
+                dangerouslySetInnerHTML={{ __html: markdownToHtml(quiz.introText) }}
+              />
             )}
           </CardHeader>
           <CardContent className="space-y-4">
@@ -904,13 +994,22 @@ export default function PublicQuizPage() {
                 {results.passed ? 'PASSED ✓' : 'FAILED ✗'}
               </Badge>
               {results.passed && quiz.passMessage && (
-                <p className="mt-4 text-primary font-medium">{quiz.passMessage}</p>
+                <div
+                  className="mt-4 text-primary font-medium prose prose-sm max-w-none"
+                  dangerouslySetInnerHTML={{ __html: markdownToHtml(quiz.passMessage) }}
+                />
               )}
               {!results.passed && quiz.failMessage && (
-                <p className="mt-4 text-red-600">{quiz.failMessage}</p>
+                <div
+                  className="mt-4 text-red-600 prose prose-sm max-w-none"
+                  dangerouslySetInnerHTML={{ __html: markdownToHtml(quiz.failMessage) }}
+                />
               )}
               {quiz.conclusionText && (
-                <p className="mt-4 text-gray-600 text-sm">{quiz.conclusionText}</p>
+                <div
+                  className="mt-4 text-gray-600 text-sm prose prose-sm max-w-none"
+                  dangerouslySetInnerHTML={{ __html: markdownToHtml(quiz.conclusionText) }}
+                />
               )}
 
               {/* Certificate button */}

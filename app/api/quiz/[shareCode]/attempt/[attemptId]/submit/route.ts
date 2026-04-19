@@ -75,26 +75,53 @@ export async function POST(
       isCorrect =
         userAnswer.trim().toLowerCase() ===
         (q.correctAnswer ?? "").trim().toLowerCase();
-    } else if (q.questionType === "SHORT_ANSWER" || q.questionType === "FILL_BLANK") {
-      // Simple text match
-      isCorrect =
-        userAnswer.trim().toLowerCase() ===
-        (q.correctAnswer ?? "").trim().toLowerCase();
+    } else if (q.questionType === "SHORT_ANSWER") {
+      // Case-insensitive match; accept any correct answer variant (||‐delimited)
+      const correctVariants = (q.correctAnswer ?? "")
+        .split("||")
+        .map((s) => s.trim().toLowerCase())
+        .filter(Boolean)
+      isCorrect = correctVariants.includes(userAnswer.trim().toLowerCase())
+    } else if (q.questionType === "FILL_BLANK") {
+      // Case-insensitive, trimmed match; also accept ||‐delimited variants
+      const correctVariants = (q.correctAnswer ?? "")
+        .split("||")
+        .map((s) => s.trim().toLowerCase())
+        .filter(Boolean)
+      isCorrect = correctVariants.length > 0
+        ? correctVariants.includes(userAnswer.trim().toLowerCase())
+        : userAnswer.trim().toLowerCase() === (q.correctAnswer ?? "").trim().toLowerCase()
     } else if (q.questionType === "MULTIPLE_RESPONSE") {
       // Compare sorted arrays (answers separated by ||)
       const userSet = userAnswer
         .split("||")
         .map((s) => s.trim().toLowerCase())
+        .filter(Boolean)
         .sort();
       const correctSet = (q.correctAnswer ?? "")
         .split("||")
         .map((s) => s.trim().toLowerCase())
+        .filter(Boolean)
         .sort();
       isCorrect = JSON.stringify(userSet) === JSON.stringify(correctSet);
     }
     // ESSAY, LONG_ANSWER, MATCHING: not auto-graded (isCorrect remains false, earnedPoints = 0)
 
-    const earned = isCorrect ? q.points : 0;
+    let earned = 0;
+    if (q.questionType === "MULTIPLE_RESPONSE" && quizSet.partialCredits) {
+      // Partial credits: award points proportional to correct selections
+      const userSel = userAnswer.split("|").map((s) => s.trim().toLowerCase()).filter(Boolean);
+      const correctSel = (q.correctAnswer ?? "").split("|").map((s) => s.trim().toLowerCase()).filter(Boolean);
+      if (correctSel.length > 0) {
+        const correctHits = userSel.filter((s) => correctSel.includes(s)).length;
+        const wrongHits = userSel.filter((s) => !correctSel.includes(s)).length;
+        const rawRatio = Math.max(0, (correctHits - wrongHits) / correctSel.length)
+        earned = Math.round(q.points * rawRatio)
+      }
+      isCorrect = earned === q.points;
+    } else {
+      earned = isCorrect ? q.points : 0;
+    }
     earnedPoints += earned;
 
     // Update the answer record

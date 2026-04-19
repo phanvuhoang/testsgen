@@ -370,32 +370,37 @@ export default function QuizQuestionsPage() {
       let buffer = ''
       const newQs: Question[] = []
 
+      const processSSELine = (line: string) => {
+        if (!line.startsWith('data: ')) return
+        const payload = line.slice(6).trim()
+        if (payload === '[DONE]') return
+        try {
+          const event = JSON.parse(payload)
+          if (event.type === 'start') setGenStatus(event.message)
+          if (event.type === 'question') {
+            newQs.push(event.question)
+            setGenProgress(event.progress)
+            setGenStatus(`Generated ${event.progress}/${event.total} questions...`)
+          }
+          if (event.type === 'complete') {
+            setGenStatus(`Done: ${event.count} questions`)
+            setQuestions((prev) => [...prev, ...newQs])
+          }
+          if (event.type === 'error') throw new Error(event.message)
+        } catch {}
+      }
+
       while (true) {
         const { done, value } = await reader.read()
-        if (done) break
+        if (done) {
+          // Flush remaining buffer
+          if (buffer.trim()) processSSELine(buffer.trim())
+          break
+        }
         buffer += decoder.decode(value, { stream: true })
         const lines = buffer.split('\n')
         buffer = lines.pop() ?? ''
-
-        for (const line of lines) {
-          if (!line.startsWith('data: ')) continue
-          const payload = line.slice(6).trim()
-          if (payload === '[DONE]') break
-          try {
-            const event = JSON.parse(payload)
-            if (event.type === 'start') setGenStatus(event.message)
-            if (event.type === 'question') {
-              newQs.push(event.question)
-              setGenProgress(event.progress)
-              setGenStatus(`Generated ${event.progress}/${event.total} questions...`)
-            }
-            if (event.type === 'complete') {
-              setGenStatus(`Done: ${event.count} questions`)
-              setQuestions((prev) => [...prev, ...newQs])
-            }
-            if (event.type === 'error') throw new Error(event.message)
-          } catch {}
-        }
+        for (const line of lines) processSSELine(line)
       }
 
       toast({ title: `Generated ${newQs.length} questions with AI` })
