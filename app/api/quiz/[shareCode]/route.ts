@@ -46,6 +46,25 @@ export async function GET(
     return NextResponse.json({ error: "This quiz has expired" }, { status: 410 });
   }
 
+  // Handle variant overrides
+  const url2 = new URL(req.url)
+  const variantId = url2.searchParams.get('variant')
+  let variantOverride: any = null
+  if (variantId) {
+    variantOverride = await db.quizVariant.findFirst({
+      where: { id: variantId, quizSet: { shareCode: params.shareCode } }
+    }).catch(() => null)
+  }
+
+  // Apply overrides to quizSet (mutate the object before using it in response)
+  if (variantOverride) {
+    if (variantOverride.questionsPerAttempt != null) quizSet.questionsPerAttempt = variantOverride.questionsPerAttempt
+    if (variantOverride.timeLimitMinutes != null) quizSet.timeLimitMinutes = variantOverride.timeLimitMinutes
+    if (variantOverride.passMark != null) quizSet.passMark = variantOverride.passMark
+    if (variantOverride.randomizeQuestions != null) quizSet.randomizeQuestions = variantOverride.randomizeQuestions
+    if (variantOverride.displayMode != null) quizSet.displayMode = variantOverride.displayMode
+  }
+
   return NextResponse.json({
     id: quizSet.id,
     title: quizSet.title,
@@ -56,6 +75,7 @@ export async function GET(
     randomizeQuestions: quizSet.randomizeQuestions,
     showAnswers: quizSet.showAnswers,
     displayMode: quizSet.displayMode,
+    requireLogin: quizSet.requireLogin,
     questionsPerAttempt: quizSet.questionsPerAttempt,
     access: quizSet.access,
     maxAttempts: quizSet.maxAttempts,
@@ -96,5 +116,9 @@ export async function GET(
     questionCount: quizSet.questions.length,
     questions: quizSet.questions,
     createdBy: quizSet.createdBy?.name ?? "Unknown",
+    variantId: variantOverride?.id ?? null,
+    shuffleAnswerOptions: variantOverride?.shuffleAnswerOptions ?? false,
+    fixedQuestionIds: variantOverride?.fixedQuestionIds ? JSON.parse(variantOverride.fixedQuestionIds) : null,
+    disablePrevButton: variantOverride?.disablePrevButton ?? quizSet.disablePrevButton ?? false,
   });
 }

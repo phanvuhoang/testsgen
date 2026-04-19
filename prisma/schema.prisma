@@ -264,6 +264,7 @@ model Attempt {
   userId            String?
   mockExamId        String?
   quizSetId         String?
+  variantId         String?       // null = no variant (uses parent quiz)
   startedAt         DateTime      @default(now())
   submittedAt       DateTime?
   totalScore        Float?
@@ -274,9 +275,10 @@ model Attempt {
   questionsSnapshot Json?         // snapshot of questions at time of attempt
 
   // Relations
-  user    User?          @relation(fields: [userId], references: [id])
-  mockExam MockExam?     @relation(fields: [mockExamId], references: [id])
-  quizSet  QuizSet?      @relation(fields: [quizSetId], references: [id])
+  user     User?          @relation(fields: [userId], references: [id])
+  mockExam MockExam?      @relation(fields: [mockExamId], references: [id])
+  quizSet  QuizSet?       @relation(fields: [quizSetId], references: [id])
+  variant  QuizVariant?   @relation(fields: [variantId], references: [id])
   answers  AttemptAnswer[]
 
   @@map("testsgen_attempts")
@@ -321,6 +323,8 @@ model QuizSet {
   allowedEmails       String?       // JSON array of emails
   randomizeQuestions  Boolean       @default(true)
   displayMode         DisplayMode   @default(ONE_AT_ONCE)
+  disablePrevButton   Boolean       @default(false)
+  requireLogin        Boolean       @default(false)
   expiresAt           DateTime?
   tags                Json?         @default("[]")
   theme               String?       @default("default")
@@ -424,11 +428,17 @@ model QuizVariant {
   randomizeQuestions  Boolean?      // null = inherit from parent
   displayMode         DisplayMode?
   questionFilter      String?       // JSON: { poolTags?: string[], difficulty?: string, maxQuestions?: number }
+  shareCode           String        @unique @default(cuid())  // unique URL for this variant
+  shuffleAnswerOptions Boolean      @default(false)    // shuffle answer option order per student
+  fixedQuestionIds    String?       // JSON: string[] of specific question IDs to always use
+  disablePrevButton   Boolean       @default(false)
+  requireLogin        Boolean?      // null = inherit from parent
   createdAt           DateTime      @default(now())
   updatedAt           DateTime      @updatedAt
 
   // Relations
-  quizSet QuizSet @relation(fields: [quizSetId], references: [id], onDelete: Cascade)
+  quizSet  QuizSet   @relation(fields: [quizSetId], references: [id], onDelete: Cascade)
+  attempts Attempt[]
 
   @@map("testsgen_quiz_variants")
 }

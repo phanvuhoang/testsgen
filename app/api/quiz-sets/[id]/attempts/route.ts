@@ -37,6 +37,18 @@ export async function GET(
         user: {
           select: { id: true, name: true, email: true },
         },
+        answers: {
+          select: {
+            id: true,
+            quizQuestionId: true,
+            answer: true,
+            isCorrect: true,
+            marksAwarded: true,
+            quizQuestion: {
+              select: { stem: true, correctAnswer: true, questionType: true }
+            }
+          }
+        }
       },
     }),
     db.attempt.count({ where: { quizSetId: params.id } }),
@@ -45,7 +57,22 @@ export async function GET(
   // Aggregate stats
   const submittedAttempts = await db.attempt.findMany({
     where: { quizSetId: params.id, status: { in: ["SUBMITTED", "GRADED"] } },
-    select: { totalScore: true, maxScore: true },
+    select: {
+      totalScore: true,
+      maxScore: true,
+      answers: {
+        select: {
+          id: true,
+          quizQuestionId: true,
+          answer: true,
+          isCorrect: true,
+          marksAwarded: true,
+          quizQuestion: {
+            select: { stem: true, correctAnswer: true, questionType: true }
+          }
+        }
+      }
+    },
   });
 
   const scores = submittedAttempts
@@ -60,6 +87,26 @@ export async function GET(
       ? scores.filter((s) => s >= quizSet.passMark).length
       : null;
 
+  // Compute per-question stats from all submitted attempts' answers
+  const allAnswers = submittedAttempts.flatMap((a: any) => a.answers || [])
+  const questionMap = new Map<string, { stem: string; answers: Array<{answer: string; isCorrect: boolean}> }>()
+  for (const ans of allAnswers) {
+    if (!ans.quizQuestionId || !ans.quizQuestion) continue
+    const key = ans.quizQuestionId
+    if (!questionMap.has(key)) {
+      questionMap.set(key, { stem: ans.quizQuestion.stem, answers: [] })
+    }
+    questionMap.get(key)!.answers.push({ answer: ans.answer ?? '', isCorrect: ans.isCorrect ?? false })
+  }
+  const questionStats = Array.from(questionMap.entries()).map(([, v]) => {
+    const total = v.answers.length
+    const correct = v.answers.filter(a => a.isCorrect).length
+    const wrongAnswers = v.answers.filter(a => !a.isCorrect).map(a => a.answer).filter(Boolean)
+    const freq = wrongAnswers.reduce((acc: Record<string, number>, a) => { acc[a] = (acc[a] || 0) + 1; return acc }, {})
+    const topWrong = Object.entries(freq).sort((a, b) => b[1] - a[1])[0]?.[0] || null
+    return { stem: v.stem, correctCount: correct, totalCount: total, pct: total > 0 ? Math.round(correct/total*100) : 0, topWrongAnswer: topWrong }
+  })
+
   return NextResponse.json({
     attempts,
     pagination: { page, limit, total, pages: Math.ceil(total / limit) },
@@ -72,6 +119,7 @@ export async function GET(
         passCount !== null && submittedAttempts.length > 0
           ? Math.round((passCount / submittedAttempts.length) * 100)
           : null,
+      questionStats,
     },
   });
 }

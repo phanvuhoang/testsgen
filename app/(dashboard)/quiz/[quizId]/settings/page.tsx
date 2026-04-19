@@ -29,6 +29,7 @@ type QuizSettings = {
   questionsPerAttempt: number
   randomizeQuestions: boolean
   displayMode: string
+  disablePrevButton: boolean
   allowBlankAnswers: boolean
   penalizeIncorrect: boolean
   partialCredits: boolean   // MULTIPLE_RESPONSE: partial points per correct answer
@@ -43,6 +44,7 @@ type QuizSettings = {
   showAnswers: boolean
   showCorrectAnswers: boolean
   // Access
+  requireLogin: boolean
   access: string
   passcode: string
   allowedEmails: string
@@ -89,6 +91,7 @@ const DEFAULTS: QuizSettings = {
   questionsPerAttempt: 20,
   randomizeQuestions: true,
   displayMode: 'ONE_AT_ONCE',
+  disablePrevButton: false,
   allowBlankAnswers: false,
   penalizeIncorrect: false,
   partialCredits: false,
@@ -100,6 +103,7 @@ const DEFAULTS: QuizSettings = {
   showOutline: true,
   showAnswers: true,
   showCorrectAnswers: true,
+  requireLogin: false,
   access: 'PUBLIC',
   passcode: '',
   allowedEmails: '',
@@ -166,6 +170,7 @@ export default function QuizSettingsPage() {
           questionsPerAttempt: data.questionsPerAttempt ?? 20,
           randomizeQuestions: data.randomizeQuestions ?? true,
           displayMode: data.displayMode ?? 'ONE_AT_ONCE',
+          disablePrevButton: data.disablePrevButton ?? false,
           allowBlankAnswers: data.allowBlankAnswers ?? false,
           penalizeIncorrect: data.penalizeIncorrect ?? false,
           partialCredits: data.partialCredits ?? false,
@@ -177,6 +182,7 @@ export default function QuizSettingsPage() {
           showOutline: data.showOutline ?? true,
           showAnswers: data.showAnswers ?? true,
           showCorrectAnswers: data.showCorrectAnswers ?? true,
+          requireLogin: data.requireLogin ?? false,
           access: data.access ?? 'PUBLIC',
           passcode: data.passcode ?? '',
           allowedEmails: data.allowedEmails ?? '',
@@ -372,6 +378,18 @@ export default function QuizSettingsPage() {
               </Select>
             </div>
           </div>
+          {settings.displayMode === 'ONE_AT_ONCE' && (
+            <div className="flex items-center gap-2 pl-6">
+              <Checkbox
+                id="disablePrevButton"
+                checked={settings.disablePrevButton}
+                onCheckedChange={(c) => set('disablePrevButton', c as boolean)}
+              />
+              <Label htmlFor="disablePrevButton" className="font-normal text-sm">
+                Disable &quot;Previous&quot; button (students can only go forward)
+              </Label>
+            </div>
+          )}
           <div className="space-y-2">
             {[
               { key: 'randomizeQuestions', label: 'Randomize question order for each attempt' },
@@ -727,6 +745,19 @@ export default function QuizSettingsPage() {
       <Card className="mb-4">
         <CardHeader><CardTitle className="text-sm font-semibold text-gray-600 uppercase tracking-wide">Access Control</CardTitle></CardHeader>
         <CardContent className="space-y-4">
+          <div className="flex items-center gap-2">
+            <Checkbox
+              id="requireLogin"
+              checked={settings.requireLogin}
+              onCheckedChange={(c) => set('requireLogin', c as boolean)}
+            />
+            <Label htmlFor="requireLogin" className="font-normal">
+              Require student to log in before taking this quiz
+            </Label>
+          </div>
+          <p className="text-xs text-gray-400 pl-6">
+            When unchecked, anyone with the link can take the quiz as a guest without logging in.
+          </p>
           <div className="space-y-1.5">
             <Label>Who can take this test</Label>
             <Select value={settings.access} onValueChange={(v) => set('access', v)}>

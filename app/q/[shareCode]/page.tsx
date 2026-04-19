@@ -2,6 +2,7 @@
 
 import { useEffect, useRef, useState } from 'react'
 import { useParams } from 'next/navigation'
+import { useSession } from 'next-auth/react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Label } from '@/components/ui/label'
@@ -63,6 +64,10 @@ type QuizInfo = {
   disableCopyPaste: boolean
   disableTranslate: boolean
   disablePrint: boolean
+  // Navigation
+  disablePrevButton: boolean
+  // Access
+  requireLogin: boolean
 }
 
 type Question = {
@@ -88,6 +93,7 @@ export default function PublicQuizPage() {
   const params = useParams()
   const shareCode = params.shareCode as string
   const printRef = useRef<HTMLDivElement>(null)
+  const { status: sessionStatus } = useSession()
 
   const [phase, setPhase] = useState<Phase>('landing')
   const [quiz, setQuiz] = useState<QuizInfo | null>(null)
@@ -115,6 +121,7 @@ export default function PublicQuizPage() {
   // Per-question feedback
   const [questionFeedback, setQuestionFeedback] = useState<Record<string, FeedbackState>>({})
   const [showFeedbackForId, setShowFeedbackForId] = useState<string | null>(null)
+  const [submittedQuestions, setSubmittedQuestions] = useState<Set<string>>(new Set())
 
   // Results
   const [results, setResults] = useState<{
@@ -267,6 +274,21 @@ export default function PublicQuizPage() {
     quiz.displayMode === 'ONE_AT_ONCE' &&
     (quiz.feedbackShowCorrect || quiz.feedbackShowAnswer || quiz.feedbackShowExplanation)
 
+  const computeFeedback = (q: Question, answer: string): FeedbackState => {
+    let isCorrect = false
+    const correctAnswer = q.correctAnswer ?? ''
+    if (q.questionType === 'MCQ' || q.questionType === 'TRUE_FALSE') {
+      isCorrect = answer.trim().toLowerCase() === correctAnswer.trim().toLowerCase()
+    } else if (q.questionType === 'SHORT_ANSWER' || q.questionType === 'FILL_BLANK') {
+      isCorrect = answer.trim().toLowerCase() === correctAnswer.trim().toLowerCase()
+    } else if (q.questionType === 'MULTIPLE_RESPONSE') {
+      const userSet = answer.split('||').map((s) => s.trim().toLowerCase()).sort()
+      const correctSet = correctAnswer.split('||').map((s) => s.trim().toLowerCase()).sort()
+      isCorrect = JSON.stringify(userSet) === JSON.stringify(correctSet)
+    }
+    return { isCorrect, correctAnswer, explanation: q.explanation ?? null }
+  }
+
   const saveAnswer = async (questionId: string, answer: string) => {
     if (!attemptId) return
     setAnswers((prev) => ({ ...prev, [questionId]: answer }))
@@ -277,29 +299,16 @@ export default function PublicQuizPage() {
     })
 
     // Per-question feedback (only in ONE_AT_ONCE mode)
+    // If needsSubmitButton, feedback is shown only after Submit Answer is clicked
     if (quiz && shouldShowFeedback(quiz)) {
-      const q = questions.find((q) => q.quizQuestionId === questionId)
-      if (q) {
-        // Compute locally
-        let isCorrect = false
-        const correctAnswer = q.correctAnswer ?? ''
-        if (q.questionType === 'MCQ' || q.questionType === 'TRUE_FALSE') {
-          isCorrect = answer.trim().toLowerCase() === correctAnswer.trim().toLowerCase()
-        } else if (q.questionType === 'SHORT_ANSWER' || q.questionType === 'FILL_BLANK') {
-          isCorrect = answer.trim().toLowerCase() === correctAnswer.trim().toLowerCase()
-        } else if (q.questionType === 'MULTIPLE_RESPONSE') {
-          // For multiple response, compare sorted arrays
-          const userSet = answer.split('||').map((s) => s.trim().toLowerCase()).sort()
-          const correctSet = correctAnswer.split('||').map((s) => s.trim().toLowerCase()).sort()
-          isCorrect = JSON.stringify(userSet) === JSON.stringify(correctSet)
+      const needsSubmitButton = quiz.displayMode === 'ONE_AT_ONCE'
+      if (!needsSubmitButton) {
+        const q = questions.find((q) => q.quizQuestionId === questionId)
+        if (q) {
+          const feedback = computeFeedback(q, answer)
+          setQuestionFeedback((prev) => ({ ...prev, [questionId]: feedback }))
+          setShowFeedbackForId(questionId)
         }
-        const feedback: FeedbackState = {
-          isCorrect,
-          correctAnswer,
-          explanation: q.explanation ?? null,
-        }
-        setQuestionFeedback((prev) => ({ ...prev, [questionId]: feedback }))
-        setShowFeedbackForId(questionId)
       }
     }
   }
@@ -577,6 +586,27 @@ export default function PublicQuizPage() {
 
   /* Landing */
   if (phase === 'landing') {
+    // If quiz requires login and user is not authenticated, show login prompt
+    if (quiz.requireLogin && sessionStatus === 'unauthenticated') {
+      return (
+        <div
+          className="min-h-screen bg-gradient-to-br from-primary-50 to-white flex items-center justify-center p-4"
+          style={fontStyle}
+        >
+          <Card className="max-w-md w-full">
+            <CardContent className="py-12 text-center">
+              <BookOpen className="h-12 w-12 text-primary mx-auto mb-4" />
+              <h2 className="text-lg font-semibold mb-2">{quiz.title}</h2>
+              <p className="text-gray-500 mb-6">This quiz requires you to log in first.</p>
+              <Button asChild className="bg-primary text-white">
+                <a href={`/login?callbackUrl=/q/${shareCode}`}>Log in to continue</a>
+              </Button>
+            </CardContent>
+          </Card>
+        </div>
+      )
+    }
+
     return (
       <div
         className="min-h-screen bg-gradient-to-br from-primary-50 to-white flex items-center justify-center p-4"
@@ -662,10 +692,13 @@ export default function PublicQuizPage() {
   if (phase === 'quiz') {
     const isOneAtATime = quiz.displayMode === 'ONE_AT_ONCE'
     const currentQ = questions[currentIndex]
+    const currentQid = currentQ?.quizQuestionId
     const progress = ((currentIndex + 1) / questions.length) * 100
     const answeredCount = Object.keys(answers).length
     const hasFeedback = shouldShowFeedback(quiz)
-    const currentFeedback = currentQ && showFeedbackForId === currentQ.quizQuestionId
+    const needsSubmitButton = quiz.displayMode === 'ONE_AT_ONCE' && hasFeedback
+    const isCurrentSubmitted = submittedQuestions.has(currentQid ?? '')
+    const currentFeedback = currentQ && (needsSubmitButton ? isCurrentSubmitted : showFeedbackForId === currentQ.quizQuestionId)
       ? questionFeedback[currentQ.quizQuestionId]
       : null
 
@@ -894,6 +927,26 @@ export default function PublicQuizPage() {
                     </div>
                   )}
 
+                  {/* Submit Answer button (ONE_AT_ONCE + feedback, before submitted) */}
+                  {needsSubmitButton && !isCurrentSubmitted && (
+                    <Button
+                      className="w-full bg-primary text-white mt-4"
+                      onClick={() => {
+                        if (!currentQ || !currentQid) return
+                        const answer = answers[currentQid] || multiAnswers[currentQid]?.join('||') || ''
+                        const feedback = computeFeedback(currentQ, answer)
+                        setQuestionFeedback((prev) => ({ ...prev, [currentQid]: feedback }))
+                        setSubmittedQuestions((prev) => {
+                          const next = new Set(prev)
+                          next.add(currentQid)
+                          return next
+                        })
+                      }}
+                    >
+                      Submit Answer
+                    </Button>
+                  )}
+
                   <div className="flex justify-between mt-6">
                     <Button
                       variant="outline"
@@ -901,16 +954,19 @@ export default function PublicQuizPage() {
                         setCurrentIndex((i) => Math.max(0, i - 1))
                         setShowFeedbackForId(null)
                       }}
-                      disabled={currentIndex === 0}
+                      disabled={quiz.disablePrevButton || currentIndex === 0}
                     >
                       <ChevronLeft className="h-4 w-4 mr-2" />
                       Previous
                     </Button>
                     {currentIndex < questions.length - 1 ? (
-                      <Button onClick={() => {
-                        setCurrentIndex((i) => i + 1)
-                        setShowFeedbackForId(null)
-                      }}>
+                      <Button
+                        onClick={() => {
+                          setCurrentIndex((i) => i + 1)
+                          setShowFeedbackForId(null)
+                        }}
+                        disabled={needsSubmitButton && !isCurrentSubmitted}
+                      >
                         Next
                         <ChevronRight className="h-4 w-4 ml-2" />
                       </Button>
@@ -921,7 +977,7 @@ export default function PublicQuizPage() {
                             handleSubmit()
                           }
                         }}
-                        disabled={isSubmitting}
+                        disabled={isSubmitting || (needsSubmitButton && !isCurrentSubmitted)}
                       >
                         {isSubmitting ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : null}
                         Submit Quiz

@@ -54,14 +54,14 @@ const navSections: NavSection[] = [
   {
     label: 'Module 1 — Exam Projects',
     items: [
-      { href: '/exams', label: 'Projects', icon: FolderOpen },
-      { href: '/my-exams', label: 'My Exams', icon: GraduationCap },
+      { href: '/exams', label: 'Projects', icon: FolderOpen, roles: ['ADMIN', 'TEACHER'] },
+      { href: '/my-exams', label: 'My Exams', icon: GraduationCap, roles: ['ADMIN', 'TEACHER'] },
     ],
   },
   {
     label: 'Module 2 — Quiz Generator',
     items: [
-      { href: '/quiz', label: 'My Quiz Sets', icon: Puzzle },
+      { href: '/quiz', label: 'My Quiz Sets', icon: Puzzle, roles: ['ADMIN', 'TEACHER'] },
       { href: '/my-results', label: 'My Results', icon: History },
     ],
   },

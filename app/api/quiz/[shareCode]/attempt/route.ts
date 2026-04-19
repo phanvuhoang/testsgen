@@ -50,7 +50,7 @@ export async function POST(
   }
 
   const body = await req.json().catch(() => ({}));
-  const { guestName, guestEmail, passcode } = body;
+  const { guestName, guestEmail, passcode, variantId, fixedQuestionIds, shuffleAnswerOptions } = body;
 
   // Validate passcode if required
   if (quizSet.access === "PASSCODE") {
@@ -67,7 +67,13 @@ export async function POST(
 
   let selectedQuestions: typeof allQuestions;
 
-  if (quizSet.randomizeQuestions) {
+  // If fixedQuestionIds provided, use those specific questions in order
+  if (fixedQuestionIds && Array.isArray(fixedQuestionIds) && fixedQuestionIds.length > 0) {
+    const idSet = new Set(fixedQuestionIds)
+    selectedQuestions = fixedQuestionIds
+      .map((id: string) => allQuestions.find(q => q.id === id))
+      .filter(Boolean) as typeof allQuestions
+  } else if (quizSet.randomizeQuestions) {
     const easy = allQuestions.filter((q) => q.difficulty === "EASY");
     const medium = allQuestions.filter((q) => q.difficulty === "MEDIUM");
     const hard = allQuestions.filter((q) => q.difficulty === "HARD");
@@ -138,6 +144,7 @@ export async function POST(
       guestEmail: guestEmail ?? session?.user?.email ?? null,
       questionsSnapshot: questionsSnapshot as any,
       status: "IN_PROGRESS",
+      variantId: variantId ?? null,
     },
   });
 

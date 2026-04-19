@@ -37,6 +37,10 @@ export async function PATCH(
       questionFilter: body.questionFilter !== undefined
         ? (body.questionFilter ? JSON.stringify(body.questionFilter) : null)
         : variant.questionFilter,
+      shuffleAnswerOptions: body.shuffleAnswerOptions !== undefined ? body.shuffleAnswerOptions : variant.shuffleAnswerOptions,
+      fixedQuestionIds: body.fixedQuestionIds !== undefined ? body.fixedQuestionIds : variant.fixedQuestionIds,
+      disablePrevButton: body.disablePrevButton !== undefined ? body.disablePrevButton : variant.disablePrevButton,
+      requireLogin: body.requireLogin !== undefined ? body.requireLogin : variant.requireLogin,
     },
   })
 

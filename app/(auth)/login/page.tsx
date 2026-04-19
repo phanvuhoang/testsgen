@@ -144,9 +144,6 @@ export default function LoginPage() {
               <LoginForm />
             </Suspense>
 
-            <div className="mt-4 text-center text-sm text-gray-500">
-              <p>Default admin: admin@testsgen.com / Admin@123456</p>
-            </div>
           </CardContent>
         </Card>
       </div>

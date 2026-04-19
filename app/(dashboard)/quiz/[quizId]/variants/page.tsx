@@ -24,6 +24,7 @@ import {
   Copy,
   Share2,
   Layers,
+  BarChart2,
 } from 'lucide-react'
 
 type Variant = {
@@ -60,6 +61,8 @@ const emptyForm = {
   displayMode: '',
   poolTags: '',
   maxQuestions: '',
+  shuffleAnswerOptions: 'false',
+  fixedQuestionIds: '',
 }
 
 export default function QuizVariantsPage() {
@@ -103,6 +106,7 @@ export default function QuizVariantsPage() {
   const openEdit = (v: Variant) => {
     setEditingId(v.id)
     const qf = v.questionFilter ? JSON.parse(v.questionFilter) : {}
+    const anyV = v as any
     setForm({
       name: v.name,
       description: v.description ?? '',
@@ -113,6 +117,8 @@ export default function QuizVariantsPage() {
       displayMode: v.displayMode ?? '',
       poolTags: qf.poolTags?.join(',') ?? '',
       maxQuestions: qf.maxQuestions != null ? String(qf.maxQuestions) : '',
+      shuffleAnswerOptions: String(anyV.shuffleAnswerOptions ?? false),
+      fixedQuestionIds: anyV.fixedQuestionIds ? (() => { try { return JSON.parse(anyV.fixedQuestionIds).join(',') } catch { return anyV.fixedQuestionIds } })() : '',
     })
     setShowDialog(true)
   }
@@ -139,6 +145,10 @@ export default function QuizVariantsPage() {
         randomizeQuestions: form.randomizeQuestions === 'true' ? true : form.randomizeQuestions === 'false' ? false : null,
         displayMode: form.displayMode || null,
         questionFilter,
+        shuffleAnswerOptions: form.shuffleAnswerOptions === 'true',
+        fixedQuestionIds: form.fixedQuestionIds.trim()
+          ? JSON.stringify(form.fixedQuestionIds.split(',').map(s => s.trim()).filter(Boolean))
+          : null,
       }
 
       const url = editingId
@@ -286,6 +296,14 @@ export default function QuizVariantsPage() {
                     <Button
                       size="sm"
                       variant="ghost"
+                      onClick={() => window.open(`/quiz/${params.quizId}/variants/${v.id}/analytics`, '_blank')}
+                      title="View analytics"
+                    >
+                      <BarChart2 className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="ghost"
                       onClick={() => openEdit(v)}
                     >
                       <Pencil className="h-4 w-4" />
@@ -419,6 +437,33 @@ export default function QuizVariantsPage() {
                   value={form.maxQuestions}
                   onChange={(e) => setForm({ ...form, maxQuestions: e.target.value })}
                 />
+              </div>
+            </div>
+
+            <p className="text-xs font-medium text-gray-500 uppercase tracking-wider">
+              Class / Fixed Question Set
+            </p>
+            <div className="space-y-3">
+              <div className="space-y-1">
+                <Label className="text-sm">Fixed question IDs for this class (comma-separated)</Label>
+                <Textarea
+                  placeholder="Leave empty to use question pool/random selection. Paste specific question IDs to use the same questions for all students in this variant."
+                  value={form.fixedQuestionIds}
+                  onChange={(e) => setForm({ ...form, fixedQuestionIds: e.target.value })}
+                  className="min-h-[60px] text-xs"
+                />
+                <p className="text-xs text-gray-400">All students assigned this variant will receive the same questions in this set.</p>
+              </div>
+              <div className="flex items-center gap-2">
+                <input
+                  type="checkbox"
+                  id="shuffleAnswerOptions"
+                  checked={form.shuffleAnswerOptions === 'true'}
+                  onChange={(e) => setForm({ ...form, shuffleAnswerOptions: e.target.checked ? 'true' : 'false' })}
+                />
+                <Label htmlFor="shuffleAnswerOptions" className="text-sm font-normal">
+                  Shuffle answer option order per student (same questions, different answer order)
+                </Label>
               </div>
             </div>
           </div>
