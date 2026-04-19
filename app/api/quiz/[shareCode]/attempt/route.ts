@@ -17,8 +17,8 @@ export async function POST(
     },
     include: {
       questions: {
-        orderBy: { createdAt: "asc" },
-        select: { id: true, difficulty: true },
+        orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
+        select: { id: true, difficulty: true, sortOrder: true },
       },
     },
   });
@@ -113,11 +113,20 @@ export async function POST(
       options: true,
       difficulty: true,
       points: true,
+      sortOrder: true,
+      poolTag: true,
     },
   });
 
   const snapshotMap = new Map(questionsForSnapshot.map((q) => [q.id, q]));
-  const questionsSnapshot = questionOrder.map((id) => snapshotMap.get(id));
+  // Map each question so frontend gets quizQuestionId = the DB question id
+  const questionsSnapshot = questionOrder
+    .map((id) => snapshotMap.get(id))
+    .filter(Boolean)
+    .map((q) => ({
+      ...q,
+      quizQuestionId: q!.id, // critical: expose as quizQuestionId for frontend
+    }));
 
   const attempt = await db.attempt.create({
     data: {

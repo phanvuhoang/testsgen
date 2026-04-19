@@ -14,6 +14,7 @@ import { Badge } from '@/components/ui/badge'
 import { Progress } from '@/components/ui/progress'
 import { useToast } from '@/components/ui/use-toast'
 import { Checkbox } from '@/components/ui/checkbox'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import {
   Upload,
   FileText,
@@ -24,6 +25,7 @@ import {
   CheckCircle2,
   Sparkles,
   X,
+  Bot,
 } from 'lucide-react'
 
 type Step = 1 | 2 | 3 | 4
@@ -52,7 +54,19 @@ const step2Schema = z.object({
   includesMCQ: z.boolean(),
   includesTrueFalse: z.boolean(),
   includesShortAnswer: z.boolean(),
+  includesMultipleResponse: z.boolean(),
+  includesFillBlank: z.boolean(),
+  includesEssay: z.boolean(),
+  includesLongAnswer: z.boolean(),
+  includesMatching: z.boolean(),
 })
+
+type AIModelChoice = {
+  id: string
+  label: string
+  provider: string
+  model: string
+}
 
 const step3Schema = z.object({
   questionsPerAttempt: z.number().min(1),
@@ -76,6 +90,8 @@ export default function NewQuizPage() {
   const { toast } = useToast()
   const [step, setStep] = useState<Step>(1)
   const [source, setSource] = useState<'upload' | 'paste' | 'manual' | null>(null)
+  const [aiModels, setAIModels] = useState<AIModelChoice[]>([])
+  const [selectedModel, setSelectedModel] = useState<string>('deepseek:deepseek-reasoner')
 
   // Handle ?mode=manual: pre-select manual mode and jump to step 2
   useEffect(() => {
@@ -83,6 +99,14 @@ export default function NewQuizPage() {
       setSource('manual')
       setStep(2)
     }
+    // Fetch available AI models
+    fetch('/api/ai-models')
+      .then((r) => r.json())
+      .then((data: AIModelChoice[]) => {
+        setAIModels(data)
+        if (data.length > 0) setSelectedModel(data[0].id)
+      })
+      .catch(() => {})
   }, [])
   const [uploadedFile, setUploadedFile] = useState<File | null>(null)
   const [pastedText, setPastedText] = useState('')
@@ -93,7 +117,23 @@ export default function NewQuizPage() {
   const [generatedQuestions, setGeneratedQuestions] = useState<QuestionCard[]>([])
   const [isGenerating, setIsGenerating] = useState(false)
   const [generationComplete, setGenerationComplete] = useState(false)
+  const [genProgress, setGenProgress] = useState(0)
+  const [genTotal, setGenTotal] = useState(0)
   const fileInputRef = useRef<HTMLInputElement>(null)
+
+  // Save/restore generation progress to localStorage so it persists across tab closes
+  const saveProgressToStorage = (qsId: string, progress: number, total: number, done: boolean) => {
+    try {
+      localStorage.setItem(
+        `tg_gen_${qsId}`,
+        JSON.stringify({ progress, total, done, ts: Date.now() })
+      )
+    } catch {}
+  }
+
+  const clearProgressFromStorage = (qsId: string) => {
+    try { localStorage.removeItem(`tg_gen_${qsId}`) } catch {}
+  }
 
   const step2Form = useForm<Step2Form>({
     resolver: zodResolver(step2Schema),
@@ -110,6 +150,11 @@ export default function NewQuizPage() {
       includesMCQ: true,
       includesTrueFalse: false,
       includesShortAnswer: false,
+      includesMultipleResponse: false,
+      includesFillBlank: false,
+      includesEssay: false,
+      includesLongAnswer: false,
+      includesMatching: false,
     },
   })
 
@@ -219,6 +264,9 @@ export default function NewQuizPage() {
   const startGeneration = async (qsId: string, step2Data: Step2Form, step3Data: Step3Form, docId?: string | null) => {
     setIsGenerating(true)
     setGeneratedQuestions([])
+    setGenProgress(0)
+    setGenTotal(step2Data.totalQuestions)
+    saveProgressToStorage(qsId, 0, step2Data.totalQuestions, false)
     try {
       const res = await fetch(`/api/quiz-sets/${qsId}/generate`, {
         method: 'POST',
@@ -240,7 +288,13 @@ export default function NewQuizPage() {
             step2Data.includesMCQ && 'MCQ',
             step2Data.includesTrueFalse && 'TRUE_FALSE',
             step2Data.includesShortAnswer && 'SHORT_ANSWER',
+            step2Data.includesMultipleResponse && 'MULTIPLE_RESPONSE',
+            step2Data.includesFillBlank && 'FILL_BLANK',
+            step2Data.includesEssay && 'ESSAY',
+            step2Data.includesLongAnswer && 'LONG_ANSWER',
+            step2Data.includesMatching && 'MATCHING',
           ].filter(Boolean),
+          modelId: selectedModel,
         }),
       })
 
@@ -248,23 +302,38 @@ export default function NewQuizPage() {
 
       const reader = res.body.getReader()
       const decoder = new TextDecoder()
+      let buffer = ''
+      let savedCount = 0
 
       while (true) {
         const { done, value } = await reader.read()
         if (done) break
-        const chunk = decoder.decode(value)
-        const lines = chunk.split('\n')
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() ?? ''
         for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            const data = line.slice(6)
-            if (data === '[DONE]') {
+          if (!line.startsWith('data: ')) continue
+          const data = line.slice(6).trim()
+          if (data === '[DONE]') {
+            setGenerationComplete(true)
+            saveProgressToStorage(qsId, savedCount, step2Data.totalQuestions, true)
+            break
+          }
+          try {
+            const event = JSON.parse(data)
+            if (event.type === 'question' && event.question) {
+              setGeneratedQuestions((prev) => [...prev, event.question])
+              savedCount++
+              setGenProgress(savedCount)
+              saveProgressToStorage(qsId, savedCount, step2Data.totalQuestions, false)
+            } else if (event.type === 'complete') {
               setGenerationComplete(true)
-              break
+              saveProgressToStorage(qsId, savedCount, step2Data.totalQuestions, true)
+            } else if (event.type === 'error') {
+              throw new Error(event.message)
             }
-            try {
-              const question = JSON.parse(data)
-              setGeneratedQuestions((prev) => [...prev, question])
-            } catch {}
+          } catch (parseErr) {
+            // ignore parse errors for non-JSON lines
           }
         }
       }
@@ -447,11 +516,16 @@ export default function NewQuizPage() {
 
               <div>
                 <Label className="mb-2 block">Question types to generate</Label>
-                <div className="space-y-2">
+                <div className="grid grid-cols-2 gap-2">
                   {[
-                    { field: 'includesMCQ', label: 'Multiple choice (4 options, one correct)' },
+                    { field: 'includesMCQ', label: 'Multiple Choice (one answer)' },
+                    { field: 'includesMultipleResponse', label: 'Multiple Response (many answers)' },
                     { field: 'includesTrueFalse', label: 'True / False' },
-                    { field: 'includesShortAnswer', label: 'Short answer (text)' },
+                    { field: 'includesShortAnswer', label: 'Short Answer' },
+                    { field: 'includesFillBlank', label: 'Fill in the Blank' },
+                    { field: 'includesEssay', label: 'Essay (ungraded)' },
+                    { field: 'includesLongAnswer', label: 'Long Answer (ungraded)' },
+                    { field: 'includesMatching', label: 'Matching' },
                   ].map((opt) => (
                     <div key={opt.field} className="flex items-center gap-2">
                       <Checkbox
@@ -461,10 +535,27 @@ export default function NewQuizPage() {
                           step2Form.setValue(opt.field as keyof Step2Form, checked as boolean)
                         }
                       />
-                      <Label htmlFor={opt.field}>{opt.label}</Label>
+                      <Label htmlFor={opt.field} className="text-sm">{opt.label}</Label>
                     </div>
                   ))}
                 </div>
+              </div>
+
+              <div className="space-y-2">
+                <Label className="flex items-center gap-1"><Bot className="h-4 w-4" /> AI Model</Label>
+                <Select value={selectedModel} onValueChange={setSelectedModel}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select AI model..." />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {aiModels.map((m) => (
+                      <SelectItem key={m.id} value={m.id}>{m.label}</SelectItem>
+                    ))}
+                    {aiModels.length === 0 && (
+                      <SelectItem value="deepseek:deepseek-reasoner">DeepSeek Reasoner (Default)</SelectItem>
+                    )}
+                  </SelectContent>
+                </Select>
               </div>
 
               <div className="space-y-2">
@@ -629,15 +720,29 @@ export default function NewQuizPage() {
         <div className="space-y-4">
           <div className="flex items-center justify-between">
             <div>
-              <h2 className="text-lg font-semibold">Generating questions...</h2>
+              <h2 className="text-lg font-semibold">
+                {generationComplete ? 'Generation complete' : 'Generating questions...'}
+              </h2>
               <p className="text-gray-500 text-sm">
                 {isGenerating
-                  ? `${generatedQuestions.length} questions generated so far`
-                  : `Done — ${generatedQuestions.length} questions generated`}
+                  ? `${genProgress} of ${genTotal} questions generated`
+                  : `Done — ${generatedQuestions.length} questions saved`}
               </p>
             </div>
             {isGenerating && <Loader2 className="h-6 w-6 animate-spin text-primary" />}
             {generationComplete && <CheckCircle2 className="h-6 w-6 text-primary" />}
+          </div>
+
+          {/* Progress bar */}
+          <div className="space-y-1">
+            <Progress
+              value={genTotal > 0 ? Math.round((genProgress / genTotal) * 100) : 0}
+              className="h-3"
+            />
+            <div className="flex justify-between text-xs text-gray-500">
+              <span>{genTotal > 0 ? Math.round((genProgress / genTotal) * 100) : 0}%</span>
+              <span>{genProgress}/{genTotal} questions</span>
+            </div>
           </div>
 
           <div className="space-y-3 max-h-[500px] overflow-y-auto">

@@ -34,18 +34,19 @@ export type GradingConfig = {
 }
 
 export function buildQuizGenerationPrompt(config: GenerationConfig): string {
-  const typesList = config.questionTypes.join(', ') || 'MCQ'
-  
+  const typesList = config.questionTypes.length > 0 ? config.questionTypes.join(', ') : 'MCQ'
+
   return `You are an expert exam question creator. Generate exactly ${config.totalQuestions} quiz questions based on the provided content.
 
 CONTENT:
-${config.documentContent || 'No specific document provided — generate general knowledge questions about the topic.'}
+${config.documentContent || 'No specific document provided — generate general knowledge questions about the topic: ' + config.title}
 
 QUESTION SPECIFICATIONS:
 - Easy questions: ${config.easyCount} (worth ${config.easyPoints} point each)
-- Medium questions: ${config.mediumCount} (worth ${config.mediumPoints} points each)  
+- Medium questions: ${config.mediumCount} (worth ${config.mediumPoints} points each)
 - Hard questions: ${config.hardCount} (worth ${config.hardPoints} points each)
 - Question types to include: ${typesList}
+  (Distribute the requested types roughly evenly unless only one type is specified)
 
 ${config.aiInstructions ? `ADDITIONAL INSTRUCTIONS:\n${config.aiInstructions}` : ''}
 
@@ -53,22 +54,34 @@ OUTPUT FORMAT:
 Return a JSON array where each question object has:
 {
   "stem": "The question text",
-  "questionType": "MCQ" | "TRUE_FALSE" | "SHORT_ANSWER",
-  "options": ["A. option1", "B. option2", "C. option3", "D. option4"] (for MCQ only, omit for others),
-  "correctAnswer": "The correct option text or answer",
-  "explanation": "Why this is correct and the educational context",
+  "questionType": "MCQ" | "MULTIPLE_RESPONSE" | "TRUE_FALSE" | "SHORT_ANSWER" | "FILL_BLANK" | "ESSAY" | "LONG_ANSWER" | "MATCHING",
+  "options": ["option1", "option2", "option3", "option4"],
+  "correctAnswer": "The correct option text or answer (for MULTIPLE_RESPONSE: answers separated by ||)",
+  "explanation": "Why this is correct",
   "difficulty": "EASY" | "MEDIUM" | "HARD",
   "points": number
 }
 
-RULES:
-1. For MCQ: provide exactly 4 options labeled A, B, C, D. correctAnswer should be the full option text.
-2. For TRUE_FALSE: options are ["True", "False"]. correctAnswer is "True" or "False".
-3. For SHORT_ANSWER: no options. correctAnswer is a brief model answer.
-4. Questions must be based on the provided content — no hallucination.
-5. Distribute difficulties as specified.
-6. Make distractors plausible but clearly wrong upon careful reading.
-7. Return ONLY the JSON array, no other text.`
+RULES FOR EACH TYPE:
+1. MCQ: provide exactly 4 options (plain text, NO letter prefixes like 'A.' — just the option text).
+   correctAnswer = exact text of the correct option.
+2. MULTIPLE_RESPONSE: provide 4-5 options (plain text, no letter prefixes).
+   correctAnswer = all correct options separated by "||" (e.g. "Paris||London").
+3. TRUE_FALSE: options = ["True", "False"]. correctAnswer = "True" or "False".
+4. SHORT_ANSWER: no options. correctAnswer = brief model answer.
+5. FILL_BLANK: stem contains blank as "___". no options. correctAnswer = the word/phrase.
+6. ESSAY / LONG_ANSWER: no options, no correctAnswer. Just stem.
+7. MATCHING: options is an object: { "left": ["item1", "item2", ...], "right": ["match1", "match2", ...] }.
+   correctAnswer = JSON array of pairs: [["left1","right1"],["left2","right2"]] as a string.
+
+IMPORTANT: For MCQ and MULTIPLE_RESPONSE, do NOT prefix options with letters (A., B., etc.).
+The UI adds letters automatically. Just write the plain option text.
+
+Quality rules:
+- Questions must be based on the provided content — no hallucination.
+- Distribute difficulties as specified.
+- Make distractors plausible.
+- Return ONLY the JSON array, no other text or markdown fences.`
 }
 
 export function buildExamQuestionPrompt(config: ExamGenerationConfig): string {

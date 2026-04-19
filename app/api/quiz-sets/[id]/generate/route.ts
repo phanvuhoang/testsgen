@@ -179,29 +179,49 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
           .toUpperCase()
           .replace(/\s+/g, '_')
 
-        const typeMap: Record<string, 'MCQ' | 'MULTIPLE_RESPONSE' | 'TRUE_FALSE' | 'SHORT_ANSWER' | 'FILL_BLANK' | 'ESSAY'> = {
+        const typeMap: Record<string, string> = {
           MCQ: 'MCQ',
           MULTIPLE_CHOICE: 'MCQ',
           MULTIPLE_RESPONSE: 'MULTIPLE_RESPONSE',
+          MULTIPLE_SELECT: 'MULTIPLE_RESPONSE',
           TRUE_FALSE: 'TRUE_FALSE',
+          TRUE_OR_FALSE: 'TRUE_FALSE',
           SHORT_ANSWER: 'SHORT_ANSWER',
           SHORT: 'SHORT_ANSWER',
           FILL_BLANK: 'FILL_BLANK',
           FILL_IN_THE_BLANK: 'FILL_BLANK',
+          FILL_IN_BLANK: 'FILL_BLANK',
           ESSAY: 'ESSAY',
+          LONG_ANSWER: 'LONG_ANSWER',
+          MATCHING: 'MATCHING',
         }
         const questionType = typeMap[rawType] ?? 'MCQ'
+
+        // Strip "A. ", "B. " etc. prefixes from AI-generated options to prevent double-labeling in UI
+        const cleanOptions = (opts: unknown): string[] => {
+          if (!Array.isArray(opts)) return []
+          return (opts as string[]).map((o) => String(o).replace(/^[A-Za-z][.)]\s+/, '').trim())
+        }
+
+        // Get current max sortOrder for this quiz set to auto-increment
+        const lastQ = await db.quizQuestion.findFirst({
+          where: { quizSetId: params.id },
+          orderBy: { sortOrder: 'desc' },
+          select: { sortOrder: true },
+        })
+        const nextSortOrder = (lastQ?.sortOrder ?? 0) + 1
 
         const created = await db.quizQuestion.create({
           data: {
             quizSetId: params.id,
             stem: (q.stem as string) ?? (q.question as string) ?? '',
-            questionType,
-            options: (q.options as string[]) ?? [],
+            questionType: questionType as import('@prisma/client').QuizQuestionType,
+            options: cleanOptions(q.options),
             correctAnswer: (q.correctAnswer as string) ?? '',
             explanation: (q.explanation as string) ?? null,
             difficulty: difficultyValue,
             points: (q.points as number) ?? 1,
+            sortOrder: nextSortOrder,
           },
         })
 

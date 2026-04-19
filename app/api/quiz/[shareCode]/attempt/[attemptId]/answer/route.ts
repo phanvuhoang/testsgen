@@ -23,11 +23,13 @@ export async function POST(
   }
 
   const body = await req.json();
-  const { questionId, answer } = body;
+  // Accept both questionId and quizQuestionId (frontend sends quizQuestionId)
+  const questionId = body.questionId ?? body.quizQuestionId;
+  const { answer } = body;
 
   if (!questionId || answer === undefined) {
     return NextResponse.json(
-      { error: "questionId and answer are required" },
+      { error: "questionId (or quizQuestionId) and answer are required" },
       { status: 400 }
     );
   }

@@ -579,6 +579,9 @@ export default function PublicQuizPage() {
       ? questionFeedback[currentQ.quizQuestionId]
       : null
 
+    // If an option already starts with "A. " or "A) " etc, don't add prefix again to avoid "A.A. ..."
+    const hasBuiltinPrefix = (opt: string): boolean => /^[A-Za-z][.)][\s)]/.test(opt)
+
     const renderQuestionInput = (q: Question, inAllAtOnce = false) => {
       const qId = q.quizQuestionId
       const options = Array.isArray(q.options) ? q.options as string[] : null
@@ -599,11 +602,12 @@ export default function PublicQuizPage() {
               onValueChange={(v) => saveAnswer(qId, v)}
             >
               {options.map((opt, i) => (
-                <div key={i} className={`flex items-center gap-3 p-3 rounded-lg border hover:bg-gray-50 cursor-pointer ${inAllAtOnce ? '' : ''}`}>
+                <div key={i} className="flex items-center gap-3 p-3 rounded-lg border hover:bg-gray-50 cursor-pointer">
                   <RadioGroupItem value={opt} id={`q${qId}-opt-${i}`} />
                   <Label htmlFor={`q${qId}-opt-${i}`} className="cursor-pointer flex-1">
-                    <span className="font-medium mr-2">{String.fromCharCode(65 + i)}.</span>
-                    {opt}
+                    {hasBuiltinPrefix(opt) ? opt : (
+                      <><span className="font-medium mr-2">{String.fromCharCode(65 + i)}.</span>{opt}</>
+                    )}
                   </Label>
                 </div>
               ))}
@@ -629,8 +633,9 @@ export default function PublicQuizPage() {
                       {selected && <span className="text-white text-xs font-bold">✓</span>}
                     </div>
                     <span className="text-sm">
-                      <span className="font-medium mr-2">{String.fromCharCode(65 + i)}.</span>
-                      {opt}
+                      {hasBuiltinPrefix(opt) ? opt : (
+                        <><span className="font-medium mr-2">{String.fromCharCode(65 + i)}.</span>{opt}</>
+                      )}
                     </span>
                   </div>
                 )

@@ -12,6 +12,14 @@ import { Progress } from '@/components/ui/progress'
 import { useToast } from '@/components/ui/use-toast'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Label } from '@/components/ui/label'
+import { Checkbox } from '@/components/ui/checkbox'
+import {
+  Dialog,
+  DialogContent,
+  DialogHeader,
+  DialogTitle,
+  DialogFooter,
+} from '@/components/ui/dialog'
 import {
   Plus,
   Search,
@@ -26,6 +34,7 @@ import {
   Loader2,
   FileSpreadsheet,
   X,
+  Copy,
 } from 'lucide-react'
 
 type Question = {
@@ -127,8 +136,21 @@ export default function QuizQuestionsPage() {
   const [genTotal, setGenTotal] = useState(0)
   const [genStatus, setGenStatus] = useState('')
 
-  // Import state
+  // Import from Excel state
   const [isImporting, setIsImporting] = useState(false)
+
+  // Import from Quiz state
+  type QuizSetSummary = { id: string; title: string; questionCount: number }
+  type QuizQuestionSummary = { id: string; stem: string; questionType: string; difficulty: string; points: number }
+  const [showImportQuizDialog, setShowImportQuizDialog] = useState(false)
+  const [importQuizSearch, setImportQuizSearch] = useState('')
+  const [importQuizSets, setImportQuizSets] = useState<QuizSetSummary[]>([])
+  const [importQuizLoading, setImportQuizLoading] = useState(false)
+  const [selectedSourceQuiz, setSelectedSourceQuiz] = useState<QuizSetSummary | null>(null)
+  const [sourceQuestions, setSourceQuestions] = useState<QuizQuestionSummary[]>([])
+  const [sourceQuestionsLoading, setSourceQuestionsLoading] = useState(false)
+  const [selectedQuestionIds, setSelectedQuestionIds] = useState<string[]>([])
+  const [isImportingFromQuiz, setIsImportingFromQuiz] = useState(false)
 
   useEffect(() => {
     fetchQuestions()
@@ -429,6 +451,63 @@ export default function QuizQuestionsPage() {
     } finally {
       setIsImporting(false)
       if (importFileRef.current) importFileRef.current.value = ''
+    }
+  }
+
+  // ── Import from Quiz ─────────────────────────────────────────────────────────
+  const openImportQuizDialog = async () => {
+    setShowImportQuizDialog(true)
+    setSelectedSourceQuiz(null)
+    setSourceQuestions([])
+    setSelectedQuestionIds([])
+    setImportQuizSearch('')
+    await searchImportQuizSets('')
+  }
+
+  const searchImportQuizSets = async (q: string) => {
+    setImportQuizLoading(true)
+    try {
+      const res = await fetch(`/api/quiz-sets/${params.quizId}/import-questions?search=${encodeURIComponent(q)}`)
+      if (res.ok) setImportQuizSets(await res.json())
+    } catch {}
+    setImportQuizLoading(false)
+  }
+
+  const selectSourceQuiz = async (qs: QuizSetSummary) => {
+    setSelectedSourceQuiz(qs)
+    setSelectedQuestionIds([])
+    setSourceQuestionsLoading(true)
+    try {
+      const res = await fetch(`/api/quiz-sets/${qs.id}/questions`)
+      if (res.ok) {
+        const data: QuizQuestionSummary[] = await res.json()
+        setSourceQuestions(data)
+      }
+    } catch {}
+    setSourceQuestionsLoading(false)
+  }
+
+  const handleImportFromQuiz = async () => {
+    if (!selectedSourceQuiz || selectedQuestionIds.length === 0) return
+    setIsImportingFromQuiz(true)
+    try {
+      const res = await fetch(`/api/quiz-sets/${params.quizId}/import-questions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sourceQuizSetId: selectedSourceQuiz.id,
+          questionIds: selectedQuestionIds,
+        }),
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Import failed')
+      toast({ title: `Imported ${data.imported} questions successfully` })
+      fetchQuestions()
+      setShowImportQuizDialog(false)
+    } catch (err) {
+      toast({ title: 'Import failed', description: String(err), variant: 'destructive' })
+    } finally {
+      setIsImportingFromQuiz(false)
     }
   }
 
@@ -846,6 +925,12 @@ export default function QuizQuestionsPage() {
             Generate with AI
           </Button>
 
+          {/* Import from Quiz */}
+          <Button variant="outline" size="sm" onClick={openImportQuizDialog}>
+            <Copy className="h-4 w-4 mr-2" />
+            Import from Quiz
+          </Button>
+
           {/* Add Manual */}
           <Button variant="outline" size="sm" onClick={() => { setIsAdding(true); resetNewQuestion() }}>
             <Plus className="h-4 w-4 mr-2" />
@@ -960,21 +1045,21 @@ export default function QuizQuestionsPage() {
               </div>
 
               {/* Question types */}
-              <div className="space-y-1.5">
+              <div className="space-y-1.5 col-span-2">
                 <Label className="text-xs text-gray-600">Question types</Label>
                 <div className="flex gap-1.5 flex-wrap pt-1">
-                  {['MCQ', 'TRUE_FALSE', 'SHORT_ANSWER', 'FILL_BLANK', 'ESSAY'].map((type) => (
+                  {ALL_QUESTION_TYPES.filter(t => t.value !== 'TEXT_BLOCK').map((t) => (
                     <button
-                      key={type}
-                      onClick={() => toggleAIType(type)}
+                      key={t.value}
+                      onClick={() => toggleAIType(t.value)}
                       disabled={isGenerating}
                       className={`text-xs px-2.5 py-1 rounded-full border transition-colors ${
-                        aiTypes.includes(type)
+                        aiTypes.includes(t.value)
                           ? 'bg-[#028a39] text-white border-[#028a39]'
                           : 'bg-white text-gray-600 border-gray-200 hover:border-[#028a39]'
                       }`}
                     >
-                      {TYPE_LABEL[type] || type}
+                      {TYPE_LABEL[t.value] || t.value}
                     </button>
                   ))}
                 </div>
@@ -1431,6 +1516,154 @@ export default function QuizQuestionsPage() {
           })}
         </div>
       )}
+
+      {/* Import from Quiz Dialog */}
+      <Dialog open={showImportQuizDialog} onOpenChange={setShowImportQuizDialog}>
+        <DialogContent className="max-w-2xl max-h-[80vh] flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Copy className="h-5 w-5" />
+              Import Questions from Another Quiz
+            </DialogTitle>
+          </DialogHeader>
+
+          <div className="flex-1 overflow-hidden flex flex-col gap-4 py-2">
+            {!selectedSourceQuiz ? (
+              // Step 1: Select quiz set
+              <>
+                <div className="space-y-2">
+                  <Label>Search Quiz Sets</Label>
+                  <div className="flex gap-2">
+                    <Input
+                      placeholder="Search by title..."
+                      value={importQuizSearch}
+                      onChange={(e) => setImportQuizSearch(e.target.value)}
+                      onKeyDown={(e) => e.key === 'Enter' && searchImportQuizSets(importQuizSearch)}
+                    />
+                    <Button variant="outline" onClick={() => searchImportQuizSets(importQuizSearch)} disabled={importQuizLoading}>
+                      <Search className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+
+                <div className="flex-1 overflow-y-auto space-y-2">
+                  {importQuizLoading && (
+                    <div className="flex items-center justify-center py-8">
+                      <Loader2 className="h-6 w-6 animate-spin text-primary" />
+                    </div>
+                  )}
+                  {!importQuizLoading && importQuizSets.length === 0 && (
+                    <p className="text-center text-gray-400 py-8">No other quiz sets found</p>
+                  )}
+                  {importQuizSets.map((qs) => (
+                    <Card
+                      key={qs.id}
+                      className="cursor-pointer hover:border-primary transition-colors"
+                      onClick={() => selectSourceQuiz(qs)}
+                    >
+                      <CardContent className="p-4 flex items-center justify-between">
+                        <div>
+                          <p className="font-medium">{qs.title}</p>
+                          <p className="text-sm text-gray-500">{qs.questionCount} questions</p>
+                        </div>
+                        <ChevronDown className="h-4 w-4 text-gray-400 -rotate-90" />
+                      </CardContent>
+                    </Card>
+                  ))}
+                </div>
+              </>
+            ) : (
+              // Step 2: Select questions from chosen quiz
+              <>
+                <div className="flex items-center gap-2">
+                  <Button variant="ghost" size="sm" onClick={() => setSelectedSourceQuiz(null)}>
+                    <ChevronDown className="h-4 w-4 rotate-90" />
+                    Back
+                  </Button>
+                  <div>
+                    <p className="font-semibold">{selectedSourceQuiz.title}</p>
+                    <p className="text-xs text-gray-500">{selectedSourceQuiz.questionCount} questions</p>
+                  </div>
+                </div>
+
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      if (selectedQuestionIds.length === sourceQuestions.length) {
+                        setSelectedQuestionIds([])
+                      } else {
+                        setSelectedQuestionIds(sourceQuestions.map((q) => q.id))
+                      }
+                    }}
+                  >
+                    {selectedQuestionIds.length === sourceQuestions.length ? 'Deselect All' : 'Select All'}
+                  </Button>
+                  {selectedQuestionIds.length > 0 && (
+                    <span className="text-sm text-primary font-medium">{selectedQuestionIds.length} selected</span>
+                  )}
+                </div>
+
+                <div className="flex-1 overflow-y-auto space-y-2">
+                  {sourceQuestionsLoading ? (
+                    <div className="flex items-center justify-center py-8">
+                      <Loader2 className="h-6 w-6 animate-spin text-primary" />
+                    </div>
+                  ) : (
+                    sourceQuestions.map((q) => (
+                      <div
+                        key={q.id}
+                        className={`flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-colors ${
+                          selectedQuestionIds.includes(q.id)
+                            ? 'border-primary bg-primary/5'
+                            : 'border-gray-200 hover:border-gray-300'
+                        }`}
+                        onClick={() =>
+                          setSelectedQuestionIds((prev) =>
+                            prev.includes(q.id) ? prev.filter((id) => id !== q.id) : [...prev, q.id]
+                          )
+                        }
+                      >
+                        <Checkbox
+                          checked={selectedQuestionIds.includes(q.id)}
+                          onCheckedChange={() => {}}
+                          className="mt-0.5"
+                        />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium line-clamp-2">{q.stem}</p>
+                          <div className="flex gap-1.5 mt-1">
+                            <Badge variant="outline" className="text-xs">{TYPE_LABEL[q.questionType] || q.questionType}</Badge>
+                            <Badge variant="outline" className="text-xs">{q.difficulty}</Badge>
+                            <Badge variant="secondary" className="text-xs">{q.points}pt</Badge>
+                          </div>
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </>
+            )}
+          </div>
+
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setShowImportQuizDialog(false)}>Cancel</Button>
+            {selectedSourceQuiz && (
+              <Button
+                onClick={handleImportFromQuiz}
+                disabled={selectedQuestionIds.length === 0 || isImportingFromQuiz}
+                className="bg-[#028a39] hover:bg-[#026d2e] text-white"
+              >
+                {isImportingFromQuiz ? (
+                  <><Loader2 className="h-4 w-4 mr-2 animate-spin" />Importing...</>
+                ) : (
+                  <>Import {selectedQuestionIds.length} Question{selectedQuestionIds.length !== 1 ? 's' : ''}</>
+                )}
+              </Button>
+            )}
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

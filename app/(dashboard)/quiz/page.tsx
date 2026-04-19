@@ -18,7 +18,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from '@/components/ui/alert-dialog'
-import { Plus, Puzzle, Share2, BarChart2, Copy, Trash2, Sparkles, PenLine, FileSpreadsheet, Loader2, ChevronDown } from 'lucide-react'
+import { Plus, Puzzle, Share2, BarChart2, Copy, Trash2, Sparkles, PenLine, FileSpreadsheet, Loader2, ChevronDown, Layers } from 'lucide-react'
 import { formatDate } from '@/lib/utils'
 
 type QuizSet = {
@@ -275,6 +275,11 @@ export default function QuizPage() {
                     title="Copy share link"
                   >
                     <Share2 className="h-3.5 w-3.5" />
+                  </Button>
+                  <Button asChild size="sm" variant="outline" title="Variants">
+                    <Link href={`/quiz/${quiz.id}/variants`}>
+                      <Layers className="h-3.5 w-3.5" />
+                    </Link>
                   </Button>
                   <Button asChild size="sm" variant="outline" title="Results">
                     <Link href={`/quiz/${quiz.id}/results`}>

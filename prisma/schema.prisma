@@ -363,6 +363,7 @@ model QuizSet {
   questions   QuizQuestion[]
   attempts    Attempt[]
   documents   QuizDocument[]
+  variants    QuizVariant[]
 
   @@map("testsgen_quiz_sets")
 }
@@ -401,6 +402,27 @@ model QuizQuestion {
   attemptAnswers AttemptAnswer[]
 
   @@map("testsgen_quiz_questions")
+}
+
+model QuizVariant {
+  id                  String        @id @default(cuid())
+  quizSetId           String
+  name                String        // e.g. "Variant A", "Hard Mode"
+  description         String?
+  // Override quiz settings per variant
+  questionsPerAttempt Int?
+  timeLimitMinutes    Int?
+  passMark            Int?
+  randomizeQuestions  Boolean?      // null = inherit from parent
+  displayMode         DisplayMode?
+  questionFilter      String?       // JSON: { poolTags?: string[], difficulty?: string, maxQuestions?: number }
+  createdAt           DateTime      @default(now())
+  updatedAt           DateTime      @updatedAt
+
+  // Relations
+  quizSet QuizSet @relation(fields: [quizSetId], references: [id], onDelete: Cascade)
+
+  @@map("testsgen_quiz_variants")
 }
 
 model SystemSetting {
