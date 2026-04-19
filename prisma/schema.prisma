@@ -274,6 +274,9 @@ model Attempt {
   guestEmail        String?
   questionsSnapshot Json?         // snapshot of questions at time of attempt
 
+  quizClassId     String?
+  quizClass       QuizClass?     @relation("ClassAttempts", fields: [quizClassId], references: [id])
+
   // Relations
   user     User?          @relation(fields: [userId], references: [id])
   mockExam MockExam?      @relation(fields: [mockExamId], references: [id])
@@ -376,6 +379,7 @@ model QuizSet {
   attempts    Attempt[]
   documents   QuizDocument[]
   variants    QuizVariant[]
+  classes     QuizClass[]    @relation("QuizSetClasses")
 
   @@map("testsgen_quiz_sets")
 }
@@ -441,6 +445,43 @@ model QuizVariant {
   attempts Attempt[]
 
   @@map("testsgen_quiz_variants")
+}
+
+model QuizClass {
+  id              String   @id @default(cuid())
+  name            String
+  description     String?
+  shareCode       String   @unique @default(cuid())
+  
+  // Parent quiz set
+  quizSetId       String
+  quizSet         QuizSet  @relation("QuizSetClasses", fields: [quizSetId], references: [id], onDelete: Cascade)
+  
+  // Settings (override parent)
+  timeLimitMinutes      Int?
+  questionsPerAttempt   Int?
+  passMark              Int?
+  randomizeQuestions    Boolean   @default(true)
+  shuffleAnswerOptions  Boolean   @default(false)
+  disablePrevButton     Boolean   @default(false)
+  displayMode           String?   @default("ONE_AT_ONCE")
+  requireLogin          Boolean   @default(false)
+  maxAttempts           Int?
+  
+  // Fixed question set (JSON array of question IDs)
+  // null = use all questions from parent (with randomization/pool settings)
+  fixedQuestionIds      String?
+  
+  // Email settings
+  autoSendResults       Boolean   @default(false)
+  autoSendResultType    String?   @default("comprehensive")
+  
+  attempts        Attempt[]   @relation("ClassAttempts")
+  
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@map("testsgen_quiz_classes")
 }
 
 model SystemSetting {

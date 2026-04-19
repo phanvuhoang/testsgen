@@ -19,6 +19,7 @@ function buildTestMozWorkbook(
     correctAnswer: string | null
     explanation: string | null
     points: number
+    partialCredit?: boolean
   }[],
   title: string
 ): XLSX.WorkBook {
@@ -28,40 +29,73 @@ function buildTestMozWorkbook(
     const opts = (q.options ?? []) as string[]
     const correct = q.correctAnswer ?? ''
     const explanation = q.explanation ?? null
+    const pointsCell = q.partialCredit ? `~${q.points}` : q.points
 
-    if (q.questionType === 'SHORT_ANSWER') {
-      // TestMoz short answer: col C = "short"
-      rows.push([q.stem, q.points, 'short', explanation])
-      rows.push(['*', correct, null, null])
+    if (q.questionType === 'ESSAY' || q.questionType === 'LONG_ANSWER') {
+      // Essay: question + points, no answer rows
+      rows.push([q.stem, q.points, null, explanation])
+    } else if (q.questionType === 'SHORT_ANSWER') {
+      // Short answer: col C = "short", correct answers become fill-in-blank style (all marked *)
+      rows.push([q.stem, pointsCell, 'short', explanation])
+      // Each || variant is a separate accepted answer row
+      const variants = correct.split('||').map(s => s.trim()).filter(Boolean)
+      for (const v of variants) {
+        rows.push(['*', v, null, null])
+      }
+    } else if (q.questionType === 'FILL_BLANK') {
+      // Fill-in-blank: ALL answer rows have *, each variant is a separate accepted answer
+      rows.push([q.stem, pointsCell, null, explanation])
+      const variants = correct.split('||').map(s => s.trim()).filter(Boolean)
+      if (variants.length === 0) variants.push(correct)
+      for (const v of variants) {
+        rows.push(['*', v, null, null])
+      }
     } else if (q.questionType === 'TRUE_FALSE') {
-      rows.push([q.stem, q.points, 'shuffle', explanation])
-      const trueAnswer = ['true', 'đúng'].includes((correct ?? '').toLowerCase())
-      rows.push([trueAnswer ? '*' : null, 'True', null, null])
-      rows.push([!trueAnswer ? '*' : null, 'False', null, null])
-    } else {
-      // MCQ
-      rows.push([q.stem, q.points, 'shuffle', explanation])
+      rows.push([q.stem, pointsCell, 'shuffle', explanation])
+      const isTrue = ['true', 'đúng'].includes((correct ?? '').toLowerCase())
+      rows.push([isTrue ? '*' : null, 'True', null, null])
+      rows.push([!isTrue ? '*' : null, 'False', null, null])
+    } else if (q.questionType === 'MULTIPLE_RESPONSE') {
+      // Choose many: SOME answers have *
+      rows.push([q.stem, pointsCell, 'shuffle', explanation])
+      const correctSet = new Set(
+        correct.split('||').map(s => s.trim().toLowerCase())
+      )
       for (const opt of opts) {
-        const isCorrect = opt.toLowerCase().trim() === correct.toLowerCase().trim()
+        const isCorrect = correctSet.has(opt.trim().toLowerCase())
+        rows.push([isCorrect ? '*' : null, opt, null, null])
+      }
+    } else if (q.questionType === 'MATCHING') {
+      // Matching: clue in col B, answer in col C, both marked *
+      rows.push([q.stem, pointsCell, null, explanation])
+      // options are stored as "clue::answer" pairs or separate arrays
+      // Try to parse options as pairs
+      for (const opt of opts) {
+        const parts = opt.split('::')
+        if (parts.length >= 2) {
+          rows.push(['*', parts[0].trim(), parts[1].trim(), null])
+        } else {
+          rows.push(['*', opt, null, null])
+        }
+      }
+    } else {
+      // MCQ (choose one): ONE answer has *
+      rows.push([q.stem, pointsCell, 'shuffle', explanation])
+      for (const opt of opts) {
+        const isCorrect = opt.trim().toLowerCase() === correct.trim().toLowerCase()
         rows.push([isCorrect ? '*' : null, opt, null, null])
       }
     }
 
-    // Blank separator row
+    // Blank separator row between questions
     rows.push([null, null, null, null])
   }
 
-  // Add END marker
-  rows.push(['END', null, null, null])
+  // DO NOT add END row (per user requirement)
 
   const ws = XLSX.utils.aoa_to_sheet(rows)
-
-  // Set column widths
   ws['!cols'] = [
-    { wch: 80 }, // A: question/answer text
-    { wch: 12 }, // B: points / answer
-    { wch: 12 }, // C: options
-    { wch: 60 }, // D: explanation
+    { wch: 80 }, { wch: 12 }, { wch: 20 }, { wch: 60 },
   ]
 
   const wb = XLSX.utils.book_new()

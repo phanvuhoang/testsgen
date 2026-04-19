@@ -1,6 +1,16 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 
+// Remove Vietnamese diacritics for accent-insensitive comparison
+function removeAccents(str: string): string {
+  return str
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '') // remove combining diacritical marks
+    .replace(/đ/g, 'd').replace(/Đ/g, 'D')
+    .toLowerCase()
+    .trim()
+}
+
 // POST /api/quiz/[shareCode]/attempt/[attemptId]/submit
 // Finalize attempt: auto-grade MCQ/TRUE_FALSE, compute score
 export async function POST(
@@ -76,21 +86,24 @@ export async function POST(
         userAnswer.trim().toLowerCase() ===
         (q.correctAnswer ?? "").trim().toLowerCase();
     } else if (q.questionType === "SHORT_ANSWER") {
-      // Case-insensitive match; accept any correct answer variant (||‐delimited)
+      const userNorm = removeAccents(userAnswer)
       const correctVariants = (q.correctAnswer ?? "")
         .split("||")
-        .map((s) => s.trim().toLowerCase())
-        .filter(Boolean)
-      isCorrect = correctVariants.includes(userAnswer.trim().toLowerCase())
-    } else if (q.questionType === "FILL_BLANK") {
-      // Case-insensitive, trimmed match; also accept ||‐delimited variants
-      const correctVariants = (q.correctAnswer ?? "")
-        .split("||")
-        .map((s) => s.trim().toLowerCase())
+        .map((s) => removeAccents(s))
         .filter(Boolean)
       isCorrect = correctVariants.length > 0
-        ? correctVariants.includes(userAnswer.trim().toLowerCase())
-        : userAnswer.trim().toLowerCase() === (q.correctAnswer ?? "").trim().toLowerCase()
+        ? correctVariants.includes(userNorm)
+        : removeAccents(userAnswer) === removeAccents(q.correctAnswer ?? "")
+    } else if (q.questionType === "FILL_BLANK") {
+      // Case-insensitive + accent-insensitive match; accept ||-delimited variants
+      const userNorm = removeAccents(userAnswer)
+      const correctVariants = (q.correctAnswer ?? "")
+        .split("||")
+        .map((s) => removeAccents(s))
+        .filter(Boolean)
+      isCorrect = correctVariants.length > 0
+        ? correctVariants.some(v => removeAccents(userAnswer) === v || userNorm === v)
+        : removeAccents(userAnswer) === removeAccents(q.correctAnswer ?? "")
     } else if (q.questionType === "MULTIPLE_RESPONSE") {
       // Compare sorted arrays (answers separated by ||)
       const userSet = userAnswer

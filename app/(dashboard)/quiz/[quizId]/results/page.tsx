@@ -15,7 +15,7 @@ import {
   DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger
 } from '@/components/ui/dropdown-menu'
 import {
-  Download, Search, Users, TrendingUp, CheckCircle2, Award, Eye, BarChart2, Mail, ChevronDown
+  Download, Search, Users, TrendingUp, CheckCircle2, Award, Eye, BarChart2, Mail, ChevronDown, Trash2
 } from 'lucide-react'
 
 type AnswerDetail = {
@@ -69,6 +69,8 @@ export default function QuizResultsPage() {
   const [selectedAttempt, setSelectedAttempt] = useState<Attempt | null>(null)
   const [loadingAnswers, setLoadingAnswers] = useState(false)
   const [isSending, setIsSending] = useState(false)
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [isDeleting, setIsDeleting] = useState(false)
 
   useEffect(() => { fetchData() }, [])
 
@@ -139,8 +141,29 @@ export default function QuizResultsPage() {
     }
   }
 
+  const handleDelete = async () => {
+    if (selectedIds.size === 0) return
+    if (!confirm(`Delete ${selectedIds.size} submission(s)? This cannot be undone.`)) return
+    setIsDeleting(true)
+    try {
+      const res = await fetch(`/api/quiz-sets/${params.quizId}/attempts/delete`, {
+        method: 'DELETE',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ attemptIds: Array.from(selectedIds) })
+      })
+      const data = await res.json()
+      toast({ title: `Deleted ${data.deleted} submission(s)` })
+      setSelectedIds(new Set())
+      fetchData()
+    } catch {
+      toast({ title: 'Failed to delete', variant: 'destructive' })
+    } finally {
+      setIsDeleting(false)
+    }
+  }
+
   const handleSendOne = async (attemptId: string) => {
-    const type = prompt('Send type: score, analytics, or comprehensive?', 'score')
+    const type = prompt('Send type: score, analytics, or comprehensive?', 'comprehensive')
     if (!type) return
     setIsSending(true)
     try {
@@ -185,6 +208,12 @@ export default function QuizResultsPage() {
           <Button variant="outline" size="sm" onClick={handleExport}>
             <Download className="h-4 w-4 mr-2" />Export CSV
           </Button>
+          {selectedIds.size > 0 && (
+            <Button variant="destructive" size="sm" onClick={handleDelete} disabled={isDeleting}>
+              <Trash2 className="h-4 w-4 mr-2" />
+              Delete Selected ({selectedIds.size})
+            </Button>
+          )}
           <DropdownMenu>
             <DropdownMenuTrigger asChild>
               <Button variant="outline" size="sm" disabled={isSending}>
@@ -194,14 +223,14 @@ export default function QuizResultsPage() {
               </Button>
             </DropdownMenuTrigger>
             <DropdownMenuContent align="end">
-              <DropdownMenuItem onClick={() => handleSendAll('score')}>
-                📊 Score only
+              <DropdownMenuItem onClick={() => handleSendAll('comprehensive')}>
+                📄 Comprehensive (recommended)
               </DropdownMenuItem>
               <DropdownMenuItem onClick={() => handleSendAll('analytics')}>
                 📋 Analytics (correct/incorrect per question)
               </DropdownMenuItem>
-              <DropdownMenuItem onClick={() => handleSendAll('comprehensive')}>
-                📄 Comprehensive (answers + correct answers + explanations)
+              <DropdownMenuItem onClick={() => handleSendAll('score')}>
+                📊 Score only
               </DropdownMenuItem>
             </DropdownMenuContent>
           </DropdownMenu>
@@ -293,6 +322,16 @@ export default function QuizResultsPage() {
               <table className="w-full text-sm">
                 <thead className="bg-gray-50 border-b">
                   <tr>
+                    <th className="p-3 w-10">
+                      <input
+                        type="checkbox"
+                        checked={filtered.length > 0 && filtered.every(a => selectedIds.has(a.id))}
+                        onChange={(e) => {
+                          if (e.target.checked) setSelectedIds(new Set(filtered.map(a => a.id)))
+                          else setSelectedIds(new Set())
+                        }}
+                      />
+                    </th>
                     <th className="text-left p-3">Name</th>
                     <th className="text-left p-3">Email</th>
                     <th className="text-right p-3">Score</th>
@@ -309,6 +348,18 @@ export default function QuizResultsPage() {
                       : null
                     return (
                       <tr key={attempt.id} className="hover:bg-gray-50">
+                        <td className="p-3">
+                          <input
+                            type="checkbox"
+                            checked={selectedIds.has(attempt.id)}
+                            onChange={(e) => {
+                              const next = new Set(selectedIds)
+                              if (e.target.checked) next.add(attempt.id)
+                              else next.delete(attempt.id)
+                              setSelectedIds(next)
+                            }}
+                          />
+                        </td>
                         <td className="p-3 font-medium">{attempt.user?.name || attempt.guestName || 'Guest'}</td>
                         <td className="p-3 text-gray-500">{attempt.user?.email || attempt.guestEmail || '—'}</td>
                         <td className="p-3 text-right">

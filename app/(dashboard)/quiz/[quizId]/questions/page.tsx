@@ -689,17 +689,45 @@ export default function QuizQuestionsPage() {
         {(qt === 'MCQ' || qt === 'MULTIPLE_RESPONSE') && options && (
           <div className="space-y-1">
             {options.map((opt: string, i: number) => (
-              <Input
-                key={i}
-                value={opt}
-                onChange={(e) => {
-                  const opts = [...(Array.isArray(editForm.options) ? editForm.options as string[] : options)]
-                  opts[i] = e.target.value
-                  setEditForm({ ...editForm, options: opts })
-                }}
-                placeholder={`Option ${String.fromCharCode(65 + i)}`}
-                className="h-8 text-xs"
-              />
+              <div key={i} className="flex items-center gap-1">
+                <Input
+                  value={opt}
+                  onChange={(e) => {
+                    const opts = [...(Array.isArray(editForm.options) ? editForm.options as string[] : options)]
+                    opts[i] = e.target.value
+                    setEditForm({ ...editForm, options: opts })
+                  }}
+                  placeholder={`Option ${String.fromCharCode(65 + i)}`}
+                  className="h-8 text-xs flex-1"
+                />
+                <input
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  id={`edit-img-upload-${i}`}
+                  onChange={async (e) => {
+                    const f = e.target.files?.[0]
+                    if (!f) return
+                    const fd = new FormData()
+                    fd.append('file', f)
+                    const res = await fetch('/api/upload-image', { method: 'POST', body: fd })
+                    const data = await res.json()
+                    if (data.url) {
+                      const opts = [...(Array.isArray(editForm.options) ? editForm.options as string[] : options)]
+                      opts[i] = `<img src="${data.url}" style="max-height:80px;max-width:120px;object-fit:contain;vertical-align:middle;margin-right:4px" />${opts[i]}`
+                      setEditForm({ ...editForm, options: opts })
+                    }
+                    e.target.value = ''
+                  }}
+                />
+                <label
+                  htmlFor={`edit-img-upload-${i}`}
+                  className="cursor-pointer p-1 rounded hover:bg-gray-100 shrink-0"
+                  title="Add image to option"
+                >
+                  <span className="text-sm">📷</span>
+                </label>
+              </div>
             ))}
             <Input
               value={editForm.correctAnswer || ''}
@@ -1239,7 +1267,7 @@ export default function QuizQuestionsPage() {
               <div className="space-y-2">
                 <Label className="text-xs text-gray-600">Options</Label>
                 {newQuestion.options.map((opt, i) => (
-                  <div key={i} className="flex gap-2">
+                  <div key={i} className="flex gap-2 items-center">
                     <Input
                       placeholder={`Option ${String.fromCharCode(65 + i)}`}
                       value={opt}
@@ -1248,8 +1276,35 @@ export default function QuizQuestionsPage() {
                         opts[i] = e.target.value
                         setNewQuestion({ ...newQuestion, options: opts })
                       }}
-                      className="h-9"
+                      className="h-9 flex-1"
                     />
+                    <input
+                      type="file"
+                      accept="image/*"
+                      className="hidden"
+                      id={`new-img-upload-${i}`}
+                      onChange={async (e) => {
+                        const f = e.target.files?.[0]
+                        if (!f) return
+                        const fd = new FormData()
+                        fd.append('file', f)
+                        const res = await fetch('/api/upload-image', { method: 'POST', body: fd })
+                        const data = await res.json()
+                        if (data.url) {
+                          const opts = [...newQuestion.options]
+                          opts[i] = `<img src="${data.url}" style="max-height:80px;max-width:120px;object-fit:contain;vertical-align:middle;margin-right:4px" />${opts[i]}`
+                          setNewQuestion({ ...newQuestion, options: opts })
+                        }
+                        e.target.value = ''
+                      }}
+                    />
+                    <label
+                      htmlFor={`new-img-upload-${i}`}
+                      className="cursor-pointer p-1 rounded hover:bg-gray-100 shrink-0"
+                      title="Add image to option"
+                    >
+                      <span className="text-sm">📷</span>
+                    </label>
                     {newQuestion.options.length > 2 && (
                       <Button
                         variant="ghost"

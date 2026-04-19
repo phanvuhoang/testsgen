@@ -18,12 +18,13 @@ import * as XLSX from 'xlsx'
 
 type QuestionRow = {
   stem: string
-  questionType: 'MCQ' | 'TRUE_FALSE' | 'SHORT_ANSWER'
+  questionType: 'MCQ' | 'TRUE_FALSE' | 'SHORT_ANSWER' | 'FILL_BLANK' | 'MULTIPLE_RESPONSE' | 'ESSAY' | 'LONG_ANSWER' | 'MATCHING' | 'TEXT_BLOCK'
   options: string[]
   correctAnswer: string
   explanation: string | null
   difficulty: 'EASY' | 'MEDIUM' | 'HARD'
   points: number
+  partialCredit: boolean
 }
 
 function parseTestMozExcel(buffer: Buffer): QuestionRow[] {
@@ -31,106 +32,150 @@ function parseTestMozExcel(buffer: Buffer): QuestionRow[] {
   const sheetName = workbook.SheetNames[0]
   const sheet = workbook.Sheets[sheetName]
   const rows: (string | number | null)[][] = XLSX.utils.sheet_to_json(sheet, {
-    header: 1,
-    defval: null,
-    raw: false,
+    header: 1, defval: null, raw: false,
   }) as (string | number | null)[][]
 
   const questions: QuestionRow[] = []
   let i = 0
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  let inPool = false
+
+  // Check for HTML flag in row 1
+  if (rows[0] && String(rows[0][0] ?? '').trim().toUpperCase() === 'HTML') {
+    i = 1
+  }
 
   while (i < rows.length) {
     const row = rows[i]
+    const colA = String(row?.[0] ?? '').trim()
+    const colB = row?.[1]
+    const colC = String(row?.[2] ?? '').trim()
+    const colD = String(row?.[3] ?? '').trim()
 
     // Skip blank rows
-    if (!row || !row[0]) {
+    if (!colA && !colB) { i++; continue }
+
+    // POOL marker
+    if (colA.toUpperCase() === 'POOL') { inPool = true; i++; continue }
+
+    // END marker — ends pool, continue parsing
+    if (colA.toUpperCase() === 'END') { inPool = false; i++; continue }
+
+    // Skip asterisk rows at top level (shouldn't happen but guard)
+    if (colA === '*') { i++; continue }
+
+    // Parse points from col B
+    let points = 1
+    let partialCredit = false
+    if (colB !== null && colB !== undefined) {
+      const bStr = String(colB).trim()
+      if (bStr.startsWith('~')) {
+        partialCredit = true
+        points = parseFloat(bStr.slice(1)) || 1
+      } else {
+        const n = parseFloat(bStr)
+        if (!isNaN(n)) points = n
+      }
+    }
+
+    const explanation = colD || null
+    const flags = colC.toLowerCase().split(',').map(s => s.trim())
+    const stem = colA
+
+    i++ // move to first answer row
+
+    // Collect answer rows
+    const answerRows: { colA: string; colB: string; colC: string }[] = []
+    while (i < rows.length) {
+      const aRow = rows[i]
+      const aA = String(aRow?.[0] ?? '').trim()
+      const aB = String(aRow?.[1] ?? '').trim()
+      const aC = String(aRow?.[2] ?? '').trim()
+
+      // Blank row = end of question
+      if (!aA && !aB && !aC) break
+      // END or POOL = end of question
+      if (aA.toUpperCase() === 'END' || aA.toUpperCase() === 'POOL') break
+      // Non-empty col A that's not '*' = next question
+      if (aA && aA !== '*') break
+
+      answerRows.push({ colA: aA, colB: aB, colC: aC })
       i++
+    }
+
+    // Determine question type
+    // Explicit flag overrides
+    const hasExplicitOne = flags.includes('one')
+    const hasExplicitMany = flags.includes('many')
+    const hasShort = flags.includes('short')
+    const hasLong = flags.includes('long')
+    const isText = flags.includes('text')
+
+    if (isText && answerRows.length === 0) {
+      // Text block — import as TEXT_BLOCK
+      questions.push({ stem, questionType: 'TEXT_BLOCK', options: [], correctAnswer: '', explanation, difficulty: 'MEDIUM', points, partialCredit })
       continue
     }
 
-    const colA = String(row[0] ?? '').trim()
-    const colB = row[1]
-    const colC = String(row[2] ?? '').trim().toLowerCase()
-    const colD = String(row[3] ?? '').trim()
-
-    // Skip special markers: POOL, END, text blocks without answer rows
-    if (colA === 'END' || colA === 'POOL') {
-      i++
+    if (hasShort) {
+      // Short answer — collect all * rows as accepted variants
+      const variants = answerRows.filter(r => r.colA === '*').map(r => r.colB).filter(Boolean)
+      questions.push({ stem, questionType: 'SHORT_ANSWER', options: [], correctAnswer: variants.join('||') || '', explanation, difficulty: 'MEDIUM', points, partialCredit })
       continue
     }
 
-    // Detect if this is a question row: col A is non-empty AND not "*"
-    if (colA && colA !== '*') {
-      // Parse points
-      let points = 1
-      if (colB !== null && colB !== undefined) {
-        const bStr = String(colB).trim()
-        if (bStr.startsWith('~')) {
-          points = parseFloat(bStr.slice(1)) || 1
-        } else {
-          const n = parseFloat(bStr)
-          if (!isNaN(n)) points = n
-        }
-      }
-
-      // Explanation from col D
-      const explanation = colD || null
-
-      // Collect answer rows (following rows where col A is empty or "*")
-      const options: string[] = []
-      const correctAnswers: string[] = []
-      i++
-
-      while (i < rows.length) {
-        const aRow = rows[i]
-        const aColA = String(aRow?.[0] ?? '').trim()
-        const aColB = String(aRow?.[1] ?? '').trim()
-
-        // Blank row = end of this question
-        if (!aRow || (!aColA && !aColB)) break
-
-        // If col A is non-empty and not "*", it's the next question
-        if (aColA && aColA !== '*') break
-
-        if (aColB) {
-          options.push(aColB)
-          if (aColA === '*') {
-            correctAnswers.push(aColB)
-          }
-        }
-        i++
-      }
-
-      if (options.length === 0) {
-        // No answer rows — skip (text block, essay, etc.)
-        continue
-      }
-
-      // Determine question type
-      let questionType: 'MCQ' | 'TRUE_FALSE' | 'SHORT_ANSWER' = 'MCQ'
-      if (
-        options.length === 2 &&
-        options.every((o) => ['true', 'false', 'đúng', 'sai'].includes(o.toLowerCase()))
-      ) {
-        questionType = 'TRUE_FALSE'
-      } else if (colC === 'short' || colC === 'long') {
-        questionType = 'SHORT_ANSWER'
-      }
-
-      const correctAnswer = correctAnswers[0] ?? options[0]
-
-      questions.push({
-        stem: colA,
-        questionType,
-        options,
-        correctAnswer,
-        explanation,
-        difficulty: 'MEDIUM',
-        points,
-      })
-    } else {
-      i++
+    if (hasLong) {
+      questions.push({ stem, questionType: 'LONG_ANSWER', options: [], correctAnswer: '', explanation, difficulty: 'MEDIUM', points, partialCredit })
+      continue
     }
+
+    // No answer rows + no short/long flag = essay
+    if (answerRows.length === 0) {
+      questions.push({ stem, questionType: 'ESSAY', options: [], correctAnswer: '', explanation, difficulty: 'MEDIUM', points, partialCredit })
+      continue
+    }
+
+    // Check if matching: some rows have both colB and colC
+    const isMatching = answerRows.some(r => r.colC && r.colB)
+    if (isMatching) {
+      const opts = answerRows.map(r => `${r.colB}::${r.colC}`)
+      const correctOpts = answerRows.filter(r => r.colA === '*').map(r => `${r.colB}::${r.colC}`)
+      questions.push({ stem, questionType: 'MATCHING', options: opts, correctAnswer: correctOpts.join('||'), explanation, difficulty: 'MEDIUM', points, partialCredit })
+      continue
+    }
+
+    const options = answerRows.map(r => r.colB).filter(Boolean)
+    const correctRows = answerRows.filter(r => r.colA === '*')
+    const correctAnswers = correctRows.map(r => r.colB).filter(Boolean)
+    const allCorrect = answerRows.length > 0 && correctRows.length === answerRows.length
+    const noneCorrect = correctRows.length === 0
+    const someCorrect = correctRows.length > 0 && correctRows.length < answerRows.length
+
+    // True/False detection
+    const isTrueFalse = options.length === 2 &&
+      options.every(o => ['true', 'false', 'đúng', 'sai', 'yes', 'no'].includes(o.toLowerCase()))
+
+    if (isTrueFalse && !hasExplicitMany) {
+      const correct = correctAnswers[0] || options[0]
+      questions.push({ stem, questionType: 'TRUE_FALSE', options, correctAnswer: correct, explanation, difficulty: 'MEDIUM', points, partialCredit })
+      continue
+    }
+
+    // Fill-in-blank: ALL rows have *
+    if (allCorrect && !hasExplicitOne && !hasExplicitMany) {
+      questions.push({ stem, questionType: 'FILL_BLANK', options, correctAnswer: correctAnswers.join('||'), explanation, difficulty: 'MEDIUM', points, partialCredit })
+      continue
+    }
+
+    // Choose many: SOME rows have *
+    if ((someCorrect || hasExplicitMany) && !hasExplicitOne) {
+      questions.push({ stem, questionType: 'MULTIPLE_RESPONSE', options, correctAnswer: correctAnswers.join('||'), explanation, difficulty: 'MEDIUM', points, partialCredit })
+      continue
+    }
+
+    // Default: MCQ (choose one)
+    const correctAnswer = correctAnswers[0] || (noneCorrect ? '' : options[0])
+    questions.push({ stem, questionType: 'MCQ', options, correctAnswer, explanation, difficulty: 'MEDIUM', points, partialCredit })
   }
 
   return questions
@@ -163,11 +208,17 @@ function parseCsvImport(csvText: string): QuestionRow[] {
 
     if (!stemText || !correctAnswer) continue
 
-    const typeMap: Record<string, 'MCQ' | 'TRUE_FALSE' | 'SHORT_ANSWER'> = {
+    const typeMap: Record<string, QuestionRow['questionType']> = {
       mcq: 'MCQ',
       true_false: 'TRUE_FALSE',
       short_answer: 'SHORT_ANSWER',
       short: 'SHORT_ANSWER',
+      fill_blank: 'FILL_BLANK',
+      fill_in_blank: 'FILL_BLANK',
+      multiple_response: 'MULTIPLE_RESPONSE',
+      essay: 'ESSAY',
+      long_answer: 'LONG_ANSWER',
+      matching: 'MATCHING',
     }
     const questionType = typeMap[(typeRaw ?? 'mcq').toLowerCase().trim()] ?? 'MCQ'
 
@@ -192,6 +243,7 @@ function parseCsvImport(csvText: string): QuestionRow[] {
       explanation: explanation?.trim() || null,
       difficulty,
       points: parseFloat(pointsStr ?? '1') || 1,
+      partialCredit: false,
     })
   }
 

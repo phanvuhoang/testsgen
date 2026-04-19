@@ -69,7 +69,10 @@ RULES FOR EACH TYPE:
    correctAnswer = all correct options separated by "||" (e.g. "Paris||London").
 3. TRUE_FALSE: options = ["True", "False"]. correctAnswer = "True" or "False".
 4. SHORT_ANSWER: no options. correctAnswer = brief model answer.
-5. FILL_BLANK: stem contains blank as "___". no options. correctAnswer = the word/phrase.
+5. FILL_BLANK: stem contains blank as "___". no options. correctAnswer MUST contain multiple acceptable answer variants separated by "||".
+   For Vietnamese fill-in-blank questions, include: (1) the answer with full diacritics, (2) the answer without diacritics, (3) any common alternate spellings.
+   Example: "Hỏa hoạn||hoa hoan||hoả hoạn||hoa hoạn". Always provide at least 2-3 variants.
+   Example JSON: {"questionType": "FILL_BLANK", "stem": "Điền vào chỗ trống: ___ là thủ đô của Pháp.", "correctAnswer": "Paris||paris||Pari", "options": [], "explanation": "Paris là thủ đô và thành phố lớn nhất của Pháp."}
 6. ESSAY / LONG_ANSWER: no options, no correctAnswer. Just stem.
 7. MATCHING: options is an object: { "left": ["item1", "item2", ...], "right": ["match1", "match2", ...] }.
    correctAnswer = JSON array of pairs: [["left1","right1"],["left2","right2"]] as a string.

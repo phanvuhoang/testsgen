@@ -6,6 +6,77 @@ export async function GET(
   req: NextRequest,
   { params }: { params: { shareCode: string } }
 ) {
+  // Check if shareCode belongs to a QuizClass
+  const quizClass = await db.quizClass.findFirst({
+    where: { shareCode: params.shareCode },
+    include: { quizSet: { include: { createdBy: { select: { name: true } }, questions: { orderBy: [{ sortOrder: 'asc' }, { createdAt: 'asc' }], select: { id: true, stem: true, questionType: true, options: true, difficulty: true, points: true, sortOrder: true, poolTag: true } } } } }
+  }).catch(() => null)
+
+  if (quizClass) {
+    const quizSet = quizClass.quizSet
+    // Build response with class settings overriding parent
+    return NextResponse.json({
+      id: quizSet.id,
+      title: quizSet.title,
+      description: quizSet.description,
+      shareCode: params.shareCode, // class shareCode
+      classId: quizClass.id,
+      className: quizClass.name,
+      // Settings from class (override parent)
+      timeLimitMinutes: quizClass.timeLimitMinutes ?? quizSet.timeLimitMinutes,
+      questionsPerAttempt: quizClass.questionsPerAttempt ?? quizSet.questionsPerAttempt,
+      passMark: quizClass.passMark ?? quizSet.passMark,
+      randomizeQuestions: quizClass.randomizeQuestions,
+      shuffleAnswerOptions: quizClass.shuffleAnswerOptions,
+      displayMode: quizClass.displayMode ?? quizSet.displayMode,
+      disablePrevButton: quizClass.disablePrevButton,
+      requireLogin: quizClass.requireLogin,
+      maxAttempts: quizClass.maxAttempts ?? quizSet.maxAttempts,
+      fixedQuestionIds: quizClass.fixedQuestionIds ? JSON.parse(quizClass.fixedQuestionIds) : null,
+      // From parent quiz set
+      accessType: quizSet.access,
+      access: quizSet.access,
+      passcode: quizSet.passcode,
+      introText: quizSet.introText,
+      conclusionText: quizSet.conclusionText,
+      passMessage: quizSet.passMessage,
+      failMessage: quizSet.failMessage,
+      certificateEnabled: quizSet.certificateEnabled,
+      certificateTitle: quizSet.certificateTitle,
+      certificateMessage: quizSet.certificateMessage,
+      certificateBorderColor: quizSet.certificateBorderColor,
+      certificateFont: quizSet.certificateFont,
+      certificateShowLogo: quizSet.certificateShowLogo,
+      certificateShowScore: quizSet.certificateShowScore,
+      certificateShowDate: quizSet.certificateShowDate,
+      certificateIssuerName: quizSet.certificateIssuerName,
+      certificateIssuerTitle: quizSet.certificateIssuerTitle,
+      feedbackShowCorrect: quizSet.feedbackShowCorrect,
+      feedbackShowAnswer: quizSet.feedbackShowAnswer,
+      feedbackShowExplanation: quizSet.feedbackShowExplanation,
+      themeColor: quizSet.themeColor,
+      themeFont: quizSet.themeFont,
+      themeLogo: quizSet.themeLogo,
+      partialCredits: quizSet.partialCredits,
+      showAnswers: quizSet.showAnswers,
+      showScore: quizSet.showScore,
+      showOutline: quizSet.showOutline,
+      showCorrectAnswers: quizSet.showCorrectAnswers,
+      identifyBy: quizSet.identifyBy,
+      expiresAt: quizSet.expiresAt,
+      disableRightClick: quizSet.disableRightClick,
+      disableCopyPaste: quizSet.disableCopyPaste,
+      disableTranslate: quizSet.disableTranslate,
+      disablePrint: quizSet.disablePrint,
+      customIdentifierPrompt: quizSet.customIdentifierPrompt,
+      language: quizSet.language,
+      createdBy: quizSet.createdBy?.name ?? 'Unknown',
+      variantId: null,
+      questionCount: quizSet.questions.length,
+      questions: quizSet.questions,
+    })
+  }
+
   const quizSet = await db.quizSet.findFirst({
     where: {
       shareCode: params.shareCode,

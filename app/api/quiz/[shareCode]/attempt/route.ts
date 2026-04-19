@@ -10,7 +10,9 @@ export async function POST(
   // Auth is optional for public quizzes
   const session = await auth();
 
-  const quizSet = await db.quizSet.findFirst({
+  // Check if shareCode belongs to a QuizClass first
+  let resolvedClassId: string | null = null
+  let quizSet = await db.quizSet.findFirst({
     where: {
       shareCode: params.shareCode,
       status: "OPEN",
@@ -22,6 +24,36 @@ export async function POST(
       },
     },
   });
+
+  if (!quizSet) {
+    // Try class shareCode
+    const quizClassByCode = await db.quizClass.findFirst({
+      where: { shareCode: params.shareCode },
+      include: {
+        quizSet: {
+          include: {
+            questions: {
+              orderBy: [{ sortOrder: "asc" }, { createdAt: "asc" }],
+              select: { id: true, difficulty: true, sortOrder: true },
+            },
+          },
+        },
+      },
+    }).catch(() => null)
+    if (quizClassByCode && quizClassByCode.quizSet.status === 'OPEN') {
+      // Apply class setting overrides onto the quizSet object
+      const parentSet = quizClassByCode.quizSet as any
+      quizSet = {
+        ...parentSet,
+        questionsPerAttempt: quizClassByCode.questionsPerAttempt ?? parentSet.questionsPerAttempt,
+        timeLimitMinutes: quizClassByCode.timeLimitMinutes ?? parentSet.timeLimitMinutes,
+        passMark: quizClassByCode.passMark ?? parentSet.passMark,
+        randomizeQuestions: quizClassByCode.randomizeQuestions,
+        maxAttempts: quizClassByCode.maxAttempts ?? parentSet.maxAttempts,
+      } as any
+      resolvedClassId = quizClassByCode.id
+    }
+  }
 
   if (!quizSet) {
     return NextResponse.json({ error: "Quiz not found or not available" }, { status: 404 });
@@ -50,7 +82,16 @@ export async function POST(
   }
 
   const body = await req.json().catch(() => ({}));
-  const { guestName, guestEmail, passcode, variantId, fixedQuestionIds, shuffleAnswerOptions } = body;
+  const { guestName, guestEmail, passcode, variantId, fixedQuestionIds, shuffleAnswerOptions, classId } = body;
+
+  // If classId provided and no fixedQuestionIds in body, fetch from quizClass
+  let resolvedFixedIds = fixedQuestionIds
+  if (!resolvedFixedIds && classId) {
+    const cls = await db.quizClass.findFirst({ where: { id: classId }, select: { fixedQuestionIds: true } }).catch(() => null)
+    if (cls?.fixedQuestionIds) {
+      try { resolvedFixedIds = JSON.parse(cls.fixedQuestionIds) } catch {}
+    }
+  }
 
   // Validate passcode if required
   if (quizSet.access === "PASSCODE") {
@@ -68,9 +109,8 @@ export async function POST(
   let selectedQuestions: typeof allQuestions;
 
   // If fixedQuestionIds provided, use those specific questions in order
-  if (fixedQuestionIds && Array.isArray(fixedQuestionIds) && fixedQuestionIds.length > 0) {
-    const idSet = new Set(fixedQuestionIds)
-    selectedQuestions = fixedQuestionIds
+  if (resolvedFixedIds && Array.isArray(resolvedFixedIds) && resolvedFixedIds.length > 0) {
+    selectedQuestions = resolvedFixedIds
       .map((id: string) => allQuestions.find(q => q.id === id))
       .filter(Boolean) as typeof allQuestions
   } else if (quizSet.randomizeQuestions) {
@@ -145,6 +185,7 @@ export async function POST(
       questionsSnapshot: questionsSnapshot as any,
       status: "IN_PROGRESS",
       variantId: variantId ?? null,
+      quizClassId: classId ?? resolvedClassId ?? null,
     },
   });
 

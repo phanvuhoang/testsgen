@@ -26,6 +26,15 @@ export default auth((req) => {
   const adminRoutes = ['/admin', '/users', '/settings']
   const isAdminRoute = adminRoutes.some((route) => nextUrl.pathname.startsWith(route))
 
+  // Redirect STUDENT role away from dashboard to my-results
+  if (isLoggedIn && nextUrl.pathname === '/dashboard' && userRole === 'STUDENT') {
+    return NextResponse.redirect(new URL('/my-results', nextUrl))
+  }
+  // Students can't access /quiz/ dashboard pages
+  if (isLoggedIn && nextUrl.pathname.startsWith('/quiz') && userRole === 'STUDENT') {
+    return NextResponse.redirect(new URL('/my-results', nextUrl))
+  }
+
   if (isAdminRoute && userRole !== 'ADMIN' && userRole !== 'TEACHER') {
     return NextResponse.redirect(new URL('/dashboard', nextUrl))
   }
