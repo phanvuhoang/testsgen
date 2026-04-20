@@ -121,9 +121,11 @@ model User {
   updatedAt   DateTime   @updatedAt
 
   // Relations
-  projects   Project[]
-  quizSets   QuizSet[]
-  attempts   Attempt[]
+  projects         Project[]
+  quizSets         QuizSet[]
+  attempts         Attempt[]
+  gameshowSessions GameshowSession[] @relation("GameshowHost")
+  gameshowPlayers  GameshowPlayer[]  @relation("GameshowPlayers")
 
   @@map("testsgen_users")
 }
@@ -387,6 +389,7 @@ model QuizSet {
   documents   QuizDocument[]
   variants    QuizVariant[]
   classes     QuizClass[]    @relation("QuizSetClasses")
+  gameshows   Gameshow[]     @relation("QuizSetGameshows")
 
   @@map("testsgen_quiz_sets")
 }
@@ -530,6 +533,155 @@ model QuizClass {
   updatedAt       DateTime  @updatedAt
 
   @@map("testsgen_quiz_classes")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GAMESHOW MODULE
+// ─────────────────────────────────────────────────────────────────────────────
+
+// GameshowType: style of gameshow
+enum GameshowType {
+  WWTBAM
+  KAHOOT
+  JEOPARDY
+}
+
+// PlayMode: who is playing
+enum GameshowPlayMode {
+  SINGLE      // Solo player
+  LOCAL       // Multiple players, same device
+  ONLINE      // Real-time multiplayer via different devices
+}
+
+// SelectionMode: question ordering
+enum GameshowSelectionMode {
+  LINEAR      // Sequential Q1 → Q2 → Q3
+  FREE_CHOICE // Player/Host chooses next question
+}
+
+// ScoringMode
+enum GameshowScoringMode {
+  SPEED_ACCURACY  // Correct + fast = more points
+  ACCURACY_ONLY   // Correct answer = flat points, speed ignored
+}
+
+// GameshowSession status
+enum GameshowSessionStatus {
+  WAITING   // Room created, waiting for players
+  ACTIVE    // Game in progress
+  FINISHED  // Game ended
+}
+
+model Gameshow {
+  id            String        @id @default(cuid())
+  name          String
+  description   String?
+  shareCode     String        @unique @default(cuid())
+
+  // Parent quiz set
+  quizSetId     String
+  quizSet       QuizSet       @relation("QuizSetGameshows", fields: [quizSetId], references: [id], onDelete: Cascade)
+
+  // Game configuration
+  type          GameshowType  @default(KAHOOT)
+  playMode      GameshowPlayMode @default(SINGLE)
+  selectionMode GameshowSelectionMode @default(LINEAR)
+  scoringMode   GameshowScoringMode  @default(SPEED_ACCURACY)
+
+  // Question settings
+  questionsCount    Int?       // How many questions to use (null = all)
+  fixedQuestionIds  String?    // JSON array of question IDs (null = use all/random)
+  easyCount         Int?
+  mediumCount       Int?
+  hardCount         Int?
+  shuffleQuestions  Boolean    @default(true)
+
+  // Timer settings
+  timeLimitSeconds  Int        @default(30)   // Per-question timer
+  answerRevealSeconds Int      @default(4)    // Time to view answer before responding (Jeopardy)
+  responseSeconds   Int        @default(10)   // Time to respond after buzz
+
+  // WWTBAM lifelines
+  enableLifelines   Boolean    @default(true)
+  lifelines         String?    // JSON array e.g. ["5050","phone","audience"]
+
+  // Kahoot-specific
+  enableStreak      Boolean    @default(true)
+  streakBonus       Int        @default(50)   // pts per consecutive correct
+
+  // Jeopardy-specific
+  categoriesCount   Int        @default(5)
+  tiersPerCategory  Int        @default(5)
+  // Point values per tier: JSON array e.g. [10,25,50,100,200]
+  tierPoints        String?    // JSON array e.g. "[10,25,50,100,200]"
+
+  // Multiplayer settings
+  maxPlayers        Int        @default(4)
+  requireLogin      Boolean    @default(false)
+
+  // Access
+  accessType        String?    @default("PUBLIC")
+  passcode          String?
+
+  sessions          GameshowSession[]
+  createdAt         DateTime   @default(now())
+  updatedAt         DateTime   @updatedAt
+
+  @@map("testsgen_gameshows")
+}
+
+model GameshowSession {
+  id            String              @id @default(cuid())
+  roomCode      String              @unique
+  status        GameshowSessionStatus @default(WAITING)
+
+  gameshowId    String
+  gameshow      Gameshow            @relation(fields: [gameshowId], references: [id], onDelete: Cascade)
+
+  // Host user (null = anonymous)
+  hostId        String?
+  host          User?               @relation("GameshowHost", fields: [hostId], references: [id])
+
+  // Current game state (JSON)
+  // Stores: currentQuestionIndex, questionOrder[], startedAt, finishedAt, etc.
+  gameState     String?             // JSON
+
+  players       GameshowPlayer[]
+  createdAt     DateTime            @default(now())
+  updatedAt     DateTime            @updatedAt
+
+  @@map("testsgen_gameshow_sessions")
+}
+
+model GameshowPlayer {
+  id            String   @id @default(cuid())
+  sessionId     String
+  session       GameshowSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+
+  // Player identity (may be anonymous)
+  userId        String?
+  user          User?    @relation("GameshowPlayers", fields: [userId], references: [id])
+  nickname      String
+  avatarColor   String?  @default("#028a39")
+
+  // Score tracking
+  score         Int      @default(0)
+  correctCount  Int      @default(0)
+  wrongCount    Int      @default(0)
+  streak        Int      @default(0)  // Current consecutive correct streak
+  bestStreak    Int      @default(0)
+
+  // Answers (JSON array of {questionId, answer, correct, pointsEarned, responseTimeMs})
+  answers       String?  // JSON
+
+  // Connection status
+  isConnected   Boolean  @default(true)
+  lastSeenAt    DateTime @default(now())
+
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  @@map("testsgen_gameshow_players")
 }
 
 model SystemSetting {

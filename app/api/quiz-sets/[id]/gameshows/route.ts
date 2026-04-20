@@ -1,0 +1,55 @@
+import { NextRequest, NextResponse } from 'next/server'
+import { db } from '@/lib/db'
+import { auth } from '@/auth'
+
+// GET /api/quiz-sets/[id]/gameshows
+export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
+  const session = await auth()
+  if (!session?.user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  
+  const gameshows = await db.gameshow.findMany({
+    where: { quizSetId: params.id },
+    include: {
+      _count: { select: { sessions: true } }
+    },
+    orderBy: { createdAt: 'desc' }
+  })
+  return NextResponse.json(gameshows)
+}
+
+// POST /api/quiz-sets/[id]/gameshows
+export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
+  const session = await auth()
+  if (!session?.user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+  
+  const body = await req.json()
+  const gameshow = await db.gameshow.create({
+    data: {
+      quizSetId: params.id,
+      name: body.name || 'New Gameshow',
+      description: body.description || null,
+      type: body.type || 'KAHOOT',
+      playMode: body.playMode || 'SINGLE',
+      selectionMode: body.selectionMode || 'LINEAR',
+      scoringMode: body.scoringMode || 'SPEED_ACCURACY',
+      questionsCount: body.questionsCount ? parseInt(body.questionsCount) : null,
+      timeLimitSeconds: body.timeLimitSeconds ? parseInt(body.timeLimitSeconds) : 30,
+      answerRevealSeconds: body.answerRevealSeconds ? parseInt(body.answerRevealSeconds) : 4,
+      responseSeconds: body.responseSeconds ? parseInt(body.responseSeconds) : 10,
+      enableLifelines: body.enableLifelines ?? true,
+      lifelines: body.lifelines ?? '["5050","phone","audience"]',
+      enableStreak: body.enableStreak ?? true,
+      streakBonus: body.streakBonus ? parseInt(body.streakBonus) : 50,
+      categoriesCount: body.categoriesCount ? parseInt(body.categoriesCount) : 5,
+      tiersPerCategory: body.tiersPerCategory ? parseInt(body.tiersPerCategory) : 5,
+      tierPoints: body.tierPoints ?? '[10,25,50,100,200]',
+      maxPlayers: body.maxPlayers ? parseInt(body.maxPlayers) : 4,
+      requireLogin: body.requireLogin ?? false,
+      shuffleQuestions: body.shuffleQuestions ?? true,
+      easyCount: body.easyCount ? parseInt(body.easyCount) : null,
+      mediumCount: body.mediumCount ? parseInt(body.mediumCount) : null,
+      hardCount: body.hardCount ? parseInt(body.hardCount) : null,
+    }
+  })
+  return NextResponse.json(gameshow, { status: 201 })
+}
