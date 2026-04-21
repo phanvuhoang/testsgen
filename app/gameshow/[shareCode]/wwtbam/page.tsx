@@ -23,7 +23,7 @@ type GameshowConfig = {
   scoringMode: 'SPEED_ACCURACY' | 'ACCURACY_ONLY'; questionsCount: number | null
   timeLimitSeconds: number; enableLifelines: boolean; lifelines: string | null
   shuffleQuestions: boolean; showLeaderboard: boolean; clickStartToCount: boolean
-  maxPlayers: number; shortLink: string | null; quizSetTitle: string; questions: Question[]
+  maxPlayers: number; manualScoring: boolean; shortLink: string | null; quizSetTitle: string; questions: Question[]
 }
 type Player = {
   id: string; nickname: string; avatarColor: string
@@ -31,7 +31,7 @@ type Player = {
   usedLifelines: string[]
 }
 type LifelineType = '5050' | 'phone' | 'audience'
-type Phase = 'setup' | 'intro' | 'select' | 'question' | 'reveal' | 'leaderboard' | 'gameover'
+type Phase = 'setup' | 'intro' | 'select' | 'question' | 'reveal' | 'scoring' | 'leaderboard' | 'gameover'
 
 // ─── Tone SFX (for non-music sounds only) ───────────────────────────────────
 function playTone(freq: number, dur: number, type: OscillatorType = 'sine', vol = 0.3) {
@@ -102,6 +102,7 @@ export default function WwtbamPage() {
   const [currentPlayerIdx, setCurrentPlayerIdx] = useState(0)
   const [setupNames, setSetupNames] = useState([''])
   const [answeredQuestions, setAnsweredQuestions] = useState<Set<string>>(new Set())
+  const [scoringAdjustments, setScoringAdjustments] = useState<Record<string,number>>({})
 
   const timerRef = useRef<NodeJS.Timeout | null>(null)
   const timeCountPlayedRef = useRef(false)
@@ -267,6 +268,27 @@ export default function WwtbamPage() {
       (config?.selectionMode === 'LINEAR' && currentIdx >= questions.length - 1)
     setTimerRunning(false)
     audio.stopAll()
+    // LOCAL + manualScoring: show scoring adjustment screen first
+    if (config?.playMode === 'LOCAL' && players.length > 1 && config?.manualScoring) {
+      setScoringAdjustments({})
+      setPhase('scoring')
+      return
+    }
+    if (config?.showLeaderboard && players.length > 0) {
+      audio.playBg('leaderboard', 0.6)
+      setPhase('leaderboard')
+      setTimeout(() => advanceFromLeaderboard(isLastQ), 5000)
+    } else {
+      advanceFromLeaderboard(isLastQ)
+    }
+  }
+
+  const confirmScoring = () => {
+    const isLastQ = answeredQuestions.size >= questions.length ||
+      (config?.selectionMode === 'LINEAR' && currentIdx >= questions.length - 1)
+    if (Object.keys(scoringAdjustments).length > 0) {
+      setPlayers(prev => prev.map(p => ({ ...p, score: p.score + (scoringAdjustments[p.id] ?? 0) })))
+    }
     if (config?.showLeaderboard && players.length > 0) {
       audio.playBg('leaderboard', 0.6)
       setPhase('leaderboard')
@@ -746,6 +768,64 @@ export default function WwtbamPage() {
   }
 
   // ─── GAME OVER ────────────────────────────────────────────────────────────
+  // ─── SCORING (Local Multiplayer manual score adjustment) ───────────────────────
+  if (phase === 'scoring') {
+    const isLastQ = answeredQuestions.size >= questions.length ||
+      (config?.selectionMode === 'LINEAR' && currentIdx >= questions.length - 1)
+    return (
+      <div className="relative min-h-screen bg-[#0a0a2e] text-white flex flex-col items-center justify-center p-4">
+        <MusicBtn />
+        <div className="w-full max-w-md">
+          <div className="text-center mb-6">
+            <div className="text-4xl mb-2">📊</div>
+            <h2 className="text-2xl font-black text-yellow-300">Score Adjustment</h2>
+            <p className="text-blue-300 text-sm mt-1">Q{currentIdx + 1} — Adjust points before continuing.</p>
+          </div>
+          <div className="bg-[#0d1b5e] rounded-2xl p-4 space-y-3 mb-4 border border-blue-500/30">
+            {players.map(p => {
+              const adj = scoringAdjustments[p.id] ?? 0
+              return (
+                <div key={p.id} className="flex items-center justify-between gap-3 py-2 border-b border-blue-500/20 last:border-0">
+                  <div className="flex-1 min-w-0">
+                    <p className="font-bold text-sm truncate">{p.nickname}</p>
+                    <p className="text-xs text-blue-400">Base: {p.score} pts{adj !== 0 ? ` · Adj: ${adj > 0 ? '+' : ''}${adj}` : ''}</p>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <button onClick={() => setScoringAdjustments(prev => ({ ...prev, [p.id]: (prev[p.id] ?? 0) - 50 }))}
+                      className="w-9 h-9 rounded-full bg-red-500/20 hover:bg-red-500/40 text-red-300 font-black text-lg flex items-center justify-center">−</button>
+                    <span className={`w-14 text-center font-black text-lg ${adj > 0 ? 'text-green-400' : adj < 0 ? 'text-red-400' : 'text-gray-400'}`}>
+                      {adj > 0 ? `+${adj}` : adj === 0 ? '0' : adj}
+                    </span>
+                    <button onClick={() => setScoringAdjustments(prev => ({ ...prev, [p.id]: (prev[p.id] ?? 0) + 50 }))}
+                      className="w-9 h-9 rounded-full bg-green-500/20 hover:bg-green-500/40 text-green-300 font-black text-lg flex items-center justify-center">+</button>
+                  </div>
+                  <div className="w-16 text-right">
+                    <span className="font-black text-yellow-300">{p.score + (scoringAdjustments[p.id] ?? 0)}</span>
+                    <span className="text-xs text-blue-400 block">total</span>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+          <div className="flex gap-2 mb-3">
+            {[-200, -100, -50, 50, 100, 200].map(v => (
+              <button key={v} onClick={() => {
+                const p = players[currentPlayerIdx]
+                if (p) setScoringAdjustments(prev => ({ ...prev, [p.id]: (prev[p.id] ?? 0) + v }))
+              }} className={`flex-1 py-2 rounded-xl text-xs font-bold transition-all ${v > 0 ? 'bg-green-600/30 hover:bg-green-600/50 text-green-300' : 'bg-red-600/30 hover:bg-red-600/50 text-red-300'}`}>
+                {v > 0 ? `+${v}` : v}
+              </button>
+            ))}
+          </div>
+          <p className="text-xs text-blue-400 text-center mb-4">Quick buttons → <span className="text-yellow-300">{players[currentPlayerIdx]?.nickname}</span></p>
+          <Button onClick={confirmScoring} className="w-full bg-yellow-400 hover:bg-yellow-300 text-black font-bold text-lg py-5 rounded-2xl">
+            {isLastQ ? 'Final Results ✓' : 'Confirm & Continue'} <ChevronRight className="h-5 w-5 ml-1" />
+          </Button>
+        </div>
+      </div>
+    )
+  }
+
   if (phase === 'gameover') {
     const sorted = [...players].sort((a, b) => b.score - a.score)
     return (

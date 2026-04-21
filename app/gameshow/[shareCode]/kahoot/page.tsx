@@ -21,6 +21,7 @@ type GameshowConfig = {
   timeLimitSeconds: number; enableStreak: boolean; streakBonus: number
   shuffleQuestions: boolean; showLeaderboard: boolean; clickStartToCount: boolean
   buzzerMode: boolean
+  manualScoring: boolean
   maxPlayers: number; shortLink: string | null; quizSetTitle: string; questions: Question[]
 }
 type Player = {
@@ -242,8 +243,9 @@ export default function KahootPage() {
 
   // Timer
   useEffect(() => {
-    if (!timerRunning || phase!=='question'||!config) return
-    timeCountPlayedRef.current = false
+    if (!timerRunning) return
+    // Clear any existing interval first (guard against double-fire)
+    clearInterval(timerRef.current!)
     timerRef.current = setInterval(() => {
       setTimeLeft(prev => {
         if (prev<=5&&!timeCountPlayedRef.current){timeCountPlayedRef.current=true;audio.playTimeCount()}
@@ -252,7 +254,7 @@ export default function KahootPage() {
       })
     }, 1000)
     return ()=>clearInterval(timerRef.current!)
-  }, [timerRunning, phase, currentIdx])
+  }, [timerRunning])
 
   const handleTimeout = useCallback(() => {
     if (submitted) return
@@ -292,6 +294,7 @@ export default function KahootPage() {
     const streakBonus=config?.enableStreak&&correct?(currentPlayer?.streak??0)*(config?.streakBonus??50):0
     const pts=computePoints(correct,elapsed)+streakBonus
     setSelectedAnswer(answer); setIsCorrect(correct); setSubmitted(true)
+    setAnsweredQuestions(prev=>new Set(Array.from(prev).concat(currentQuestion.id)))
     buildDistribution()
     updatePlayer(correct,pts)
     if(correct){audio.playOnce('win',0.9);if((currentPlayer?.streak??0)>=2)setShowConfetti(true);setTimeout(()=>setShowConfetti(false),1500)}
@@ -308,6 +311,7 @@ export default function KahootPage() {
     const correct=corrects.length===selectedMultiple.length&&corrects.every(c=>selectedMultiple.some(s=>normalize(s)===normalize(c)))
     const pts=computePoints(correct,elapsed)
     setIsCorrect(correct); setSubmitted(true)
+    setAnsweredQuestions(prev=>new Set(Array.from(prev).concat(currentQuestion.id)))
     buildDistribution(); updatePlayer(correct,pts)
     if(correct){audio.playOnce('win',0.9);setShowConfetti(true);setTimeout(()=>setShowConfetti(false),1500)}
     else audio.playOnce('lost',0.9)
@@ -323,6 +327,7 @@ export default function KahootPage() {
     const correct=corrects.some(c=>normalize(c)===normalize(fillAnswer))
     const pts=computePoints(correct,elapsed)
     setIsCorrect(correct); setSubmitted(true)
+    setAnsweredQuestions(prev=>new Set(Array.from(prev).concat(currentQuestion.id)))
     buildDistribution(); updatePlayer(correct,pts)
     if(correct){audio.playOnce('win',0.9);setShowConfetti(true);setTimeout(()=>setShowConfetti(false),1500)}
     else audio.playOnce('lost',0.9)
@@ -463,8 +468,8 @@ export default function KahootPage() {
     const allAnswered=answeredQuestions.size>=questions.length
     const isLast=isFreeChoice?allAnswered:currentIdx>=questions.length-1
     audio.stopAll()
-    // LOCAL mode: show manual scoring screen before leaderboard
-    if(config?.playMode==='LOCAL'&&players.length>1){
+    // LOCAL mode with manualScoring enabled: show manual scoring screen before leaderboard
+    if(config?.playMode==='LOCAL'&&players.length>1&&config?.manualScoring){
       setScoringAdjustments({})
       setScoringNotes('')
       setPhase('scoring')

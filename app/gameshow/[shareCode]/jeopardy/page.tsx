@@ -26,12 +26,12 @@ type GameshowConfig = {
   shuffleQuestions: boolean; showLeaderboard: boolean; maxPlayers: number
   categoriesCount: number; tiersPerCategory: number; tierPoints: string | null
   quizSetTitle: string; questions: Question[]
-  clickStartToCount: boolean; shortLink: string | null
+  clickStartToCount: boolean; manualScoring: boolean; shortLink: string | null
 }
 type Player = { id: string; nickname: string; avatarColor: string; score: number; correctCount: number; wrongCount: number }
 type TileState = 'available' | 'answered'
 type BoardTile = { questionId: string; category: string; points: number; state: TileState }
-type Phase = 'setup' | 'board' | 'question' | 'buzzer' | 'respond' | 'reveal' | 'linear_question' | 'leaderboard' | 'gameover'
+type Phase = 'setup' | 'board' | 'question' | 'buzzer' | 'respond' | 'reveal' | 'scoring' | 'linear_question' | 'leaderboard' | 'gameover'
 
 // ─── Utilities ─────────────────────────────────────────────────────────────────
 function parseOptions(q: Question): string[] {
@@ -121,6 +121,7 @@ export default function JeopardyPage() {
 
   // Answered questions tracking for Free Choice
   const [answeredQuestions, setAnsweredQuestions] = useState<Set<string>>(new Set())
+  const [scoringAdjustments, setScoringAdjustments] = useState<Record<string,number>>({})
 
   // QR code
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null)
@@ -133,6 +134,7 @@ export default function JeopardyPage() {
   const leaderboardTimerRef = useRef<NodeJS.Timeout | null>(null)
 
   const timerRef = useRef<NodeJS.Timeout | null>(null)
+  const isAnsweredRef = useRef(false)  // guards against timeout firing after answer
   const responseTimerRef = useRef<NodeJS.Timeout | null>(null)
 
   // Music toggle button
@@ -229,6 +231,7 @@ export default function JeopardyPage() {
     const activeConfig = cfg || config
     const q = qs[idx]
     if (!q) { audio.stopAll(); setPhase('gameover'); return }
+    isAnsweredRef.current = false
     setCurrentQuestion(q)
     const tpoints = tierPoints
     const pts = tpoints[Math.min(Math.floor(idx / Math.max(1, qs.length / tpoints.length)), tpoints.length - 1)] || 10
@@ -244,22 +247,21 @@ export default function JeopardyPage() {
     setQuestionTimeLeft(timeLimit)
 
     if (activeConfig?.clickStartToCount) {
-      // Wait for Start button press: play 'wait' bg
       setTimerRunning(false)
       audio.playBg('wait', 0.5)
-    } else {
-      setTimerRunning(true)
-      if (activeConfig?.playMode === 'SINGLE') {
-        audio.playBg('game-play', 0.55)
-      } else {
-        openBuzzerPhase()
-        return
-      }
-    }
-    if (activeConfig?.playMode !== 'SINGLE') {
-      openBuzzerPhase()
-    } else {
       setPhase('linear_question')
+    } else {
+      if (activeConfig?.playMode !== 'SINGLE') {
+        // Multiplayer linear: show question then open buzzer, timer NOT running yet
+        setTimerRunning(false)
+        setPhase('linear_question')
+        openBuzzerPhase()
+      } else {
+        // Single player: start timer immediately
+        audio.playBg('game-play', 0.55)
+        setTimerRunning(true)
+        setPhase('linear_question')
+      }
     }
   }, [config, tierPoints])
 
@@ -268,6 +270,7 @@ export default function JeopardyPage() {
     if (!tile || tile.state !== 'available') return
     const q = questions.find(q => q.id === tile.questionId)
     if (!q) return
+    isAnsweredRef.current = false
     setCurrentQuestion(q)
     setCurrentTilePoints(tile.points)
     setCurrentTileCategory(categories[catIdx])
@@ -283,19 +286,20 @@ export default function JeopardyPage() {
     if (config?.clickStartToCount) {
       setTimerRunning(false)
       audio.playBg('wait', 0.5)
+      // Always go to question phase; for multiplayer will open buzzer on Start click
+      setPhase(config?.playMode === 'SINGLE' ? 'question' : 'question')
     } else {
-      setTimerRunning(true)
       if (config?.playMode !== 'SINGLE') {
+        // Multiplayer: show question then open buzzer (timer NOT running until buzz)
+        setTimerRunning(false)
+        setPhase('question')
         openBuzzerPhase()
-        return
+      } else {
+        // Single player: start timer immediately
+        audio.playBg('game-play', 0.55)
+        setTimerRunning(true)
+        setPhase('question')
       }
-      audio.playBg('game-play', 0.55)
-    }
-
-    if (config?.playMode === 'SINGLE') {
-      setPhase('question')
-    } else {
-      openBuzzerPhase()
     }
   }
 
@@ -328,6 +332,8 @@ export default function JeopardyPage() {
   }
 
   const handleQuestionTimeout = () => {
+    // Guard: if player already answered, don't override their result
+    if (isAnsweredRef.current) return
     audio.stopAll()
     audio.stopTimeCount()
     audio.playOnce('lost', 0.9)
@@ -375,6 +381,7 @@ export default function JeopardyPage() {
   }
 
   const handleResponse = (correct: boolean) => {
+    isAnsweredRef.current = true
     clearInterval(responseTimerRef.current!)
     audio.stopAll()
     setIsCorrect(correct)
@@ -398,6 +405,7 @@ export default function JeopardyPage() {
   }
 
   const handleSingleAnswer = (answer: string) => {
+    isAnsweredRef.current = true
     clearInterval(timerRef.current!)
     setTimerRunning(false)
     audio.stopAll()
@@ -447,6 +455,25 @@ export default function JeopardyPage() {
 
   const handleNext = () => {
     markTileDone()
+    // LOCAL + manualScoring: show scoring adjustment screen first
+    if (config?.playMode === 'LOCAL' && players.length > 1 && config?.manualScoring) {
+      setScoringAdjustments({})
+      setPhase('scoring')
+      return
+    }
+    if (config?.showLeaderboard && players.length > 0) {
+      audio.playBg('leaderboard', 0.6)
+      setPhase('leaderboard')
+      leaderboardTimerRef.current = setTimeout(() => advanceFromLeaderboard(), 5000)
+    } else {
+      advanceFromLeaderboard()
+    }
+  }
+
+  const confirmScoring = () => {
+    if (Object.keys(scoringAdjustments).length > 0) {
+      setPlayers(prev => prev.map(p => ({ ...p, score: p.score + (scoringAdjustments[p.id] ?? 0) })))
+    }
     if (config?.showLeaderboard && players.length > 0) {
       audio.playBg('leaderboard', 0.6)
       setPhase('leaderboard')
@@ -859,6 +886,62 @@ export default function JeopardyPage() {
 
           <Button onClick={handleNext} className="w-full bg-yellow-400 hover:bg-yellow-300 text-black font-bold py-5 rounded-2xl text-lg">
             {isFreeChoice ? 'Back to Board' : 'Next Question'} <ChevronRight className="h-5 w-5 ml-1" />
+          </Button>
+        </div>
+      </div>
+    )
+  }
+
+  // ─── SCORING (Local Multiplayer manual score adjustment) ───────────────────────
+  if (phase === 'scoring') {
+    return (
+      <div className="relative min-h-screen bg-[#060b2e] text-white flex flex-col items-center justify-center p-4">
+        <MusicBtn />
+        <div className="w-full max-w-md">
+          <div className="text-center mb-6">
+            <div className="text-4xl mb-2">📊</div>
+            <h2 className="text-2xl font-black text-yellow-400">Score Adjustment</h2>
+            <p className="text-blue-300 text-sm mt-1">Adjust points for this question.</p>
+          </div>
+          <div className="bg-[#0d1b5e] rounded-2xl p-4 space-y-3 mb-4 border border-blue-500/30">
+            {players.map(p => {
+              const adj = scoringAdjustments[p.id] ?? 0
+              return (
+                <div key={p.id} className="flex items-center justify-between gap-3 py-2 border-b border-blue-500/20 last:border-0">
+                  <div className="flex-1 min-w-0">
+                    <p className="font-bold text-sm truncate">{p.nickname}</p>
+                    <p className="text-xs text-blue-400">Base: {p.score} pts{adj !== 0 ? ` · Adj: ${adj > 0 ? '+' : ''}${adj}` : ''}</p>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <button onClick={() => setScoringAdjustments(prev => ({ ...prev, [p.id]: (prev[p.id] ?? 0) - 50 }))}
+                      className="w-9 h-9 rounded-full bg-red-500/20 hover:bg-red-500/40 text-red-300 font-black text-lg flex items-center justify-center">−</button>
+                    <span className={`w-14 text-center font-black text-lg ${adj > 0 ? 'text-green-400' : adj < 0 ? 'text-red-400' : 'text-gray-400'}`}>
+                      {adj > 0 ? `+${adj}` : adj === 0 ? '0' : adj}
+                    </span>
+                    <button onClick={() => setScoringAdjustments(prev => ({ ...prev, [p.id]: (prev[p.id] ?? 0) + 50 }))}
+                      className="w-9 h-9 rounded-full bg-green-500/20 hover:bg-green-500/40 text-green-300 font-black text-lg flex items-center justify-center">+</button>
+                  </div>
+                  <div className="w-16 text-right">
+                    <span className="font-black text-yellow-300">{p.score + (scoringAdjustments[p.id] ?? 0)}</span>
+                    <span className="text-xs text-blue-400 block">total</span>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+          <div className="flex gap-2 mb-3">
+            {[-200, -100, -50, 50, 100, 200].map(v => (
+              <button key={v} onClick={() => {
+                const p = players[currentPlayerIdx]
+                if (p) setScoringAdjustments(prev => ({ ...prev, [p.id]: (prev[p.id] ?? 0) + v }))
+              }} className={`flex-1 py-2 rounded-xl text-xs font-bold transition-all ${v > 0 ? 'bg-green-600/30 hover:bg-green-600/50 text-green-300' : 'bg-red-600/30 hover:bg-red-600/50 text-red-300'}`}>
+                {v > 0 ? `+${v}` : v}
+              </button>
+            ))}
+          </div>
+          <p className="text-xs text-blue-400 text-center mb-4">Quick buttons → <span className="text-yellow-300">{players[currentPlayerIdx]?.nickname}</span></p>
+          <Button onClick={confirmScoring} className="w-full bg-yellow-400 hover:bg-yellow-300 text-black font-bold text-lg py-5 rounded-2xl">
+            Confirm & Continue <ChevronRight className="h-5 w-5 ml-1" />
           </Button>
         </div>
       </div>

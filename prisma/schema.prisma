@@ -598,6 +598,7 @@ model Gameshow {
   showLeaderboard   Boolean    @default(true)
   clickStartToCount Boolean    @default(false)
   buzzerMode        Boolean    @default(false)  // Online: players buzz in to answer
+  manualScoring     Boolean    @default(false)  // Local: host manually adjusts scores after each question
   shortLink         String?    // Custom short URL for the gameshow
 
   // Timer settings

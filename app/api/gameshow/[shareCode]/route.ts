@@ -77,6 +77,7 @@ export async function GET(
     showLeaderboard: (gameshow as any).showLeaderboard ?? true,
     clickStartToCount: (gameshow as any).clickStartToCount ?? false,
     buzzerMode: (gameshow as any).buzzerMode ?? false,
+    manualScoring: (gameshow as any).manualScoring ?? false,
     shortLink: (gameshow as any).shortLink ?? null,
     quizSetTitle: (gameshow as any).quizSet?.title ?? '',
     questions: safeQuestions,

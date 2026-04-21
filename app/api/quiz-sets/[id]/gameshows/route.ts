@@ -50,6 +50,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       ...(body.showLeaderboard !== undefined ? { showLeaderboard: body.showLeaderboard } as any : {}),
       ...(body.clickStartToCount !== undefined ? { clickStartToCount: body.clickStartToCount } as any : {}),
       ...(body.buzzerMode !== undefined ? { buzzerMode: body.buzzerMode } as any : {}),
+      ...(body.manualScoring !== undefined ? { manualScoring: body.manualScoring } as any : {}),
       shortLink: body.shortLink ?? null,
       easyCount: body.easyCount ? parseInt(body.easyCount) : null,
       mediumCount: body.mediumCount ? parseInt(body.mediumCount) : null,

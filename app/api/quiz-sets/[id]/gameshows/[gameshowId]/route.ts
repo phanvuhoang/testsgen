@@ -70,6 +70,7 @@ export async function PATCH(
       ...(body.showLeaderboard !== undefined ? { showLeaderboard: body.showLeaderboard } as any : {}),
       ...(body.clickStartToCount !== undefined ? { clickStartToCount: body.clickStartToCount } as any : {}),
       ...(body.buzzerMode !== undefined ? { buzzerMode: body.buzzerMode } as any : {}),
+      ...(body.manualScoring !== undefined ? { manualScoring: body.manualScoring } as any : {}),
       ...(body.shortLink !== undefined ? { shortLink: body.shortLink } as any : {}),
       easyCount: body.easyCount != null ? parseInt(body.easyCount) || null : undefined,
       mediumCount: body.mediumCount != null ? parseInt(body.mediumCount) || null : undefined,
