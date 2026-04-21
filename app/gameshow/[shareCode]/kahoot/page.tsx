@@ -11,7 +11,7 @@ import { Loader2, Trophy, CheckCircle2, XCircle, ChevronRight, RotateCcw, Home, 
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 type Question = {
-  id: string; stem: string; questionType: string; options: string | null
+  id: string; stem: string; questionType: string; options: string[] | string | null
   correctAnswer: string; explanation: string | null; difficulty: string
   imageUrl?: string | null
 }
@@ -20,7 +20,7 @@ type GameshowConfig = {
   playMode: 'SINGLE' | 'LOCAL' | 'ONLINE'; selectionMode: 'LINEAR' | 'FREE_CHOICE'
   scoringMode: 'SPEED_ACCURACY' | 'ACCURACY_ONLY'; questionsCount: number | null
   timeLimitSeconds: number; enableStreak: boolean; streakBonus: number
-  shuffleQuestions: boolean; maxPlayers: number
+  shuffleQuestions: boolean; showLeaderboard: boolean; maxPlayers: number
   quizSetTitle: string
   questions: Question[]
 }
@@ -69,8 +69,18 @@ function shuffle<T>(arr: T[]): T[] {
 }
 function parseOptions(q: Question): string[] {
   if (!q.options) return []
-  try { return JSON.parse(q.options) } catch { return q.options.split('|') }
+  if (Array.isArray(q.options)) return q.options as string[]
+  if (typeof q.options === 'string') {
+    try {
+      const parsed = JSON.parse(q.options)
+      return Array.isArray(parsed) ? parsed : []
+    } catch {
+      return (q.options as string).split('|')
+    }
+  }
+  return []
 }
+
 function getCorrectAnswers(q: Question): string[] {
   return q.correctAnswer.split('||').map(s => s.trim()).filter(Boolean)
 }
@@ -370,11 +380,8 @@ export default function KahootPage() {
     setPhase('question')
   }
 
-  const handleNext = () => {
-    const isLast = currentIdx >= questions.length - 1
+  const advanceFromLeaderboard = (isLast: boolean) => {
     const isLocal = config?.playMode === 'LOCAL'
-    SFX.reveal()
-
     if (isLocal && players.length > 1) {
       const nextPlayer = (currentPlayerIdx + 1) % players.length
       setCurrentPlayerIdx(nextPlayer)
@@ -383,6 +390,17 @@ export default function KahootPage() {
     } else {
       if (isLast) { SFX.final(); setPhase('gameover'); return }
       beginQuestion(currentIdx + 1)
+    }
+  }
+
+  const handleNext = () => {
+    const isLast = currentIdx >= questions.length - 1
+    SFX.reveal()
+    if (config?.showLeaderboard && players.length > 0) {
+      setPhase('leaderboard')
+      setTimeout(() => advanceFromLeaderboard(isLast), 5000)
+    } else {
+      advanceFromLeaderboard(isLast)
     }
   }
 
@@ -663,6 +681,43 @@ export default function KahootPage() {
           <Button onClick={handleNext} className="w-full bg-[#6366f1] hover:bg-[#4f46e5] text-white font-bold py-5 rounded-2xl text-lg">
             {currentIdx >= questions.length-1 ? 'See Final Results' : 'Next Question'} <ChevronRight className="h-5 w-5 ml-1" />
           </Button>
+        </div>
+      </div>
+    )
+  }
+
+  // ─── LEADERBOARD (between questions) ────────────────────────────────────────
+  if (phase === 'leaderboard') {
+    const isLast = currentIdx >= questions.length - 1
+    const sorted = [...players].sort((a,b) => b.score-a.score).slice(0,10)
+    return (
+      <div className="min-h-screen bg-[#1a1a2e] text-white flex flex-col items-center justify-center p-4">
+        <div className="w-full max-w-md">
+          <div className="text-center mb-6">
+            <div className="text-5xl mb-2">🏆</div>
+            <h2 className="text-3xl font-black text-yellow-300">Leaderboard</h2>
+            <p className="text-indigo-300 text-sm mt-1">After question {currentIdx+1} of {questions.length}</p>
+          </div>
+          <div className="bg-[#16213e] rounded-2xl p-4 space-y-2 mb-6">
+            {sorted.map((p,rank) => (
+              <div key={p.id} className={`flex items-center justify-between py-2.5 px-3 rounded-xl ${rank===0?'bg-yellow-500/20 border border-yellow-500/40':rank===1?'bg-gray-400/10 border border-gray-600/30':rank===2?'bg-orange-500/10 border border-orange-600/30':'bg-gray-800/40'} ${p.id===players[currentPlayerIdx]?.id?'ring-2 ring-[#6366f1]':''}`}>
+                <div className="flex items-center gap-3">
+                  <span className="text-xl w-8 text-center">{rank===0?'🥇':rank===1?'🥈':rank===2?'🥉':`${rank+1}`}</span>
+                  <div>
+                    <span className="font-bold text-sm">{p.nickname}</span>
+                    {p.streak>=2 && <span className="text-xs text-orange-400 ml-1">🔥{p.streak}</span>}
+                  </div>
+                </div>
+                <span className="text-yellow-300 font-black text-lg">{p.score.toLocaleString()}</span>
+              </div>
+            ))}
+          </div>
+          <div className="text-center">
+            <p className="text-indigo-300 text-sm mb-3">Auto-continuing in 5 seconds…</p>
+            <Button onClick={() => advanceFromLeaderboard(isLast)} className="bg-[#6366f1] hover:bg-[#4f46e5] text-white font-bold px-8 py-4 rounded-2xl">
+              {isLast ? 'See Final Results' : 'Next Question'} <ChevronRight className="h-5 w-5 ml-1" />
+            </Button>
+          </div>
         </div>
       </div>
     )

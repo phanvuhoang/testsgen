@@ -595,6 +595,7 @@ model Gameshow {
   mediumCount       Int?
   hardCount         Int?
   shuffleQuestions  Boolean    @default(true)
+  showLeaderboard   Boolean    @default(true)
 
   // Timer settings
   timeLimitSeconds  Int        @default(30)   // Per-question timer

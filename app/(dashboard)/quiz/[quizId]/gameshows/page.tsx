@@ -41,6 +41,7 @@ type Gameshow = {
   maxPlayers: number
   requireLogin: boolean
   shuffleQuestions: boolean
+  showLeaderboard: boolean
   createdAt: string
   _count?: { sessions: number }
 }
@@ -78,9 +79,9 @@ const emptyForm = {
   playMode: 'SINGLE' as PlayMode,
   selectionMode: 'LINEAR' as SelectionMode,
   scoringMode: 'SPEED_ACCURACY' as ScoringMode,
-  questionsCount: '',
+  questionsCount: '10',
   questionSelectionMode: 'RANDOM' as 'RANDOM' | 'FIXED',
-  timeLimitSeconds: '30',
+  timeLimitSeconds: '20',
   answerRevealSeconds: '4',
   responseSeconds: '10',
   enableLifelines: 'true',
@@ -88,9 +89,10 @@ const emptyForm = {
   streakBonus: '50',
   categoriesCount: '5',
   tiersPerCategory: '5',
-  maxPlayers: '4',
+  maxPlayers: '10',
   requireLogin: 'false',
   shuffleQuestions: 'true',
+  showLeaderboard: 'true',
 }
 
 export default function GameshowsPage() {
@@ -170,6 +172,7 @@ export default function GameshowsPage() {
       maxPlayers: g.maxPlayers.toString(),
       requireLogin: String(g.requireLogin),
       shuffleQuestions: String(g.shuffleQuestions),
+      showLeaderboard: String((g as any).showLeaderboard ?? true),
     })
     setSettingsTab('general')
     setDialogOpen(true)
@@ -204,6 +207,7 @@ export default function GameshowsPage() {
         maxPlayers: parseInt(form.maxPlayers),
         requireLogin: form.requireLogin === 'true',
         shuffleQuestions: form.shuffleQuestions === 'true',
+        showLeaderboard: form.showLeaderboard === 'true',
       }
 
       let res: Response
@@ -365,7 +369,7 @@ export default function GameshowsPage() {
 
       {/* Create/Edit Dialog */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
-        <DialogContent className="max-w-xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>{editingGameshow ? 'Edit Gameshow' : 'New Gameshow'}</DialogTitle>
           </DialogHeader>
@@ -454,17 +458,17 @@ export default function GameshowsPage() {
               </div>
               <div className="space-y-2 pt-2 border-t">
                 <BoolCheckbox k="shuffleQuestions" label="Shuffle question order" />
+                <BoolCheckbox k="showLeaderboard" label="Show leaderboard after each question (top 10 players)" />
                 {form.playMode !== 'SINGLE' && (
                   <div className="space-y-1.5">
-                    <Label>Max players</Label>
-                    <Select value={form.maxPlayers} onValueChange={v => setForm({ ...form, maxPlayers: v })}>
-                      <SelectTrigger><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        {['2','3','4','5','6','8','10','20','50'].map(n => (
-                          <SelectItem key={n} value={n}>{n} players</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
+                    <Label>Max players (up to 100)</Label>
+                    <Input
+                      type="number" min="2" max="100"
+                      value={form.maxPlayers}
+                      onChange={e => setForm({ ...form, maxPlayers: e.target.value })}
+                      placeholder="e.g. 30"
+                    />
+                    <p className="text-xs text-gray-400">SSE polling handles ~50 concurrent players well; up to 100 is supported.</p>
                   </div>
                 )}
               </div>
@@ -581,7 +585,7 @@ export default function GameshowsPage() {
                       <Loader2 className="h-5 w-5 animate-spin text-gray-400" />
                     </div>
                   ) : (
-                    <div className="border rounded-lg divide-y max-h-64 overflow-y-auto">
+                    <div className="border rounded-lg divide-y max-h-72 overflow-y-auto">
                       {allQuestions.length === 0 ? (
                         <div className="text-center text-gray-400 text-sm py-6">No questions found</div>
                       ) : allQuestions.map((q, idx) => {
@@ -609,7 +613,7 @@ export default function GameshowsPage() {
                                     {order + 1}
                                   </span>
                                 )}
-                                <span className="text-sm font-medium truncate">{idx + 1}. {q.stem}</span>
+                                <span className="text-sm font-medium leading-snug">{idx + 1}. {q.stem}</span>
                               </div>
                               <div className="flex items-center gap-2 mt-0.5">
                                 <span className="text-xs text-gray-400">{q.questionType}</span>

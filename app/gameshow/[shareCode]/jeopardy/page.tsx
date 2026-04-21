@@ -9,7 +9,7 @@ import { Loader2, Trophy, CheckCircle2, XCircle, ChevronRight, RotateCcw, Home, 
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type Question = {
-  id: string; stem: string; questionType: string; options: string | null
+  id: string; stem: string; questionType: string; options: string[] | string | null
   correctAnswer: string; explanation: string | null; difficulty: string
   topic?: string | null; imageUrl?: string | null
 }
@@ -18,7 +18,7 @@ type GameshowConfig = {
   playMode: 'SINGLE' | 'LOCAL' | 'ONLINE'; selectionMode: 'LINEAR' | 'FREE_CHOICE'
   scoringMode: 'SPEED_ACCURACY' | 'ACCURACY_ONLY'; questionsCount: number | null
   timeLimitSeconds: number; responseSeconds: number; answerRevealSeconds: number
-  shuffleQuestions: boolean; maxPlayers: number
+  shuffleQuestions: boolean; showLeaderboard: boolean; maxPlayers: number
   categoriesCount: number; tiersPerCategory: number; tierPoints: string | null
   quizSetTitle: string
   questions: Question[]
@@ -26,7 +26,7 @@ type GameshowConfig = {
 type Player = { id: string; nickname: string; avatarColor: string; score: number; correctCount: number; wrongCount: number; isCurrentBuzzer?: boolean }
 type TileState = 'available' | 'answered' | 'active'
 type BoardTile = { questionId: string; category: string; points: number; state: TileState }
-type Phase = 'setup' | 'board' | 'question' | 'buzzer' | 'respond' | 'reveal' | 'linear_question' | 'gameover'
+type Phase = 'setup' | 'board' | 'question' | 'buzzer' | 'respond' | 'reveal' | 'linear_question' | 'leaderboard' | 'gameover'
 
 // ─── Sound Effects ─────────────────────────────────────────────────────────────
 function playTone(freq: number, dur: number, type: OscillatorType = 'sine', vol = 0.25) {
@@ -52,8 +52,18 @@ const SFX = {
 // ─── Utilities ─────────────────────────────────────────────────────────────────
 function parseOptions(q: Question): string[] {
   if (!q.options) return []
-  try { return JSON.parse(q.options) } catch { return q.options.split('|') }
+  if (Array.isArray(q.options)) return q.options as string[]
+  if (typeof q.options === 'string') {
+    try {
+      const parsed = JSON.parse(q.options)
+      return Array.isArray(parsed) ? parsed : []
+    } catch {
+      return (q.options as string).split('|')
+    }
+  }
+  return []
 }
+
 function getCorrectAnswers(q: Question): string[] {
   return q.correctAnswer.split('||').map(s => s.trim()).filter(Boolean)
 }
@@ -346,18 +356,26 @@ export default function JeopardyPage() {
     )))
   }
 
-  const handleNext = () => {
-    markTileDone()
+  const advanceFromLeaderboard = () => {
     const isLinear = config?.selectionMode === 'LINEAR'
     if (isLinear) {
       const next = linearIdx + 1
       setLinearIdx(next)
       showLinearQuestion(questions, next)
     } else {
-      // Check if board is done
       const allDone = board.every(col => col.every(t => t.state === 'answered'))
       if (allDone) { SFX.final(); setPhase('gameover'); return }
       setPhase('board')
+    }
+  }
+
+  const handleNext = () => {
+    markTileDone()
+    if (config?.showLeaderboard && players.length > 0) {
+      setPhase('leaderboard')
+      setTimeout(() => advanceFromLeaderboard(), 5000)
+    } else {
+      advanceFromLeaderboard()
     }
   }
 
@@ -708,6 +726,38 @@ export default function JeopardyPage() {
           <Button onClick={handleNext} className="w-full bg-yellow-400 hover:bg-yellow-300 text-black font-bold py-5 rounded-2xl text-lg">
             {config?.selectionMode === 'FREE_CHOICE' ? 'Back to Board' : 'Next Question'} <ChevronRight className="h-5 w-5 ml-1" />
           </Button>
+        </div>
+      </div>
+    )
+  }
+
+  // ─── LEADERBOARD ────────────────────────────────────────────────────────────
+  if (phase === 'leaderboard') {
+    const sorted = [...players].sort((a,b) => b.score-a.score).slice(0,10)
+    return (
+      <div className="min-h-screen bg-[#060b2e] text-white flex flex-col items-center justify-center p-4">
+        <div className="w-full max-w-md">
+          <div className="text-center mb-6">
+            <div className="text-5xl mb-2">🏆</div>
+            <h2 className="text-3xl font-black text-yellow-400">Leaderboard</h2>
+          </div>
+          <div className="bg-[#0d1560] rounded-2xl p-4 space-y-2 mb-6 border border-yellow-500/30">
+            {sorted.map((p,rank) => (
+              <div key={p.id} className={`flex items-center justify-between py-2.5 px-3 rounded-xl transition-all ${rank===0?'bg-yellow-500/20 border border-yellow-500/40':rank===1?'bg-gray-400/10 border border-gray-600/30':rank===2?'bg-orange-500/10 border border-orange-600/30':'bg-blue-900/20'}`}>
+                <div className="flex items-center gap-3">
+                  <span className="text-xl w-8 text-center">{rank===0?'🥇':rank===1?'🥈':rank===2?'🥉':`${rank+1}`}</span>
+                  <span className="font-bold text-sm">{p.nickname}</span>
+                </div>
+                <span className="text-yellow-400 font-black text-lg">{p.score.toLocaleString()}</span>
+              </div>
+            ))}
+          </div>
+          <div className="text-center">
+            <p className="text-blue-300 text-sm mb-3">Auto-continuing in 5 seconds…</p>
+            <Button onClick={advanceFromLeaderboard} className="bg-yellow-400 hover:bg-yellow-300 text-black font-bold px-8 py-4 rounded-2xl">
+              Continue <ChevronRight className="h-5 w-5 ml-1" />
+            </Button>
+          </div>
         </div>
       </div>
     )

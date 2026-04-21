@@ -67,6 +67,7 @@ export async function PATCH(
       maxPlayers: body.maxPlayers != null ? parseInt(body.maxPlayers) : undefined,
       requireLogin: body.requireLogin,
       shuffleQuestions: body.shuffleQuestions,
+      ...(body.showLeaderboard !== undefined ? { showLeaderboard: body.showLeaderboard } as any : {}),
       easyCount: body.easyCount != null ? parseInt(body.easyCount) || null : undefined,
       mediumCount: body.mediumCount != null ? parseInt(body.mediumCount) || null : undefined,
       hardCount: body.hardCount != null ? parseInt(body.hardCount) || null : undefined,

@@ -47,6 +47,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       maxPlayers: body.maxPlayers ? parseInt(body.maxPlayers) : 4,
       requireLogin: body.requireLogin ?? false,
       shuffleQuestions: body.shuffleQuestions ?? true,
+      ...(body.showLeaderboard !== undefined ? { showLeaderboard: body.showLeaderboard } as any : {}),
       easyCount: body.easyCount ? parseInt(body.easyCount) : null,
       mediumCount: body.mediumCount ? parseInt(body.mediumCount) : null,
       hardCount: body.hardCount ? parseInt(body.hardCount) : null,

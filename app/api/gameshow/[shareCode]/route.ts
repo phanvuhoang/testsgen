@@ -74,6 +74,7 @@ export async function GET(
     maxPlayers: gameshow.maxPlayers,
     requireLogin: gameshow.requireLogin,
     shuffleQuestions: gameshow.shuffleQuestions,
+    showLeaderboard: (gameshow as any).showLeaderboard ?? true,
     quizSetTitle: (gameshow as any).quizSet?.title ?? '',
     questions: safeQuestions,
   })
