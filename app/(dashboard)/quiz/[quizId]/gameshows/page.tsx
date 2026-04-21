@@ -42,6 +42,8 @@ type Gameshow = {
   requireLogin: boolean
   shuffleQuestions: boolean
   showLeaderboard: boolean
+  clickStartToCount: boolean
+  shortLink: string | null
   createdAt: string
   _count?: { sessions: number }
 }
@@ -93,6 +95,8 @@ const emptyForm = {
   requireLogin: 'false',
   shuffleQuestions: 'true',
   showLeaderboard: 'true',
+  clickStartToCount: 'false',
+  shortLink: '',
 }
 
 export default function GameshowsPage() {
@@ -173,6 +177,8 @@ export default function GameshowsPage() {
       requireLogin: String(g.requireLogin),
       shuffleQuestions: String(g.shuffleQuestions),
       showLeaderboard: String((g as any).showLeaderboard ?? true),
+      clickStartToCount: String(g.clickStartToCount ?? false),
+      shortLink: g.shortLink ?? '',
     })
     setSettingsTab('general')
     setDialogOpen(true)
@@ -208,6 +214,8 @@ export default function GameshowsPage() {
         requireLogin: form.requireLogin === 'true',
         shuffleQuestions: form.shuffleQuestions === 'true',
         showLeaderboard: form.showLeaderboard === 'true',
+        clickStartToCount: form.clickStartToCount === 'true',
+        shortLink: (form as any).shortLink?.trim() || null,
       }
 
       let res: Response
@@ -459,6 +467,7 @@ export default function GameshowsPage() {
               <div className="space-y-2 pt-2 border-t">
                 <BoolCheckbox k="shuffleQuestions" label="Shuffle question order" />
                 <BoolCheckbox k="showLeaderboard" label="Show leaderboard after each question (top 10 players)" />
+                <BoolCheckbox k="clickStartToCount" label="Click Start button to begin timer (wait before timing starts)" />
                 {form.playMode !== 'SINGLE' && (
                   <div className="space-y-1.5">
                     <Label>Max players (up to 100)</Label>
@@ -652,6 +661,15 @@ export default function GameshowsPage() {
               <p className="text-xs text-gray-400">
                 If enabled, players must be logged in. If disabled, anyone with the link can play as a guest.
               </p>
+              <div className="space-y-1.5 pt-2 border-t">
+                <Label>Short link (optional)</Label>
+                <Input
+                  value={(form as any).shortLink ?? ''}
+                  onChange={e => setForm({ ...form, shortLink: e.target.value } as any)}
+                  placeholder="e.g. https://s.example.com/abc123"
+                />
+                <p className="text-xs text-gray-400">If set, this URL is shown instead of the full game link and used for the QR code.</p>
+              </div>
             </TabsContent>
           </Tabs>
 

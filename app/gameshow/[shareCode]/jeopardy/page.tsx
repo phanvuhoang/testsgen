@@ -1,11 +1,16 @@
 'use client'
 
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useParams } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
-import { Loader2, Trophy, CheckCircle2, XCircle, ChevronRight, RotateCcw, Home, Zap } from 'lucide-react'
+import {
+  Loader2, Trophy, CheckCircle2, XCircle, ChevronRight, RotateCcw,
+  Home, Zap, Volume2, VolumeX, QrCode, Play, LogOut,
+} from 'lucide-react'
+import QRCode from 'qrcode'
+import { useAudio } from '../../useAudio'
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 type Question = {
@@ -20,34 +25,13 @@ type GameshowConfig = {
   timeLimitSeconds: number; responseSeconds: number; answerRevealSeconds: number
   shuffleQuestions: boolean; showLeaderboard: boolean; maxPlayers: number
   categoriesCount: number; tiersPerCategory: number; tierPoints: string | null
-  quizSetTitle: string
-  questions: Question[]
+  quizSetTitle: string; questions: Question[]
+  clickStartToCount: boolean; shortLink: string | null
 }
-type Player = { id: string; nickname: string; avatarColor: string; score: number; correctCount: number; wrongCount: number; isCurrentBuzzer?: boolean }
-type TileState = 'available' | 'answered' | 'active'
+type Player = { id: string; nickname: string; avatarColor: string; score: number; correctCount: number; wrongCount: number }
+type TileState = 'available' | 'answered'
 type BoardTile = { questionId: string; category: string; points: number; state: TileState }
 type Phase = 'setup' | 'board' | 'question' | 'buzzer' | 'respond' | 'reveal' | 'linear_question' | 'leaderboard' | 'gameover'
-
-// ─── Sound Effects ─────────────────────────────────────────────────────────────
-function playTone(freq: number, dur: number, type: OscillatorType = 'sine', vol = 0.25) {
-  try {
-    const ctx = new (window.AudioContext || (window as any).webkitAudioContext)()
-    const osc = ctx.createOscillator(); const gain = ctx.createGain()
-    osc.connect(gain); gain.connect(ctx.destination)
-    osc.type = type; osc.frequency.setValueAtTime(freq, ctx.currentTime)
-    gain.gain.setValueAtTime(vol, ctx.currentTime)
-    gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + dur)
-    osc.start(); osc.stop(ctx.currentTime + dur)
-  } catch {}
-}
-const SFX = {
-  select: () => playTone(440, 0.15),
-  buzz: () => { playTone(880, 0.1); setTimeout(() => playTone(1100, 0.15), 80) },
-  correct: () => { playTone(523, 0.1); setTimeout(() => playTone(659, 0.15), 120); setTimeout(() => playTone(784, 0.3), 260) },
-  wrong: () => playTone(180, 0.4, 'sawtooth', 0.2),
-  tick: () => playTone(700, 0.05, 'square', 0.08),
-  final: () => { [523,659,784,1047].forEach((f,i) => setTimeout(() => playTone(f, 0.25), i*150)) },
-}
 
 // ─── Utilities ─────────────────────────────────────────────────────────────────
 function parseOptions(q: Question): string[] {
@@ -63,17 +47,21 @@ function parseOptions(q: Question): string[] {
   }
   return []
 }
-
 function getCorrectAnswers(q: Question): string[] {
   return q.correctAnswer.split('||').map(s => s.trim()).filter(Boolean)
 }
 function normalize(s: string) {
-  return s.trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/đ/g,'d')
+  return s.trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/g, 'd')
 }
 function shuffle<T>(arr: T[]): T[] {
-  const a = [...arr]; for (let i=a.length-1;i>0;i--) { const j=Math.floor(Math.random()*(i+1));[a[i],a[j]]=[a[j],a[i]] }; return a
+  const a = [...arr]
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]]
+  }
+  return a
 }
-const PLAYER_COLORS = ['#6366f1','#ef4444','#f59e0b','#10b981','#8b5cf6','#ec4899']
+const PLAYER_COLORS = ['#6366f1', '#ef4444', '#f59e0b', '#10b981', '#8b5cf6', '#ec4899']
 
 // ─── Buzzer Button ─────────────────────────────────────────────────────────────
 function BuzzerButton({ onClick, disabled, label = 'BUZZ IN' }: { onClick: () => void; disabled: boolean; label?: string }) {
@@ -105,7 +93,7 @@ export default function JeopardyPage() {
   const [questions, setQuestions] = useState<Question[]>([])
   const [board, setBoard] = useState<BoardTile[][]>([]) // [categoryIdx][tierIdx]
   const [categories, setCategories] = useState<string[]>([])
-  const [tierPoints, setTierPoints] = useState<number[]>([10,25,50,100,200])
+  const [tierPoints, setTierPoints] = useState<number[]>([10, 25, 50, 100, 200])
 
   // Current question state
   const [currentQuestion, setCurrentQuestion] = useState<Question | null>(null)
@@ -114,7 +102,7 @@ export default function JeopardyPage() {
   const [linearIdx, setLinearIdx] = useState(0)
 
   // Buzzer
-  const [buzzOrder, setBuzzOrder] = useState<{playerIdx: number; timeMs: number}[]>([])
+  const [buzzOrder, setBuzzOrder] = useState<{ playerIdx: number; timeMs: number }[]>([])
   const [buzzerOpen, setBuzzerOpen] = useState(false)
   const [buzzerOpenTime, setBuzzerOpenTime] = useState(0)
   const [respondingPlayerIdx, setRespondingPlayerIdx] = useState<number | null>(null)
@@ -125,13 +113,38 @@ export default function JeopardyPage() {
   const [selectedMCQ, setSelectedMCQ] = useState<string | null>(null)
   const [isCorrect, setIsCorrect] = useState<boolean | null>(null)
   const [questionTimeLeft, setQuestionTimeLeft] = useState(30)
+  const [timerRunning, setTimerRunning] = useState(false)
 
   const [players, setPlayers] = useState<Player[]>([])
-  const [currentPlayerIdx, setCurrentPlayerIdx] = useState(0) // for single/linear local
+  const [currentPlayerIdx, setCurrentPlayerIdx] = useState(0)
   const [setupNames, setSetupNames] = useState([''])
+
+  // Answered questions tracking for Free Choice
+  const [answeredQuestions, setAnsweredQuestions] = useState<Set<string>>(new Set())
+
+  // QR code
+  const [qrDataUrl, setQrDataUrl] = useState<string | null>(null)
+  const [showQr, setShowQr] = useState(false)
+
+  // Audio
+  const [musicEnabled, setMusicEnabled] = useState(true)
+  const audio = useAudio(musicEnabled)
+  const timeCountPlayedRef = useRef(false)
+  const leaderboardTimerRef = useRef<NodeJS.Timeout | null>(null)
 
   const timerRef = useRef<NodeJS.Timeout | null>(null)
   const responseTimerRef = useRef<NodeJS.Timeout | null>(null)
+
+  // Music toggle button
+  const MusicBtn = () => (
+    <button
+      onClick={() => setMusicEnabled(v => !v)}
+      className="absolute top-4 right-4 z-50 w-10 h-10 rounded-full bg-black/40 flex items-center justify-center text-white hover:bg-black/60 transition-colors"
+      title={musicEnabled ? 'Mute music' : 'Unmute music'}
+    >
+      {musicEnabled ? <Volume2 className="h-5 w-5" /> : <VolumeX className="h-5 w-5" />}
+    </button>
+  )
 
   // Fetch config
   useEffect(() => {
@@ -142,6 +155,11 @@ export default function JeopardyPage() {
         if (data.type !== 'JEOPARDY') { setError('This gameshow is not a Jeopardy game'); return }
         setConfig(data)
         setLoading(false)
+        // Generate QR code for room join URL
+        const joinUrl = data.shortLink || `${window.location.origin}/gameshow/${data.shareCode}`
+        QRCode.toDataURL(joinUrl, { margin: 1, width: 200 }).then(setQrDataUrl).catch(() => {})
+        // Play opening music
+        audio.playBg('opening', 0.5)
       })
       .catch(() => setError('Failed to load gameshow'))
   }, [shareCode])
@@ -150,21 +168,19 @@ export default function JeopardyPage() {
   const buildBoard = (qs: Question[], cfg: GameshowConfig) => {
     const numCats = cfg.categoriesCount
     const numTiers = cfg.tiersPerCategory
-    let points: number[] = [10,25,50,100,200]
+    let points: number[] = [10, 25, 50, 100, 200]
     try { if (cfg.tierPoints) points = JSON.parse(cfg.tierPoints) } catch {}
     points = points.slice(0, numTiers)
     setTierPoints(points)
 
-    // Get category names from topics
     const topicSet = new Set(qs.map(q => q.topic).filter(Boolean) as string[])
     const topicList = Array.from(topicSet)
     const catNames: string[] = []
     for (let i = 0; i < numCats; i++) {
-      catNames.push(topicList[i] || `Category ${i+1}`)
+      catNames.push(topicList[i] || `Category ${i + 1}`)
     }
     setCategories(catNames)
 
-    // Distribute questions across board
     const shuffledQs = shuffle(qs)
     const boardData: BoardTile[][] = catNames.map((cat, ci) =>
       points.map((pts, ti) => {
@@ -181,13 +197,16 @@ export default function JeopardyPage() {
     const names = setupNames.filter(n => n.trim())
     if (!names.length) return
 
+    audio.stopAll()
+
     let qs = [...config.questions]
     if (config.shuffleQuestions) qs = shuffle(qs)
     if (config.questionsCount && config.questionsCount < qs.length) qs = qs.slice(0, config.questionsCount)
     setQuestions(qs)
+    setAnsweredQuestions(new Set())
 
-    const newPlayers: Player[] = names.map((n,i) => ({
-      id: `p${i}`, nickname: n.trim()||`Player ${i+1}`,
+    const newPlayers: Player[] = names.map((n, i) => ({
+      id: `p${i}`, nickname: n.trim() || `Player ${i + 1}`,
       avatarColor: PLAYER_COLORS[i % PLAYER_COLORS.length],
       score: 0, correctCount: 0, wrongCount: 0
     }))
@@ -198,17 +217,21 @@ export default function JeopardyPage() {
     if (config.selectionMode === 'FREE_CHOICE') {
       buildBoard(qs, config)
       setPhase('board')
+      // Play selecting-question music on board
+      audio.playBg('selecting', 0.5)
     } else {
       setPhase('linear_question')
-      showLinearQuestion(qs, 0)
+      showLinearQuestion(qs, 0, config)
     }
   }
 
-  const showLinearQuestion = (qs: Question[], idx: number) => {
+  const showLinearQuestion = useCallback((qs: Question[], idx: number, cfg?: GameshowConfig | null) => {
+    const activeConfig = cfg || config
     const q = qs[idx]
-    if (!q) { SFX.final(); setPhase('gameover'); return }
+    if (!q) { audio.stopAll(); setPhase('gameover'); return }
     setCurrentQuestion(q)
-    const pts = tierPoints[Math.min(Math.floor(idx / Math.max(1, qs.length/tierPoints.length)), tierPoints.length-1)] || 10
+    const tpoints = tierPoints
+    const pts = tpoints[Math.min(Math.floor(idx / Math.max(1, qs.length / tpoints.length)), tpoints.length - 1)] || 10
     setCurrentTilePoints(pts)
     setCurrentTileCategory('')
     setTextAnswer('')
@@ -216,19 +239,33 @@ export default function JeopardyPage() {
     setIsCorrect(null)
     setBuzzOrder([])
     setRespondingPlayerIdx(null)
-    setQuestionTimeLeft(config?.timeLimitSeconds ?? 30)
-    if (config?.playMode === 'SINGLE') {
-      setPhase('linear_question')
-      startQuestionTimer()
+    timeCountPlayedRef.current = false
+    const timeLimit = activeConfig?.timeLimitSeconds ?? 30
+    setQuestionTimeLeft(timeLimit)
+
+    if (activeConfig?.clickStartToCount) {
+      // Wait for Start button press: play 'wait' bg
+      setTimerRunning(false)
+      audio.playBg('wait', 0.5)
     } else {
-      openBuzzerPhase()
+      setTimerRunning(true)
+      if (activeConfig?.playMode === 'SINGLE') {
+        audio.playBg('game-play', 0.55)
+      } else {
+        openBuzzerPhase()
+        return
+      }
     }
-  }
+    if (activeConfig?.playMode !== 'SINGLE') {
+      openBuzzerPhase()
+    } else {
+      setPhase('linear_question')
+    }
+  }, [config, tierPoints])
 
   const selectBoardTile = (catIdx: number, tierIdx: number) => {
     const tile = board[catIdx]?.[tierIdx]
     if (!tile || tile.state !== 'available') return
-    SFX.select()
     const q = questions.find(q => q.id === tile.questionId)
     if (!q) return
     setCurrentQuestion(q)
@@ -239,30 +276,62 @@ export default function JeopardyPage() {
     setIsCorrect(null)
     setBuzzOrder([])
     setRespondingPlayerIdx(null)
+    timeCountPlayedRef.current = false
+    const timeLimit = config?.timeLimitSeconds ?? 30
+    setQuestionTimeLeft(timeLimit)
+
+    if (config?.clickStartToCount) {
+      setTimerRunning(false)
+      audio.playBg('wait', 0.5)
+    } else {
+      setTimerRunning(true)
+      if (config?.playMode !== 'SINGLE') {
+        openBuzzerPhase()
+        return
+      }
+      audio.playBg('game-play', 0.55)
+    }
 
     if (config?.playMode === 'SINGLE') {
       setPhase('question')
-      setQuestionTimeLeft(config?.timeLimitSeconds ?? 30)
-      startQuestionTimer()
     } else {
       openBuzzerPhase()
     }
   }
 
-  const startQuestionTimer = () => {
+  // Timer effect — only runs when timerRunning=true
+  useEffect(() => {
+    if (!timerRunning) return
     clearInterval(timerRef.current!)
     timerRef.current = setInterval(() => {
       setQuestionTimeLeft(prev => {
-        if (prev <= 1) { clearInterval(timerRef.current!); handleQuestionTimeout(); return 0 }
-        if (prev <= 5) SFX.tick()
+        if (prev <= 1) {
+          clearInterval(timerRef.current!)
+          setTimerRunning(false)
+          handleQuestionTimeout()
+          return 0
+        }
+        if (prev <= 5 && !timeCountPlayedRef.current) {
+          timeCountPlayedRef.current = true
+          audio.playTimeCount()
+        }
         return prev - 1
       })
     }, 1000)
+    return () => clearInterval(timerRef.current!)
+  }, [timerRunning])
+
+  const handleStartTimer = () => {
+    audio.stop('wait')
+    audio.playBg('game-play', 0.55)
+    setTimerRunning(true)
   }
 
   const handleQuestionTimeout = () => {
+    audio.stopAll()
+    audio.stopTimeCount()
+    audio.playOnce('lost', 0.9)
     setIsCorrect(false)
-    SFX.wrong()
     setPhase('reveal')
   }
 
@@ -277,11 +346,9 @@ export default function JeopardyPage() {
   const handleBuzzIn = (playerIdx: number) => {
     if (!buzzerOpen) return
     const elapsed = Date.now() - buzzerOpenTime
-    SFX.buzz()
     setBuzzOrder(prev => {
       if (prev.some(b => b.playerIdx === playerIdx)) return prev
       const newOrder = [...prev, { playerIdx, timeMs: elapsed }]
-      // First to buzz gets to answer
       if (newOrder.length === 1) {
         setBuzzerOpen(false)
         setRespondingPlayerIdx(playerIdx)
@@ -299,11 +366,9 @@ export default function JeopardyPage() {
       setResponseTimeLeft(prev => {
         if (prev <= 1) {
           clearInterval(responseTimerRef.current!)
-          // Time up — wrong, pass to next buzzer or end
           handleResponse(false)
           return 0
         }
-        if (prev <= 3) SFX.tick()
         return prev - 1
       })
     }, 1000)
@@ -311,18 +376,19 @@ export default function JeopardyPage() {
 
   const handleResponse = (correct: boolean) => {
     clearInterval(responseTimerRef.current!)
+    audio.stopAll()
     setIsCorrect(correct)
     const pts = correct ? currentTilePoints : 0
     if (correct) {
-      SFX.correct()
-      setPlayers(prev => prev.map((p,i) => {
+      audio.playOnce('win', 0.9)
+      setPlayers(prev => prev.map((p, i) => {
         if (i !== respondingPlayerIdx) return p
         return { ...p, score: p.score + pts, correctCount: p.correctCount + 1 }
       }))
     } else {
-      SFX.wrong()
+      audio.playOnce('lost', 0.9)
       if (respondingPlayerIdx !== null) {
-        setPlayers(prev => prev.map((p,i) => {
+        setPlayers(prev => prev.map((p, i) => {
           if (i !== respondingPlayerIdx) return p
           return { ...p, score: p.score - Math.floor(currentTilePoints * 0.25), wrongCount: p.wrongCount + 1 }
         }))
@@ -333,6 +399,9 @@ export default function JeopardyPage() {
 
   const handleSingleAnswer = (answer: string) => {
     clearInterval(timerRef.current!)
+    setTimerRunning(false)
+    audio.stopAll()
+    audio.stopTimeCount()
     const corrects = getCorrectAnswers(currentQuestion!)
     const correct = corrects.some(c => normalize(c) === normalize(answer))
     setIsCorrect(correct)
@@ -340,12 +409,13 @@ export default function JeopardyPage() {
     const basePoints = currentTilePoints
     const pts = config?.scoringMode === 'ACCURACY_ONLY'
       ? (correct ? basePoints : 0)
-      : correct ? Math.round(basePoints * (0.5 + 0.5 * (1 - elapsed/config!.timeLimitSeconds))) : 0
-    setPlayers(prev => prev.map((p,i) => {
+      : correct ? Math.round(basePoints * (0.5 + 0.5 * (1 - elapsed / config!.timeLimitSeconds))) : 0
+    setPlayers(prev => prev.map((p, i) => {
       if (i !== currentPlayerIdx) return p
-      return { ...p, score: p.score + pts, correctCount: correct ? p.correctCount+1 : p.correctCount, wrongCount: !correct ? p.wrongCount+1 : p.wrongCount }
+      return { ...p, score: p.score + pts, correctCount: correct ? p.correctCount + 1 : p.correctCount, wrongCount: !correct ? p.wrongCount + 1 : p.wrongCount }
     }))
-    if (correct) SFX.correct(); else SFX.wrong()
+    if (correct) audio.playOnce('win', 0.9)
+    else audio.playOnce('lost', 0.9)
     setPhase('reveal')
   }
 
@@ -354,31 +424,49 @@ export default function JeopardyPage() {
     setBoard(prev => prev.map(col => col.map(tile =>
       tile.questionId === currentQuestion.id ? { ...tile, state: 'answered' } : tile
     )))
+    setAnsweredQuestions(prev => new Set(Array.from(prev).concat(currentQuestion.id)))
   }
 
-  const advanceFromLeaderboard = () => {
+  const advanceFromLeaderboard = useCallback(() => {
+    audio.stopAll()
+    if (leaderboardTimerRef.current) clearTimeout(leaderboardTimerRef.current)
+
     const isLinear = config?.selectionMode === 'LINEAR'
     if (isLinear) {
       const next = linearIdx + 1
       setLinearIdx(next)
       showLinearQuestion(questions, next)
     } else {
+      // Check board completeness
       const allDone = board.every(col => col.every(t => t.state === 'answered'))
-      if (allDone) { SFX.final(); setPhase('gameover'); return }
+      if (allDone) { setPhase('gameover'); return }
       setPhase('board')
+      audio.playBg('selecting', 0.5)
     }
-  }
+  }, [config, linearIdx, questions, board, showLinearQuestion, audio])
 
   const handleNext = () => {
     markTileDone()
     if (config?.showLeaderboard && players.length > 0) {
+      audio.playBg('leaderboard', 0.6)
       setPhase('leaderboard')
-      setTimeout(() => advanceFromLeaderboard(), 5000)
+      leaderboardTimerRef.current = setTimeout(() => advanceFromLeaderboard(), 5000)
     } else {
       advanceFromLeaderboard()
     }
   }
 
+  // Exit to gameover (Free Choice)
+  const handleExitToGameover = () => {
+    audio.stopAll()
+    if (leaderboardTimerRef.current) clearTimeout(leaderboardTimerRef.current)
+    clearInterval(timerRef.current!)
+    setPhase('gameover')
+  }
+
+  const isFreeChoice = config?.selectionMode === 'FREE_CHOICE'
+
+  // ─── Loading / Error ──────────────────────────────────────────────────────
   if (loading) return (
     <div className="min-h-screen bg-[#060b2e] flex items-center justify-center">
       <Loader2 className="h-10 w-10 animate-spin text-yellow-400" />
@@ -393,8 +481,10 @@ export default function JeopardyPage() {
   // ─── SETUP ─────────────────────────────────────────────────────────────────
   if (phase === 'setup') {
     const maxP = config?.playMode === 'SINGLE' ? 1 : (config?.maxPlayers ?? 4)
+    const joinUrl = config?.shortLink || `${window.location.origin}/gameshow/${config?.shareCode}`
     return (
-      <div className="min-h-screen bg-[#060b2e] flex items-center justify-center p-4">
+      <div className="relative min-h-screen bg-[#060b2e] flex items-center justify-center p-4">
+        <MusicBtn />
         <div className="w-full max-w-md">
           <div className="text-center mb-8">
             <div className="text-6xl mb-2">📋</div>
@@ -408,18 +498,18 @@ export default function JeopardyPage() {
             <div className="space-y-3 mb-4">
               {setupNames.map((name, i) => (
                 <div key={i} className="flex gap-2 items-center">
-                  <div className="w-3 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: PLAYER_COLORS[i%PLAYER_COLORS.length] }} />
+                  <div className="w-3 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: PLAYER_COLORS[i % PLAYER_COLORS.length] }} />
                   <Input
                     value={name}
-                    onChange={e => { const n=[...setupNames]; n[i]=e.target.value; setSetupNames(n) }}
-                    placeholder={config?.playMode==='SINGLE'?'Your name...':`Player ${i+1}...`}
+                    onChange={e => { const n = [...setupNames]; n[i] = e.target.value; setSetupNames(n) }}
+                    placeholder={config?.playMode === 'SINGLE' ? 'Your name...' : `Player ${i + 1}...`}
                     className="bg-[#0a0a2e] border-blue-500/30 text-white placeholder:text-blue-400 rounded-xl"
                   />
                 </div>
               ))}
             </div>
             {config?.playMode !== 'SINGLE' && setupNames.length < maxP && (
-              <Button variant="outline" size="sm" onClick={() => setSetupNames([...setupNames,''])}
+              <Button variant="outline" size="sm" onClick={() => setSetupNames([...setupNames, ''])}
                 className="w-full mb-4 border-blue-500/30 text-blue-300 hover:bg-blue-900/30">+ Add Player</Button>
             )}
             <div className="text-xs text-blue-400 mb-4 space-y-1">
@@ -427,7 +517,29 @@ export default function JeopardyPage() {
               <div>📋 {config?.categoriesCount} categories × {config?.tiersPerCategory} tiers</div>
               {config?.playMode !== 'SINGLE' && <div>🔔 Buzzer mode: first to buzz in answers</div>}
             </div>
-            <Button onClick={startGame} disabled={!setupNames.some(n=>n.trim())}
+            {/* QR / Join URL for multiplayer */}
+            {config?.playMode !== 'SINGLE' && (
+              <div className="mb-4 p-3 bg-[#0a0a2e] rounded-xl border border-blue-500/20">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs text-blue-400 mb-1">Join link</p>
+                    <p className="text-xs text-white truncate font-mono">{joinUrl}</p>
+                  </div>
+                  {qrDataUrl && (
+                    <button onClick={() => setShowQr(v => !v)}
+                      className="flex-shrink-0 p-2 rounded-lg bg-white/10 hover:bg-white/20 transition-colors">
+                      <QrCode className="h-5 w-5 text-white" />
+                    </button>
+                  )}
+                </div>
+                {showQr && qrDataUrl && (
+                  <div className="mt-3 flex justify-center">
+                    <img src={qrDataUrl} alt="QR Code" className="w-40 h-40 rounded-lg" />
+                  </div>
+                )}
+              </div>
+            )}
+            <Button onClick={startGame} disabled={!setupNames.some(n => n.trim())}
               className="w-full bg-yellow-400 hover:bg-yellow-300 text-black font-bold text-lg py-6 rounded-2xl">
               Start Game
             </Button>
@@ -439,19 +551,28 @@ export default function JeopardyPage() {
 
   // ─── BOARD ──────────────────────────────────────────────────────────────────
   if (phase === 'board') {
-    const sorted = [...players].sort((a,b) => b.score-a.score)
     return (
-      <div className="min-h-screen bg-[#060b2e] text-white p-2 sm:p-4">
+      <div className="relative min-h-screen bg-[#060b2e] text-white p-2 sm:p-4">
+        <MusicBtn />
         <div className="max-w-4xl mx-auto">
-          {/* Scores */}
+          {/* Scores + Exit */}
           <div className="flex justify-between items-center mb-4 flex-wrap gap-2">
-            {players.map(p => (
-              <div key={p.id} className="flex items-center gap-2 bg-[#0d1b5e] px-3 py-1.5 rounded-xl border border-blue-500/30">
-                <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: p.avatarColor }} />
-                <span className="text-sm font-medium">{p.nickname}</span>
-                <span className="text-yellow-300 font-bold text-sm">{p.score}</span>
-              </div>
-            ))}
+            <div className="flex flex-wrap gap-2">
+              {players.map(p => (
+                <div key={p.id} className="flex items-center gap-2 bg-[#0d1b5e] px-3 py-1.5 rounded-xl border border-blue-500/30">
+                  <div className="w-2.5 h-2.5 rounded-full" style={{ backgroundColor: p.avatarColor }} />
+                  <span className="text-sm font-medium">{p.nickname}</span>
+                  <span className="text-yellow-300 font-bold text-sm">{p.score}</span>
+                </div>
+              ))}
+            </div>
+            {isFreeChoice && (
+              <Button size="sm" variant="outline"
+                onClick={handleExitToGameover}
+                className="border-red-500/50 text-red-400 hover:bg-red-900/30 gap-1">
+                <LogOut className="h-3.5 w-3.5" /> End Game
+              </Button>
+            )}
           </div>
 
           {/* Board grid */}
@@ -491,16 +612,18 @@ export default function JeopardyPage() {
     )
   }
 
-  // ─── QUESTION (Single player Free Choice) ────────────────────────────────
+  // ─── QUESTION (Single player) ───────────────────────────────────────────────
   if ((phase === 'question' || phase === 'linear_question') && currentQuestion) {
     const options = parseOptions(currentQuestion)
     const isMCQ = options.length > 0
     const maxTime = config?.timeLimitSeconds ?? 30
     const timerPct = (questionTimeLeft / maxTime) * 100
     const timerColor = timerPct > 50 ? 'bg-blue-400' : timerPct > 25 ? 'bg-yellow-400' : 'bg-red-500'
+    const waiting = config?.clickStartToCount && !timerRunning
 
     return (
-      <div className="min-h-screen bg-[#060b2e] text-white flex flex-col p-4">
+      <div className="relative min-h-screen bg-[#060b2e] text-white flex flex-col p-4">
+        <MusicBtn />
         <div className="max-w-2xl mx-auto w-full flex-1 flex flex-col justify-center">
           {/* Header */}
           <div className="flex items-center justify-between mb-4">
@@ -508,7 +631,9 @@ export default function JeopardyPage() {
               {currentTileCategory && <Badge className="bg-blue-900 text-blue-300 border border-blue-500/30">{currentTileCategory}</Badge>}
               <span className="ml-2 text-yellow-400 font-bold">${currentTilePoints}</span>
             </div>
-            <div className={`text-2xl font-black ${questionTimeLeft <= 5 ? 'text-red-400 animate-pulse' : 'text-white'}`}>⏱ {questionTimeLeft}</div>
+            <div className={`text-2xl font-black ${questionTimeLeft <= 5 && timerRunning ? 'text-red-400 animate-pulse' : 'text-white'}`}>
+              ⏱ {questionTimeLeft}
+            </div>
             <div className="text-sm text-blue-300">{players[currentPlayerIdx]?.score ?? 0} pts</div>
           </div>
           <div className="h-2 bg-gray-700 rounded-full mb-6">
@@ -521,43 +646,54 @@ export default function JeopardyPage() {
             <p className="text-lg sm:text-xl font-semibold leading-relaxed">{currentQuestion.stem}</p>
           </div>
 
-          {/* Answer */}
-          {isMCQ ? (
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              {options.map((opt, i) => (
-                <button key={opt} onClick={() => handleSingleAnswer(opt)}
-                  className="flex items-center gap-3 p-4 rounded-xl border-2 bg-[#0d1b5e] border-blue-500/50 hover:bg-[#1a2f8e] hover:border-yellow-400 text-left font-medium transition-all hover:scale-[1.02] active:scale-95">
-                  <span className="w-7 h-7 rounded-full bg-yellow-400 text-black font-black text-xs flex items-center justify-center flex-shrink-0">
-                    {['A','B','C','D'][i]}
-                  </span>
-                  <span className="text-sm">{opt}</span>
-                </button>
-              ))}
-            </div>
-          ) : (
-            <div className="flex gap-3">
-              <Input value={textAnswer} onChange={e => setTextAnswer(e.target.value)}
-                onKeyDown={e => e.key === 'Enter' && textAnswer.trim() && handleSingleAnswer(textAnswer)}
-                placeholder="Type your answer..." autoFocus
-                className="bg-[#0d1b5e] border-blue-500/30 text-white placeholder:text-blue-400 rounded-xl text-lg py-6" />
-              <Button onClick={() => textAnswer.trim() && handleSingleAnswer(textAnswer)}
-                disabled={!textAnswer.trim()}
-                className="bg-yellow-400 text-black font-bold hover:bg-yellow-300 rounded-xl px-6">
-                Submit
+          {/* Click-Start-to-count overlay */}
+          {waiting ? (
+            <div className="flex flex-col items-center gap-4">
+              <p className="text-blue-300 text-sm">Press Start when ready to begin the timer</p>
+              <Button onClick={handleStartTimer}
+                className="bg-yellow-400 hover:bg-yellow-300 text-black font-black text-lg px-10 py-5 rounded-2xl gap-2">
+                <Play className="h-5 w-5" /> Start Timer
               </Button>
             </div>
+          ) : (
+            /* Answer */
+            isMCQ ? (
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                {options.map((opt, i) => (
+                  <button key={opt} onClick={() => handleSingleAnswer(opt)}
+                    className="flex items-center gap-3 p-4 rounded-xl border-2 bg-[#0d1b5e] border-blue-500/50 hover:bg-[#1a2f8e] hover:border-yellow-400 text-left font-medium transition-all hover:scale-[1.02] active:scale-95">
+                    <span className="w-7 h-7 rounded-full bg-yellow-400 text-black font-black text-xs flex items-center justify-center flex-shrink-0">
+                      {['A', 'B', 'C', 'D'][i]}
+                    </span>
+                    <span className="text-sm">{opt}</span>
+                  </button>
+                ))}
+              </div>
+            ) : (
+              <div className="flex gap-3">
+                <Input value={textAnswer} onChange={e => setTextAnswer(e.target.value)}
+                  onKeyDown={e => e.key === 'Enter' && textAnswer.trim() && handleSingleAnswer(textAnswer)}
+                  placeholder="Type your answer..." autoFocus
+                  className="bg-[#0d1b5e] border-blue-500/30 text-white placeholder:text-blue-400 rounded-xl text-lg py-6" />
+                <Button onClick={() => textAnswer.trim() && handleSingleAnswer(textAnswer)}
+                  disabled={!textAnswer.trim()}
+                  className="bg-yellow-400 text-black font-bold hover:bg-yellow-300 rounded-xl px-6">
+                  Submit
+                </Button>
+              </div>
+            )
           )}
         </div>
       </div>
     )
   }
 
-  // ─── BUZZER PHASE (Multiplayer) ────────────────────────────────────────────
+  // ─── BUZZER PHASE (Multiplayer) ─────────────────────────────────────────────
   if (phase === 'buzzer' && currentQuestion) {
     return (
-      <div className="min-h-screen bg-[#060b2e] text-white flex flex-col p-4">
+      <div className="relative min-h-screen bg-[#060b2e] text-white flex flex-col p-4">
+        <MusicBtn />
         <div className="max-w-2xl mx-auto w-full">
-          {/* Question display */}
           <div className="bg-[#0d1b5e] border-2 border-blue-500/50 rounded-2xl p-5 mb-6 text-center">
             <div className="flex items-center justify-between mb-3">
               {currentTileCategory && <Badge className="bg-blue-900 text-blue-300">{currentTileCategory}</Badge>}
@@ -567,7 +703,6 @@ export default function JeopardyPage() {
             <p className="text-lg font-semibold">{currentQuestion.stem}</p>
           </div>
 
-          {/* Buzzer buttons */}
           <div className="text-center mb-6">
             <p className="text-blue-300 mb-4 font-medium">
               {buzzerOpen ? '🔔 BUZZ IN — First to answer!' : '⏳ Waiting...'}
@@ -581,7 +716,7 @@ export default function JeopardyPage() {
                     <BuzzerButton
                       onClick={() => handleBuzzIn(idx)}
                       disabled={!buzzerOpen || hasBuzzed}
-                      label={hasBuzzed ? `#${buzzPos+1}` : 'BUZZ'}
+                      label={hasBuzzed ? `#${buzzPos + 1}` : 'BUZZ'}
                     />
                     <div className="text-sm font-bold" style={{ color: p.avatarColor }}>{p.nickname}</div>
                     <div className="text-xs text-gray-400">{p.score} pts</div>
@@ -591,14 +726,13 @@ export default function JeopardyPage() {
             </div>
           </div>
 
-          {/* Buzz register */}
           {buzzOrder.length > 0 && (
             <div className="bg-[#0d1b5e] rounded-xl p-3 border border-blue-500/30">
               <p className="text-xs text-blue-400 uppercase mb-2">Buzz Order</p>
               {buzzOrder.map((b, i) => (
                 <div key={i} className="flex items-center justify-between py-1 text-sm">
-                  <span>{i+1}. {players[b.playerIdx]?.nickname}</span>
-                  <span className="text-yellow-400">{(b.timeMs/1000).toFixed(2)}s</span>
+                  <span>{i + 1}. {players[b.playerIdx]?.nickname}</span>
+                  <span className="text-yellow-400">{(b.timeMs / 1000).toFixed(2)}s</span>
                 </div>
               ))}
             </div>
@@ -615,7 +749,8 @@ export default function JeopardyPage() {
     const isMCQ = options.length > 0
 
     return (
-      <div className="min-h-screen bg-[#060b2e] text-white flex flex-col p-4">
+      <div className="relative min-h-screen bg-[#060b2e] text-white flex flex-col p-4">
+        <MusicBtn />
         <div className="max-w-2xl mx-auto w-full">
           <div className="text-center mb-6">
             <div className="inline-flex items-center gap-2 bg-yellow-400 text-black px-4 py-2 rounded-full font-black">
@@ -639,7 +774,7 @@ export default function JeopardyPage() {
                     handleResponse(correct)
                   }}
                   className="flex items-center gap-3 p-4 rounded-xl border-2 bg-[#0d1b5e] border-blue-500/50 hover:bg-[#1a2f8e] hover:border-yellow-400 text-left font-medium transition-all hover:scale-[1.02] active:scale-95">
-                  <span className="w-7 h-7 rounded-full bg-yellow-400 text-black font-black text-xs flex items-center justify-center">{['A','B','C','D'][i]}</span>
+                  <span className="w-7 h-7 rounded-full bg-yellow-400 text-black font-black text-xs flex items-center justify-center">{['A', 'B', 'C', 'D'][i]}</span>
                   <span className="text-sm">{opt}</span>
                 </button>
               ))}
@@ -670,7 +805,6 @@ export default function JeopardyPage() {
             </div>
           )}
 
-          {/* Host override for non-MCQ */}
           {!isMCQ && (
             <div className="mt-4 flex gap-3 justify-center">
               <Button onClick={() => handleResponse(true)} className="bg-green-600 hover:bg-green-500 text-white font-bold rounded-xl px-6">
@@ -690,7 +824,8 @@ export default function JeopardyPage() {
   if (phase === 'reveal' && currentQuestion) {
     const corrects = getCorrectAnswers(currentQuestion)
     return (
-      <div className="min-h-screen bg-[#060b2e] text-white flex flex-col items-center justify-center p-4">
+      <div className="relative min-h-screen bg-[#060b2e] text-white flex flex-col items-center justify-center p-4">
+        <MusicBtn />
         <div className="w-full max-w-lg">
           <div className={`text-center p-6 rounded-2xl mb-6 border-2 ${isCorrect ? 'bg-green-900/40 border-green-500' : 'bg-red-900/40 border-red-500'}`}>
             {isCorrect
@@ -709,13 +844,12 @@ export default function JeopardyPage() {
             </div>
           )}
 
-          {/* Scoreboard */}
           <div className="bg-[#0d1b5e] rounded-2xl p-4 mb-5">
             <p className="text-xs uppercase tracking-wide text-blue-400 font-semibold mb-3">Scoreboard</p>
-            {[...players].sort((a,b)=>b.score-a.score).map((p,rank) => (
+            {[...players].sort((a, b) => b.score - a.score).map((p, rank) => (
               <div key={p.id} className="flex items-center justify-between py-2 border-b border-blue-500/20 last:border-0">
                 <div className="flex items-center gap-2">
-                  <span className="text-lg">{['🥇','🥈','🥉'][rank]||`${rank+1}.`}</span>
+                  <span className="text-lg">{['🥇', '🥈', '🥉'][rank] || `${rank + 1}.`}</span>
                   <span className="text-sm font-medium">{p.nickname}</span>
                 </div>
                 <span className="text-yellow-300 font-bold">${p.score}</span>
@@ -724,7 +858,7 @@ export default function JeopardyPage() {
           </div>
 
           <Button onClick={handleNext} className="w-full bg-yellow-400 hover:bg-yellow-300 text-black font-bold py-5 rounded-2xl text-lg">
-            {config?.selectionMode === 'FREE_CHOICE' ? 'Back to Board' : 'Next Question'} <ChevronRight className="h-5 w-5 ml-1" />
+            {isFreeChoice ? 'Back to Board' : 'Next Question'} <ChevronRight className="h-5 w-5 ml-1" />
           </Button>
         </div>
       </div>
@@ -733,30 +867,39 @@ export default function JeopardyPage() {
 
   // ─── LEADERBOARD ────────────────────────────────────────────────────────────
   if (phase === 'leaderboard') {
-    const sorted = [...players].sort((a,b) => b.score-a.score).slice(0,10)
+    const sorted = [...players].sort((a, b) => b.score - a.score).slice(0, 10)
     return (
-      <div className="min-h-screen bg-[#060b2e] text-white flex flex-col items-center justify-center p-4">
+      <div className="relative min-h-screen bg-[#060b2e] text-white flex flex-col items-center justify-center p-4">
+        <MusicBtn />
         <div className="w-full max-w-md">
           <div className="text-center mb-6">
             <div className="text-5xl mb-2">🏆</div>
             <h2 className="text-3xl font-black text-yellow-400">Leaderboard</h2>
           </div>
           <div className="bg-[#0d1560] rounded-2xl p-4 space-y-2 mb-6 border border-yellow-500/30">
-            {sorted.map((p,rank) => (
-              <div key={p.id} className={`flex items-center justify-between py-2.5 px-3 rounded-xl transition-all ${rank===0?'bg-yellow-500/20 border border-yellow-500/40':rank===1?'bg-gray-400/10 border border-gray-600/30':rank===2?'bg-orange-500/10 border border-orange-600/30':'bg-blue-900/20'}`}>
+            {sorted.map((p, rank) => (
+              <div key={p.id} className={`flex items-center justify-between py-2.5 px-3 rounded-xl transition-all ${rank === 0 ? 'bg-yellow-500/20 border border-yellow-500/40' : rank === 1 ? 'bg-gray-400/10 border border-gray-600/30' : rank === 2 ? 'bg-orange-500/10 border border-orange-600/30' : 'bg-blue-900/20'}`}>
                 <div className="flex items-center gap-3">
-                  <span className="text-xl w-8 text-center">{rank===0?'🥇':rank===1?'🥈':rank===2?'🥉':`${rank+1}`}</span>
+                  <span className="text-xl w-8 text-center">{rank === 0 ? '🥇' : rank === 1 ? '🥈' : rank === 2 ? '🥉' : `${rank + 1}`}</span>
                   <span className="font-bold text-sm">{p.nickname}</span>
                 </div>
                 <span className="text-yellow-400 font-black text-lg">{p.score.toLocaleString()}</span>
               </div>
             ))}
           </div>
-          <div className="text-center">
-            <p className="text-blue-300 text-sm mb-3">Auto-continuing in 5 seconds…</p>
-            <Button onClick={advanceFromLeaderboard} className="bg-yellow-400 hover:bg-yellow-300 text-black font-bold px-8 py-4 rounded-2xl">
-              Continue <ChevronRight className="h-5 w-5 ml-1" />
-            </Button>
+          <div className="text-center space-y-3">
+            <p className="text-blue-300 text-sm">Auto-continuing in 5 seconds…</p>
+            <div className="flex gap-3 justify-center">
+              <Button onClick={advanceFromLeaderboard} className="bg-yellow-400 hover:bg-yellow-300 text-black font-bold px-8 py-4 rounded-2xl">
+                Continue <ChevronRight className="h-5 w-5 ml-1" />
+              </Button>
+              {isFreeChoice && (
+                <Button onClick={handleExitToGameover} variant="outline"
+                  className="border-red-500/50 text-red-400 hover:bg-red-900/30 px-6 py-4 rounded-2xl gap-1">
+                  <LogOut className="h-4 w-4" /> End Game
+                </Button>
+              )}
+            </div>
           </div>
         </div>
       </div>
@@ -765,9 +908,10 @@ export default function JeopardyPage() {
 
   // ─── GAME OVER ─────────────────────────────────────────────────────────────
   if (phase === 'gameover') {
-    const sorted = [...players].sort((a,b) => b.score-a.score)
+    const sorted = [...players].sort((a, b) => b.score - a.score)
     return (
-      <div className="min-h-screen bg-[#060b2e] text-white flex items-center justify-center p-4">
+      <div className="relative min-h-screen bg-[#060b2e] text-white flex items-center justify-center p-4">
+        <MusicBtn />
         <div className="w-full max-w-lg">
           <div className="text-center mb-8">
             <Trophy className="h-16 w-16 text-yellow-400 mx-auto mb-3" />
@@ -775,11 +919,11 @@ export default function JeopardyPage() {
             <p className="text-blue-300 mt-1">{config?.name}</p>
           </div>
           <div className="space-y-3 mb-8">
-            {sorted.map((p,rank) => (
-              <div key={p.id} className={`rounded-2xl p-5 border-2 ${rank===0?'bg-yellow-900/30 border-yellow-400':rank===1?'bg-gray-700/30 border-gray-400':'bg-[#0d1b5e] border-blue-500/30'}`}>
+            {sorted.map((p, rank) => (
+              <div key={p.id} className={`rounded-2xl p-5 border-2 ${rank === 0 ? 'bg-yellow-900/30 border-yellow-400' : rank === 1 ? 'bg-gray-700/30 border-gray-400' : 'bg-[#0d1b5e] border-blue-500/30'}`}>
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
-                    <span className="text-2xl">{['🥇','🥈','🥉'][rank]||`${rank+1}.`}</span>
+                    <span className="text-2xl">{['🥇', '🥈', '🥉'][rank] || `${rank + 1}.`}</span>
                     <div>
                       <div className="font-bold">{p.nickname}</div>
                       <div className="text-xs text-gray-400">{p.correctCount} correct · {p.wrongCount} wrong</div>
@@ -791,7 +935,7 @@ export default function JeopardyPage() {
             ))}
           </div>
           <div className="flex gap-3">
-            <Button onClick={() => { setPhase('setup'); setSetupNames([setupNames[0]||'']) }}
+            <Button onClick={() => { audio.stopAll(); setPhase('setup'); setSetupNames([setupNames[0] || '']); audio.playBg('opening', 0.5) }}
               variant="outline" className="flex-1 border-blue-500/30 text-blue-300 hover:bg-blue-900/30 rounded-2xl">
               <RotateCcw className="h-4 w-4 mr-2" /> Play Again
             </Button>

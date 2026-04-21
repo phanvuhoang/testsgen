@@ -48,6 +48,8 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       requireLogin: body.requireLogin ?? false,
       shuffleQuestions: body.shuffleQuestions ?? true,
       ...(body.showLeaderboard !== undefined ? { showLeaderboard: body.showLeaderboard } as any : {}),
+      ...(body.clickStartToCount !== undefined ? { clickStartToCount: body.clickStartToCount } as any : {}),
+      shortLink: body.shortLink ?? null,
       easyCount: body.easyCount ? parseInt(body.easyCount) : null,
       mediumCount: body.mediumCount ? parseInt(body.mediumCount) : null,
       hardCount: body.hardCount ? parseInt(body.hardCount) : null,

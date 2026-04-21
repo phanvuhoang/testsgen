@@ -68,6 +68,8 @@ export async function PATCH(
       requireLogin: body.requireLogin,
       shuffleQuestions: body.shuffleQuestions,
       ...(body.showLeaderboard !== undefined ? { showLeaderboard: body.showLeaderboard } as any : {}),
+      ...(body.clickStartToCount !== undefined ? { clickStartToCount: body.clickStartToCount } as any : {}),
+      ...(body.shortLink !== undefined ? { shortLink: body.shortLink } as any : {}),
       easyCount: body.easyCount != null ? parseInt(body.easyCount) || null : undefined,
       mediumCount: body.mediumCount != null ? parseInt(body.mediumCount) || null : undefined,
       hardCount: body.hardCount != null ? parseInt(body.hardCount) || null : undefined,

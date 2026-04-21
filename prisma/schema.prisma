@@ -596,6 +596,8 @@ model Gameshow {
   hardCount         Int?
   shuffleQuestions  Boolean    @default(true)
   showLeaderboard   Boolean    @default(true)
+  clickStartToCount Boolean    @default(false)
+  shortLink         String?    // Custom short URL for the gameshow
 
   // Timer settings
   timeLimitSeconds  Int        @default(30)   // Per-question timer
