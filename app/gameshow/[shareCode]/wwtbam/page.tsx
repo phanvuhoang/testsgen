@@ -167,8 +167,14 @@ export default function WwtbamPage() {
     setCurrentPlayerIdx(0); setCurrentIdx(0)
     setAnsweredQuestions(new Set())
     audio.stop('opening')
-    setPhase('intro')
-    setTimeout(() => beginQuestion(0), 1800)
+    // Free Choice: show board first; Linear: show intro then begin Q1
+    if (config.selectionMode === 'FREE_CHOICE') {
+      audio.playBg('selecting', 0.5)
+      setPhase('select')
+    } else {
+      setPhase('intro')
+      setTimeout(() => beginQuestion(0), 1800)
+    }
   }
 
   const beginQuestion = (idx: number, qs?: Question[]) => {
@@ -225,6 +231,9 @@ export default function WwtbamPage() {
       wrongCount: !correct ? p.wrongCount + 1 : p.wrongCount,
       streak: correct ? p.streak + 1 : 0,
     }))
+    // Mark question as answered here (after answering, not when selecting)
+    setAnsweredQuestions(prev => new Set(Array.from(prev).concat(currentQuestion.id)))
+    saveAnalytics(currentQuestion.id, answer, correct, pts, (Date.now() - questionStartTime))
 
     if (correct) audio.playOnce('win', 0.9)
     else audio.playOnce('lost', 0.9)
@@ -268,6 +277,22 @@ export default function WwtbamPage() {
     audio.stopAll()
     audio.playBg('selecting', 0.5)
     setPhase('select')
+  }
+
+  // Save analytics after each answer
+  const saveAnalytics = (questionId: string, answer: string, correct: boolean, pts: number, elapsedMs: number) => {
+    try {
+      fetch('/api/gameshow/analytics', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          gameshowId: config?.id,
+          gameType: 'WWTBAM',
+          playerNickname: currentPlayer?.nickname,
+          questionId, answer, correct, points: pts, elapsedMs,
+        })
+      }).catch(() => {})
+    } catch {}
   }
 
   // Lifelines
@@ -420,13 +445,15 @@ export default function WwtbamPage() {
               <h2 className="text-2xl font-bold text-yellow-300">
                 {config?.playMode === 'LOCAL' ? `${currentPlayer?.nickname}'s Turn` : 'Choose Your Question'}
               </h2>
-              <p className="text-blue-300 text-sm">Score: {currentPlayer?.score ?? 0} pts</p>
+              <p className="text-blue-300 text-sm">
+                {answeredQuestions.size}/{questions.length} done · {currentPlayer?.score ?? 0} pts
+              </p>
             </div>
-            {/* Exit to leaderboard */}
+            {/* Exit to gameover */}
             <Button size="sm" variant="outline"
-              onClick={() => { audio.stopAll(); audio.playBg('leaderboard', 0.6); setPhase('leaderboard'); setTimeout(() => setPhase('gameover'), 5000) }}
+              onClick={() => { audio.stopAll(); setPhase('gameover') }}
               className="border-red-500/50 text-red-400 hover:bg-red-900/20">
-              <LogOut className="h-4 w-4 mr-1" /> Exit
+              <LogOut className="h-4 w-4 mr-1" /> End Game
             </Button>
           </div>
           <div className="grid grid-cols-3 sm:grid-cols-4 gap-3">
@@ -436,7 +463,6 @@ export default function WwtbamPage() {
                 <button key={q.id} disabled={done}
                   onClick={() => {
                     if (!done) {
-                      setAnsweredQuestions(prev => new Set(Array.from(prev).concat(q.id)))
                       audio.stop('selecting')
                       beginQuestion(idx)
                     }
@@ -714,10 +740,13 @@ export default function WwtbamPage() {
     )
   }
 
+  // Stop audio on gameover (moved out of conditional)
+  useEffect(() => {
+    if (phase === 'gameover') audio.stopAll()
+  }, [phase])
+
   // ─── GAME OVER ────────────────────────────────────────────────────────────
   if (phase === 'gameover') {
-    // Play final music when reaching gameover
-    useEffect(() => { audio.stopAll() }, [])
     const sorted = [...players].sort((a, b) => b.score - a.score)
     return (
       <div className="relative min-h-screen bg-[#0a0a2e] text-white flex items-center justify-center p-4">

@@ -43,6 +43,7 @@ type Gameshow = {
   shuffleQuestions: boolean
   showLeaderboard: boolean
   clickStartToCount: boolean
+  buzzerMode: boolean
   shortLink: string | null
   createdAt: string
   _count?: { sessions: number }
@@ -96,6 +97,7 @@ const emptyForm = {
   shuffleQuestions: 'true',
   showLeaderboard: 'true',
   clickStartToCount: 'false',
+  buzzerMode: 'false',
   shortLink: '',
 }
 
@@ -178,6 +180,7 @@ export default function GameshowsPage() {
       shuffleQuestions: String(g.shuffleQuestions),
       showLeaderboard: String((g as any).showLeaderboard ?? true),
       clickStartToCount: String(g.clickStartToCount ?? false),
+      buzzerMode: String(g.buzzerMode ?? false),
       shortLink: g.shortLink ?? '',
     })
     setSettingsTab('general')
@@ -215,6 +218,7 @@ export default function GameshowsPage() {
         shuffleQuestions: form.shuffleQuestions === 'true',
         showLeaderboard: form.showLeaderboard === 'true',
         clickStartToCount: form.clickStartToCount === 'true',
+        buzzerMode: (form as any).buzzerMode === 'true',
         shortLink: (form as any).shortLink?.trim() || null,
       }
 
@@ -468,6 +472,7 @@ export default function GameshowsPage() {
                 <BoolCheckbox k="shuffleQuestions" label="Shuffle question order" />
                 <BoolCheckbox k="showLeaderboard" label="Show leaderboard after each question (top 10 players)" />
                 <BoolCheckbox k="clickStartToCount" label="Click Start button to begin timer (wait before timing starts)" />
+                {form.playMode === 'ONLINE' && <BoolCheckbox k="buzzerMode" label="Buzz mode — players race to press buzz button to answer first" />}
                 {form.playMode !== 'SINGLE' && (
                   <div className="space-y-1.5">
                     <Label>Max players (up to 100)</Label>

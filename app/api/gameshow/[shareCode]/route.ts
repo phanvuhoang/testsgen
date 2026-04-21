@@ -76,6 +76,7 @@ export async function GET(
     shuffleQuestions: gameshow.shuffleQuestions,
     showLeaderboard: (gameshow as any).showLeaderboard ?? true,
     clickStartToCount: (gameshow as any).clickStartToCount ?? false,
+    buzzerMode: (gameshow as any).buzzerMode ?? false,
     shortLink: (gameshow as any).shortLink ?? null,
     quizSetTitle: (gameshow as any).quizSet?.title ?? '',
     questions: safeQuestions,

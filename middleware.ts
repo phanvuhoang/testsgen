@@ -8,7 +8,7 @@ export default auth((req) => {
   const userRole = req.auth?.user?.role
 
   // Public routes — no auth needed
-  const publicRoutes = ['/login', '/quiz/', '/api/quiz/', '/api/auth/']
+  const publicRoutes = ['/login', '/quiz/', '/api/quiz/', '/api/auth/', '/gameshow/', '/api/gameshow/']
   const isPublicRoute = publicRoutes.some((route) => nextUrl.pathname.startsWith(route))
 
   if (isPublicRoute) {

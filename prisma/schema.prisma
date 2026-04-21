@@ -597,6 +597,7 @@ model Gameshow {
   shuffleQuestions  Boolean    @default(true)
   showLeaderboard   Boolean    @default(true)
   clickStartToCount Boolean    @default(false)
+  buzzerMode        Boolean    @default(false)  // Online: players buzz in to answer
   shortLink         String?    // Custom short URL for the gameshow
 
   // Timer settings

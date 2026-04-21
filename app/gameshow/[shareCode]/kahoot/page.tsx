@@ -5,7 +5,7 @@ import { useParams } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
-import { Loader2, Trophy, CheckCircle2, XCircle, ChevronRight, RotateCcw, Home, Wifi, Volume2, VolumeX, QrCode, LogOut } from 'lucide-react'
+import { Loader2, Trophy, CheckCircle2, XCircle, ChevronRight, RotateCcw, Home, Wifi, Volume2, VolumeX, QrCode, LogOut, Zap } from 'lucide-react'
 import { useAudio } from '../../useAudio'
 import QRCode from 'qrcode'
 
@@ -20,6 +20,7 @@ type GameshowConfig = {
   scoringMode: 'SPEED_ACCURACY' | 'ACCURACY_ONLY'; questionsCount: number | null
   timeLimitSeconds: number; enableStreak: boolean; streakBonus: number
   shuffleQuestions: boolean; showLeaderboard: boolean; clickStartToCount: boolean
+  buzzerMode: boolean
   maxPlayers: number; shortLink: string | null; quizSetTitle: string; questions: Question[]
 }
 type Player = {
@@ -90,6 +91,16 @@ function TimerRing({ timeLeft, maxTime }: { timeLeft:number; maxTime:number }) {
   )
 }
 
+// ─── LobbyQR (large QR for Online lobby screen) ─────────────────────────────────
+function LobbyQR({ url }: { url: string }) {
+  const [qr, setQr] = useState<string | null>(null)
+  useEffect(() => {
+    if (url) QRCode.toDataURL(url, { margin: 1, width: 280 }).then(setQr).catch(() => {})
+  }, [url])
+  if (!qr) return <div className="w-48 h-48 mx-auto bg-white/20 rounded-2xl animate-pulse mb-2" />
+  return <img src={qr} alt="QR Code" className="w-56 h-56 mx-auto rounded-2xl border-4 border-white/40 mb-2" />
+}
+
 // ─── Main ─────────────────────────────────────────────────────────────────────
 export default function KahootPage() {
   const params = useParams()
@@ -125,6 +136,11 @@ export default function KahootPage() {
   const [roomCode, setRoomCode] = useState<string|null>(null)
   const [answeredQuestions, setAnsweredQuestions] = useState<Set<string>>(new Set())
 
+  // Buzz mode state
+  const [buzzedPlayer, setBuzzedPlayer] = useState<number|null>(null) // which player buzzed
+  const [buzzerOpen, setBuzzerOpen] = useState(false) // can players buzz right now?
+  const [showBuzz, setShowBuzz] = useState(false) // show the buzzer phase UI
+
   const timerRef = useRef<NodeJS.Timeout|null>(null)
   const timeCountPlayedRef = useRef(false)
   const currentQuestion = questions[currentIdx]
@@ -133,6 +149,7 @@ export default function KahootPage() {
   const isFillBlank = currentQuestion?.questionType === 'FILL_BLANK' || currentQuestion?.questionType === 'SHORT_ANSWER'
   const isFreeChoice = config?.selectionMode === 'FREE_CHOICE'
   const waitingForStart = config?.clickStartToCount && !timerRunning && phase === 'question'
+  const isBuzzerMode = config?.buzzerMode && config?.playMode === 'ONLINE'
 
   // Fetch config
   useEffect(() => {
@@ -276,15 +293,35 @@ export default function KahootPage() {
     setTimeLeft(config?.timeLimitSeconds??30)
     setQuestionStartTime(Date.now())
     timeCountPlayedRef.current=false
+    // Reset buzz state
+    setBuzzedPlayer(null); setBuzzerOpen(false); setShowBuzz(false)
     setPhase('question')
 
     if(config?.clickStartToCount){
       audio.playBg('wait',0.5)
       setTimerRunning(false)
+    } else if(isBuzzerMode){
+      // Buzz mode: show question, open buzzer, don't start timer yet
+      audio.playBg('wait',0.5)
+      setBuzzerOpen(true)
+      setShowBuzz(true)
+      setTimerRunning(false)
     } else {
       audio.playBg('kahoot-play',0.55)
       setTimerRunning(true)
     }
+  }
+
+  const handleBuzz=(playerIdx:number)=>{
+    if(!buzzerOpen||buzzedPlayer!==null)return
+    setBuzzedPlayer(playerIdx)
+    setBuzzerOpen(false)
+    setCurrentPlayerIdx(playerIdx)
+    // Start timer now that a player has buzzed
+    audio.stop('wait')
+    audio.playBg('kahoot-play',0.55)
+    setQuestionStartTime(Date.now())
+    setTimerRunning(true)
   }
 
   const handleStartCount=()=>{
@@ -400,24 +437,27 @@ export default function KahootPage() {
 
   // ─── LOBBY ──────────────────────────────────────────────────────────────────
   if(phase==='lobby'){
+    const lobbyUrl=typeof window!=='undefined'?`${window.location.origin}/gameshow/${shareCode}`:''
+    const lobbyQrUrl=config?.shortLink||lobbyUrl
     return(
       <div className="relative min-h-screen bg-gradient-to-b from-[#6366f1] to-[#4f46e5] flex items-center justify-center p-4 text-white">
         <MusicBtn/>
         <div className="text-center max-w-sm w-full">
-          <div className="text-6xl mb-4">🎮</div>
-          <h2 className="text-2xl font-black mb-2">Room Code</h2>
-          <div className="text-5xl font-black tracking-widest bg-white/20 rounded-2xl py-4 mb-6">{roomCode}</div>
-          <p className="text-indigo-200 mb-2">Share to join:</p>
-          <p className="text-sm opacity-70 mb-6">{typeof window!=='undefined'?window.location.href:''}</p>
-          <Button onClick={()=>beginQuestion(0)}
-            className="w-full bg-white text-[#6366f1] font-black text-lg py-6 rounded-2xl hover:bg-indigo-50">Start Game</Button>
+          <div className="text-5xl mb-2">🎮</div>
+          <h2 className="text-2xl font-black mb-1">Room Code</h2>
+          <div className="text-5xl font-black tracking-widest bg-white/20 rounded-2xl py-4 mb-4">{roomCode}</div>
+          <p className="text-indigo-200 text-sm mb-1">Scan to join:</p>
+          <p className="text-xs opacity-60 mb-3 break-all px-2">{lobbyQrUrl}</p>
+          <LobbyQR url={lobbyQrUrl}/>
+          <Button onClick={()=>isFreeChoice?setPhase('select'):beginQuestion(0)}
+            className="w-full bg-white text-[#6366f1] font-black text-lg py-6 rounded-2xl hover:bg-indigo-50 mt-4">Start Game</Button>
         </div>
       </div>
     )
   }
 
-  // ─── SELECT (Free Choice) ────────────────────────────────────────────────────
-  if(phase==='select'||((phase==='question'||phase==='reveal')&&isFreeChoice&&!currentQuestion)){
+    // ─── SELECT (Free Choice) ────────────────────────────────────────────────────
+  if(phase==='select'){
     const allAnswered=answeredQuestions.size>=questions.length
     return(
       <div className="relative min-h-screen bg-[#1a1a2e] text-white p-4">
@@ -425,13 +465,13 @@ export default function KahootPage() {
         <div className="max-w-2xl mx-auto">
           <div className="flex items-center justify-between mb-6">
             <div>
-              <h2 className="text-2xl font-bold text-white">{currentPlayer?.nickname}'s Turn</h2>
-              <p className="text-indigo-300 text-sm">{answeredQuestions.size}/{questions.length} done</p>
+              <h2 className="text-2xl font-bold text-white">{config?.playMode==='LOCAL'?`${currentPlayer?.nickname}'s Turn`:'Choose a Question'}</h2>
+              <p className="text-indigo-300 text-sm">{answeredQuestions.size}/{questions.length} done &middot; {currentPlayer?.score??0} pts</p>
             </div>
             <Button size="sm" variant="outline"
-              onClick={()=>{audio.stopAll();audio.playBg('leaderboard',0.6);setPhase('leaderboard');setTimeout(()=>setPhase('gameover'),5000)}}
+              onClick={()=>{audio.stopAll();setPhase('gameover')}}
               className="border-red-500/50 text-red-400 hover:bg-red-900/20">
-              <LogOut className="h-4 w-4 mr-1"/>Exit
+              <LogOut className="h-4 w-4 mr-1"/>End Game
             </Button>
           </div>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
@@ -442,7 +482,6 @@ export default function KahootPage() {
                 <button key={q.id} disabled={done}
                   onClick={()=>{
                     if(!done){
-                      setAnsweredQuestions(prev=>new Set(Array.from(prev).concat(q.id)))
                       audio.stop('selecting')
                       beginQuestion(idx)
                     }
@@ -500,8 +539,8 @@ export default function KahootPage() {
           </div>
         </div>
 
-        {/* Start button */}
-        {waitingForStart&&(
+        {/* Start button (clickStartToCount mode) */}
+        {waitingForStart&&!isBuzzerMode&&(
           <div className="flex justify-center py-4 bg-[#1a1a2e]">
             <Button onClick={handleStartCount}
               className="bg-[#6366f1] hover:bg-[#4f46e5] text-white font-black text-lg px-10 py-5 rounded-2xl shadow-lg">
@@ -510,10 +549,34 @@ export default function KahootPage() {
           </div>
         )}
 
+        {/* Buzz buttons (buzzerMode + Online) */}
+        {showBuzz&&isBuzzerMode&&(
+          <div className="bg-[#0f0f1e] p-4 border-t border-indigo-500/20">
+            <p className="text-center text-indigo-300 text-sm font-bold mb-3">
+              {buzzedPlayer===null?'🔔 BUZZ IN first to answer!':'⚡ '+players[buzzedPlayer]?.nickname+' buzzed in!'}
+            </p>
+            <div className="flex flex-wrap justify-center gap-4">
+              {players.map((p,idx)=>(
+                <button key={p.id}
+                  onClick={()=>handleBuzz(idx)}
+                  disabled={!buzzerOpen||buzzedPlayer!==null}
+                  className={`relative px-6 py-4 rounded-2xl border-4 font-black text-lg transition-all select-none
+                    ${buzzedPlayer===idx?'bg-yellow-400 border-yellow-300 text-black scale-110 shadow-lg shadow-yellow-400/40'
+                    :buzzedPlayer!==null?'bg-gray-800 border-gray-700 text-gray-500 opacity-40'
+                    :buzzerOpen?'bg-red-500 border-red-700 text-white hover:bg-red-400 active:scale-95 cursor-pointer shadow-[0_6px_0_#991b1b] active:shadow-[0_2px_0_#991b1b] active:translate-y-1'
+                    :'bg-gray-700 border-gray-600 text-gray-400 cursor-not-allowed'}`}
+                >
+                  <Zap className="h-5 w-5 inline mr-1"/>{p.nickname}
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* Answers */}
         <div className="flex-1 p-4">
           <div className="max-w-2xl mx-auto h-full flex flex-col justify-center">
-            <div className={waitingForStart?'opacity-60 pointer-events-none':''}>
+            <div className={(waitingForStart||showBuzz&&buzzedPlayer===null)?'opacity-60 pointer-events-none':''}>
               {isFillBlank?(
                 <div className="space-y-4">
                   <Input value={fillAnswer} onChange={e=>setFillAnswer(e.target.value)}
