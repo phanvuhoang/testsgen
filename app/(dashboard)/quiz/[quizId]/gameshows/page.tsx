@@ -116,6 +116,9 @@ export default function GameshowsPage() {
   const [allQuestions, setAllQuestions] = useState<QuizQuestion[]>([])
   const [selectedQuestionIds, setSelectedQuestionIds] = useState<string[]>([])
   const [loadingQuestions, setLoadingQuestions] = useState(false)
+  const [analyticsGameshow, setAnalyticsGameshow] = useState<Gameshow | null>(null)
+  const [analyticsData, setAnalyticsData] = useState<any>(null)
+  const [analyticsLoading, setAnalyticsLoading] = useState(false)
 
   useEffect(() => { fetchData() }, [])
 
@@ -264,6 +267,18 @@ export default function GameshowsPage() {
     }
   }
 
+  const openAnalytics = async (g: Gameshow) => {
+    setAnalyticsGameshow(g)
+    setAnalyticsData(null)
+    setAnalyticsLoading(true)
+    try {
+      const res = await fetch(`/api/gameshow/analytics?gameshowId=${g.id}`)
+      const data = await res.json()
+      setAnalyticsData(data)
+    } catch {}
+    setAnalyticsLoading(false)
+  }
+
   const copyLink = (shareCode: string) => {
     const url = `${window.location.origin}/gameshow/${shareCode}`
     navigator.clipboard.writeText(url)
@@ -362,6 +377,9 @@ export default function GameshowsPage() {
                     </Button>
                     <Button size="sm" variant="outline" onClick={() => openEdit(g)} title="Edit">
                       <Pencil className="h-3.5 w-3.5" />
+                    </Button>
+                    <Button size="sm" variant="outline" onClick={() => openAnalytics(g)} title="Analytics">
+                      <BarChart2 className="h-3.5 w-3.5" />
                     </Button>
                     <Button
                       size="sm" variant="outline"
@@ -687,6 +705,88 @@ export default function GameshowsPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Analytics Dialog */}
+      {analyticsGameshow && (
+        <Dialog open={!!analyticsGameshow} onOpenChange={open => !open && setAnalyticsGameshow(null)}>
+          <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <BarChart2 className="h-5 w-5 text-[#028a39]" />
+                Analytics — {analyticsGameshow.name}
+              </DialogTitle>
+            </DialogHeader>
+            {analyticsLoading ? (
+              <div className="flex items-center justify-center py-12">
+                <Loader2 className="h-8 w-8 animate-spin text-gray-400" />
+              </div>
+            ) : !analyticsData || analyticsData.total === 0 ? (
+              <div className="text-center py-12 text-gray-400">
+                <BarChart2 className="h-10 w-10 mx-auto mb-3 opacity-40" />
+                <p className="font-medium">No sessions yet</p>
+                <p className="text-sm mt-1">Analytics data will appear here after the first game session.</p>
+              </div>
+            ) : (
+              <div className="space-y-4 pt-2">
+                <div className="grid grid-cols-3 gap-3">
+                  <div className="bg-gray-50 rounded-xl p-3 text-center">
+                    <div className="text-2xl font-black text-[#028a39]">{analyticsData.total}</div>
+                    <div className="text-xs text-gray-500 mt-1">Sessions</div>
+                  </div>
+                  <div className="bg-gray-50 rounded-xl p-3 text-center">
+                    <div className="text-2xl font-black text-[#028a39]">
+                      {analyticsData.sessions?.reduce((s: number, ses: any) => s + (ses.players?.length ?? 0), 0) ?? 0}
+                    </div>
+                    <div className="text-xs text-gray-500 mt-1">Total Players</div>
+                  </div>
+                  <div className="bg-gray-50 rounded-xl p-3 text-center">
+                    <div className="text-2xl font-black text-[#028a39]">
+                      {(() => {
+                        const allPlayers = analyticsData.sessions?.flatMap((s: any) => s.players ?? []) ?? []
+                        const total = allPlayers.reduce((s: number, p: any) => s + (p.correctCount ?? 0) + (p.wrongCount ?? 0), 0)
+                        const correct = allPlayers.reduce((s: number, p: any) => s + (p.correctCount ?? 0), 0)
+                        return total > 0 ? `${Math.round(correct / total * 100)}%` : '—'
+                      })()}
+                    </div>
+                    <div className="text-xs text-gray-500 mt-1">Accuracy</div>
+                  </div>
+                </div>
+                {(analyticsData.sessions ?? []).map((session: any, si: number) => (
+                  <div key={session.sessionId} className="border rounded-xl overflow-hidden">
+                    <div className="bg-gray-50 px-4 py-2 flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span className="font-semibold text-sm">Session {si + 1}</span>
+                        <span className="text-xs text-gray-400 font-mono">{session.roomCode}</span>
+                        <span className={`text-xs px-2 py-0.5 rounded-full ${session.status === 'FINISHED' ? 'bg-gray-100 text-gray-500' : 'bg-green-100 text-green-700'}`}>{session.status}</span>
+                      </div>
+                      <span className="text-xs text-gray-400">{new Date(session.createdAt).toLocaleDateString('vi-VN')}</span>
+                    </div>
+                    {session.players && session.players.length > 0 ? (
+                      <div className="divide-y">
+                        {[...session.players].sort((a: any, b: any) => b.score - a.score).map((p: any, rank: number) => (
+                          <div key={p.nickname + rank} className="flex items-center justify-between px-4 py-2.5">
+                            <div className="flex items-center gap-3">
+                              <span className="text-sm text-gray-400 w-5">{rank + 1}.</span>
+                              <span className="font-medium text-sm">{p.nickname}</span>
+                            </div>
+                            <div className="flex items-center gap-4 text-sm">
+                              <span className="text-green-600 font-medium">{p.correctCount ?? 0}✓</span>
+                              <span className="text-red-500">{p.wrongCount ?? 0}✗</span>
+                              <span className="font-bold text-[#028a39] w-20 text-right">{p.score.toLocaleString()} pts</span>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    ) : (
+                      <p className="text-sm text-gray-400 px-4 py-3 italic">No player data recorded.</p>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </DialogContent>
+        </Dialog>
+      )}
 
       {/* Delete confirm */}
       <AlertDialog open={!!deleteId} onOpenChange={open => !open && setDeleteId(null)}>

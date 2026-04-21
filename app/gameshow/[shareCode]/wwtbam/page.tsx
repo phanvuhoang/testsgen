@@ -144,6 +144,11 @@ export default function WwtbamPage() {
     return () => clearInterval(timerRef.current!)
   }, [timerRunning, phase, currentIdx, config])
 
+  // ─── Stop audio on gameover (MUST be top-level, not inside conditional render) ──
+  useEffect(() => {
+    if (phase === 'gameover') audio.stopAll()
+  }, [phase])
+
   const handleTimeout = () => {
     setIsCorrect(false)
     setPhase('reveal')
@@ -739,11 +744,6 @@ export default function WwtbamPage() {
       </div>
     )
   }
-
-  // Stop audio on gameover (moved out of conditional)
-  useEffect(() => {
-    if (phase === 'gameover') audio.stopAll()
-  }, [phase])
 
   // ─── GAME OVER ────────────────────────────────────────────────────────────
   if (phase === 'gameover') {

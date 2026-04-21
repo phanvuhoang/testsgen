@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect, useRef, useState, useCallback } from 'react'
-import { useParams } from 'next/navigation'
+import { useParams, useSearchParams } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
@@ -28,7 +28,7 @@ type Player = {
   score: number; correctCount: number; wrongCount: number; streak: number; bestStreak: number
   lastPointsEarned: number
 }
-type Phase = 'setup' | 'lobby' | 'question' | 'reveal' | 'leaderboard' | 'gameover' | 'select'
+type Phase = 'setup' | 'lobby' | 'join' | 'waiting' | 'question' | 'reveal' | 'scoring' | 'leaderboard' | 'gameover' | 'select'
 
 // ─── Colors ──────────────────────────────────────────────────────────────────
 const KAHOOT_COLORS = [
@@ -104,7 +104,10 @@ function LobbyQR({ url }: { url: string }) {
 // ─── Main ─────────────────────────────────────────────────────────────────────
 export default function KahootPage() {
   const params = useParams()
+  const searchParams = useSearchParams()
   const shareCode = params.shareCode as string
+  // ?room=ROOMCODE → player is joining an existing online session
+  const joinRoomCode = searchParams.get('room')
 
   const [config, setConfig] = useState<GameshowConfig|null>(null)
   const [loading, setLoading] = useState(true)
@@ -136,6 +139,18 @@ export default function KahootPage() {
   const [roomCode, setRoomCode] = useState<string|null>(null)
   const [answeredQuestions, setAnsweredQuestions] = useState<Set<string>>(new Set())
 
+  // Online multiplayer — join flow (player device)
+  const [joinNickname, setJoinNickname] = useState('')
+  const [joinError, setJoinError] = useState<string|null>(null)
+  const [joinLoading, setJoinLoading] = useState(false)
+  const [myPlayerId, setMyPlayerId] = useState<string|null>(null)
+  const [onlineLobbyPlayers, setOnlineLobbyPlayers] = useState<{id:string;nickname:string}[]>([])
+  const [onlineSessionStarted, setOnlineSessionStarted] = useState(false)
+  const lobbyPollRef = useRef<NodeJS.Timeout|null>(null)
+  // Local multiplayer scoring phase
+  const [scoringAdjustments, setScoringAdjustments] = useState<Record<string,number>>({})
+  const [scoringNotes, setScoringNotes] = useState('')
+
   // Buzz mode state
   const [buzzedPlayer, setBuzzedPlayer] = useState<number|null>(null) // which player buzzed
   const [buzzerOpen, setBuzzerOpen] = useState(false) // can players buzz right now?
@@ -151,17 +166,79 @@ export default function KahootPage() {
   const waitingForStart = config?.clickStartToCount && !timerRunning && phase === 'question'
   const isBuzzerMode = config?.buzzerMode && config?.playMode === 'ONLINE'
 
-  // Fetch config
+  // Fetch config — also detect join flow
   useEffect(() => {
     fetch(`/api/gameshow/${shareCode}`).then(r=>r.json()).then(data => {
       if (data.error){setError(data.error);return}
       if (data.type!=='KAHOOT'){setError('This gameshow is not a Kahoot game');return}
       setConfig(data); setLoading(false)
+      // If URL has ?room=CODE and it's an ONLINE gameshow, jump directly to join screen
+      if (data.playMode==='ONLINE' && joinRoomCode) {
+        setPhase('join')
+      }
     }).catch(()=>setError('Failed to load gameshow'))
   }, [shareCode])
 
   // Opening music
-  useEffect(() => { if (phase==='setup'&&!loading) audio.playBg('opening', 0.5) }, [phase, loading])
+  useEffect(() => { if (phase==='setup'&&!loading&&!joinRoomCode) audio.playBg('opening', 0.5) }, [phase, loading])
+
+  // Online lobby polling — host polls for players joining the room
+  useEffect(() => {
+    if (phase!=='lobby'||!roomCode) return
+    const poll = async () => {
+      try {
+        const res = await fetch(`/api/gameshow/${shareCode}/session/${roomCode}`)
+        const data = await res.json()
+        if (data.players) setOnlineLobbyPlayers(data.players.map((p:any)=>({id:p.id,nickname:p.nickname})))
+      } catch {}
+    }
+    poll()
+    lobbyPollRef.current = setInterval(poll, 2000)
+    return () => clearInterval(lobbyPollRef.current!)
+  }, [phase, roomCode])
+
+  // Waiting room polling — player waits for host to start
+  useEffect(() => {
+    if (phase!=='waiting'||!joinRoomCode||!myPlayerId) return
+    const poll = async () => {
+      try {
+        const res = await fetch(`/api/gameshow/${shareCode}/session/${joinRoomCode}`)
+        const data = await res.json()
+        if (!data.gameState) return
+        let gs: any
+        try { gs = typeof data.gameState==='string' ? JSON.parse(data.gameState) : data.gameState } catch { return }
+        if (gs.phase==='started') {
+          // Host started — load questions and begin playing
+          const gameshow = data.gameshow
+          if (!gameshow) return
+          const qs = gameshow.quizSet?.questions ?? []
+          const orderedQs = gs.questionOrder
+            ? gs.questionOrder.map((id:string)=>qs.find((q:any)=>q.id===id)).filter(Boolean)
+            : qs
+          const config2 = {
+            ...gameshow,
+            quizSetTitle: gameshow.quizSet?.title ?? '',
+            questions: orderedQs.map((q:any)=>({...q, options: typeof q.options==='string'?q.options:JSON.stringify(q.options)}))
+          }
+          setConfig(config2)
+          setQuestions(orderedQs)
+          const myNick = onlineLobbyPlayers.find(p=>p.id===myPlayerId)?.nickname ||
+            data.players?.find((p:any)=>p.id===myPlayerId)?.nickname || joinNickname
+          setPlayers([{id:myPlayerId,nickname:myNick,avatarColor:PLAYER_COLORS[0],score:0,correctCount:0,wrongCount:0,streak:0,bestStreak:0,lastPointsEarned:0}])
+          setCurrentPlayerIdx(0)
+          setAnsweredQuestions(new Set())
+          clearInterval(lobbyPollRef.current!)
+          beginQuestion(0, orderedQs)
+        } else {
+          // Update waiting room player list
+          if (data.players) setOnlineLobbyPlayers(data.players.map((p:any)=>({id:p.id,nickname:p.nickname})))
+        }
+      } catch {}
+    }
+    poll()
+    lobbyPollRef.current = setInterval(poll, 2000)
+    return () => clearInterval(lobbyPollRef.current!)
+  }, [phase, joinRoomCode, myPlayerId])
 
   // Timer
   useEffect(() => {
@@ -260,6 +337,37 @@ export default function KahootPage() {
     }))
   }
 
+  // Online: player submits join form
+  const handleJoinRoom = async () => {
+    if(!joinNickname.trim()||!joinRoomCode) return
+    setJoinLoading(true); setJoinError(null)
+    try {
+      const res = await fetch(`/api/gameshow/${shareCode}/session/${joinRoomCode}/join`, {
+        method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ nickname: joinNickname.trim(), avatarColor: PLAYER_COLORS[Math.floor(Math.random()*PLAYER_COLORS.length)] })
+      })
+      const data = await res.json()
+      if (data.error) { setJoinError(data.error); setJoinLoading(false); return }
+      setMyPlayerId(data.player.id)
+      setPhase('waiting')
+    } catch { setJoinError('Connection error. Please try again.') }
+    setJoinLoading(false)
+  }
+
+  // Online host: broadcast start to all players then play on host device
+  const hostStartGame = async () => {
+    if(!roomCode) return
+    clearInterval(lobbyPollRef.current!)
+    try {
+      await fetch(`/api/gameshow/${shareCode}/session/${roomCode}`, {
+        method:'PATCH', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ gameState: { phase: 'started' }, status: 'ACTIVE' })
+      })
+    } catch {}
+    if(isFreeChoice) { audio.playBg('selecting',0.5); setPhase('select') }
+    else beginQuestion(0)
+  }
+
   const startGame=async()=>{
     if(!config)return
     const names=setupNames.filter(n=>n.trim())
@@ -278,15 +386,20 @@ export default function KahootPage() {
 
     if(config.playMode==='ONLINE'){
       try{
-        const res=await fetch(`/api/gameshow/${shareCode}/session`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({players:names.map(n=>({nickname:n}))})})
+        const res=await fetch(`/api/gameshow/${shareCode}/session`,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({})})
         const data=await res.json()
-        setRoomCode(data.roomCode); setPhase('lobby'); return
+        setRoomCode(data.roomCode)
+        setOnlineLobbyPlayers([])
+        setPhase('lobby'); return
       }catch{}
     }
     beginQuestion(0,qs)
   }
 
   const beginQuestion=(idx:number,qs?:Question[])=>{
+    // Always clear any running timer first to prevent double-ticking or stale intervals
+    clearInterval(timerRef.current!)
+    setTimerRunning(false)
     setCurrentIdx(idx)
     setSelectedAnswer(null); setSelectedMultiple([]); setFillAnswer('')
     setSubmitted(false); setIsCorrect(null); setDistribution({})
@@ -350,7 +463,33 @@ export default function KahootPage() {
     const allAnswered=answeredQuestions.size>=questions.length
     const isLast=isFreeChoice?allAnswered:currentIdx>=questions.length-1
     audio.stopAll()
+    // LOCAL mode: show manual scoring screen before leaderboard
+    if(config?.playMode==='LOCAL'&&players.length>1){
+      setScoringAdjustments({})
+      setScoringNotes('')
+      setPhase('scoring')
+      return
+    }
     if(config?.showLeaderboard&&players.length>0){
+      audio.playBg('leaderboard',0.6)
+      setPhase('leaderboard')
+      setTimeout(()=>advanceFromLeaderboard(isLast),5000)
+    } else {
+      advanceFromLeaderboard(isLast)
+    }
+  }
+
+  const confirmScoring=()=>{
+    const allAnswered=answeredQuestions.size>=questions.length
+    const isLast=isFreeChoice?allAnswered:currentIdx>=questions.length-1
+    // Apply manual score adjustments
+    if(Object.keys(scoringAdjustments).length>0){
+      setPlayers(prev=>prev.map(p=>({
+        ...p,
+        score: p.score + (scoringAdjustments[p.id]??0)
+      })))
+    }
+    if(config?.showLeaderboard){
       audio.playBg('leaderboard',0.6)
       setPhase('leaderboard')
       setTimeout(()=>advanceFromLeaderboard(isLast),5000)
@@ -436,21 +575,94 @@ export default function KahootPage() {
   }
 
   // ─── LOBBY ──────────────────────────────────────────────────────────────────
+  // ─── JOIN (player device scanned QR / opened link with ?room=) ───────────────
+  if(phase==='join'){
+    return(
+      <div className="min-h-screen bg-gradient-to-b from-[#6366f1] to-[#4f46e5] flex items-center justify-center p-4">
+        <div className="w-full max-w-sm">
+          <div className="text-center mb-6">
+            <div className="text-6xl mb-2">🎮</div>
+            <h1 className="text-3xl font-black text-white">Kahoot!</h1>
+            <p className="text-indigo-200 mt-1">{config?.name}</p>
+          </div>
+          <div className="bg-white rounded-3xl p-6 shadow-2xl">
+            <div className="text-center mb-4">
+              <p className="text-gray-500 text-sm">Room</p>
+              <div className="text-3xl font-black text-[#6366f1] tracking-widest">{joinRoomCode}</div>
+            </div>
+            <h2 className="font-bold text-gray-800 mb-3">Enter your name</h2>
+            <Input value={joinNickname} onChange={e=>setJoinNickname(e.target.value)}
+              placeholder="Your nickname..." className="rounded-xl mb-4"
+              onKeyDown={e=>e.key==='Enter'&&handleJoinRoom()}
+            />
+            {joinError&&<p className="text-red-500 text-sm mb-3 text-center">{joinError}</p>}
+            <Button onClick={handleJoinRoom} disabled={!joinNickname.trim()||joinLoading}
+              className="w-full bg-[#6366f1] hover:bg-[#4f46e5] text-white font-bold text-lg py-6 rounded-2xl">
+              {joinLoading?<Loader2 className="h-5 w-5 animate-spin mx-auto"/>:'Join Game!'}
+            </Button>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  // ─── WAITING (player joined, waiting for host to start) ───────────────────────
+  if(phase==='waiting'){
+    return(
+      <div className="min-h-screen bg-gradient-to-b from-[#6366f1] to-[#4f46e5] flex items-center justify-center p-4 text-white">
+        <div className="text-center max-w-sm w-full">
+          <div className="text-6xl mb-4 animate-bounce">🎮</div>
+          <h2 className="text-2xl font-black mb-1">You're in!</h2>
+          <p className="text-indigo-200 mb-6">Waiting for the host to start the game…</p>
+          <div className="bg-white/20 rounded-2xl p-4 mb-4">
+            <p className="text-sm text-indigo-200 mb-2">Players in the room ({onlineLobbyPlayers.length}):</p>
+            <div className="space-y-2 max-h-48 overflow-y-auto">
+              {onlineLobbyPlayers.map((p,i)=>(
+                <div key={p.id} className={`flex items-center gap-2 px-3 py-2 rounded-xl ${p.id===myPlayerId?'bg-yellow-400/30 border border-yellow-400/50':'bg-white/10'}`}>
+                  <div className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold" style={{backgroundColor:PLAYER_COLORS[i%PLAYER_COLORS.length]}}>{p.nickname[0]?.toUpperCase()}</div>
+                  <span className="font-medium">{p.nickname}</span>
+                  {p.id===myPlayerId&&<span className="text-xs text-yellow-300 ml-auto">You</span>}
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className="flex items-center justify-center gap-2 text-indigo-300">
+            <Loader2 className="h-4 w-4 animate-spin"/>
+            <span className="text-sm">Waiting for host…</span>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  // ─── LOBBY (host sees room code, QR, player list) ─────────────────────────────
   if(phase==='lobby'){
-    const lobbyUrl=typeof window!=='undefined'?`${window.location.origin}/gameshow/${shareCode}`:''
-    const lobbyQrUrl=config?.shortLink||lobbyUrl
+    const joinUrl=typeof window!=='undefined'?`${window.location.origin}/gameshow/${shareCode}?room=${roomCode}`:''
     return(
       <div className="relative min-h-screen bg-gradient-to-b from-[#6366f1] to-[#4f46e5] flex items-center justify-center p-4 text-white">
         <MusicBtn/>
         <div className="text-center max-w-sm w-full">
-          <div className="text-5xl mb-2">🎮</div>
-          <h2 className="text-2xl font-black mb-1">Room Code</h2>
-          <div className="text-5xl font-black tracking-widest bg-white/20 rounded-2xl py-4 mb-4">{roomCode}</div>
-          <p className="text-indigo-200 text-sm mb-1">Scan to join:</p>
-          <p className="text-xs opacity-60 mb-3 break-all px-2">{lobbyQrUrl}</p>
-          <LobbyQR url={lobbyQrUrl}/>
-          <Button onClick={()=>isFreeChoice?setPhase('select'):beginQuestion(0)}
-            className="w-full bg-white text-[#6366f1] font-black text-lg py-6 rounded-2xl hover:bg-indigo-50 mt-4">Start Game</Button>
+          <div className="text-4xl mb-2">🎮</div>
+          <h2 className="text-xl font-black mb-1">Room Code</h2>
+          <div className="text-5xl font-black tracking-widest bg-white/20 rounded-2xl py-3 mb-3">{roomCode}</div>
+          <p className="text-indigo-200 text-xs mb-1">Players scan to join:</p>
+          <p className="text-xs opacity-60 mb-2 break-all px-2">{joinUrl}</p>
+          <LobbyQR url={joinUrl}/>
+          <div className="bg-white/10 rounded-2xl p-3 mt-3 mb-3">
+            <p className="text-sm text-indigo-200 mb-2">Players waiting ({onlineLobbyPlayers.length}/{config?.maxPlayers??8}):</p>
+            {onlineLobbyPlayers.length===0
+              ?<p className="text-xs text-indigo-300 italic">No players yet — share the QR code!</p>
+              :<div className="flex flex-wrap gap-2 justify-center">
+                {onlineLobbyPlayers.map((p,i)=>(
+                  <span key={p.id} className="px-3 py-1 bg-white/20 rounded-full text-sm font-medium">{p.nickname}</span>
+                ))}
+              </div>
+            }
+          </div>
+          <Button onClick={hostStartGame} disabled={onlineLobbyPlayers.length===0}
+            className="w-full bg-white text-[#6366f1] font-black text-lg py-5 rounded-2xl hover:bg-indigo-50">
+            Start Game ({onlineLobbyPlayers.length} players)
+          </Button>
         </div>
       </div>
     )
@@ -714,6 +926,67 @@ export default function KahootPage() {
   }
 
   // ─── LEADERBOARD ─────────────────────────────────────────────────────────────
+  // ─── SCORING (Local Multiplayer manual score adjustment) ───────────────────────
+  if(phase==='scoring'){
+    const allAnswered=answeredQuestions.size>=questions.length
+    const isLast=isFreeChoice?allAnswered:currentIdx>=questions.length-1
+    return(
+      <div className="min-h-screen bg-[#1a1a2e] text-white flex flex-col items-center justify-center p-4">
+        <MusicBtn/>
+        <div className="w-full max-w-md">
+          <div className="text-center mb-6">
+            <div className="text-4xl mb-2">📊</div>
+            <h2 className="text-2xl font-black text-white">Score Adjustment</h2>
+            <p className="text-indigo-300 text-sm mt-1">
+              Manually adjust scores for Q{currentIdx+1}. Base scores already applied.
+            </p>
+          </div>
+          <div className="bg-[#16213e] rounded-2xl p-4 space-y-3 mb-4">
+            {players.map(p=>{
+              const adj=scoringAdjustments[p.id]??0
+              return(
+                <div key={p.id} className="flex items-center justify-between gap-3 py-2 border-b border-gray-700/50 last:border-0">
+                  <div className="flex-1 min-w-0">
+                    <p className="font-bold text-sm truncate">{p.nickname}</p>
+                    <p className="text-xs text-gray-400">Base: {p.score} pts{adj!==0?` · Adj: ${adj>0?'+':''}${adj}`:''}</p>
+                  </div>
+                  <div className="flex items-center gap-1">
+                    <button onClick={()=>setScoringAdjustments(prev=>({...prev,[p.id]:(prev[p.id]??0)-50}))}
+                      className="w-9 h-9 rounded-full bg-red-500/20 hover:bg-red-500/40 text-red-300 font-black text-lg flex items-center justify-center transition-all">−</button>
+                    <span className={`w-14 text-center font-black text-lg ${adj>0?'text-green-400':adj<0?'text-red-400':'text-gray-400'}`}>
+                      {adj>0?`+${adj}`:adj===0?'0':adj}
+                    </span>
+                    <button onClick={()=>setScoringAdjustments(prev=>({...prev,[p.id]:(prev[p.id]??0)+50}))}
+                      className="w-9 h-9 rounded-full bg-green-500/20 hover:bg-green-500/40 text-green-300 font-black text-lg flex items-center justify-center transition-all">+</button>
+                  </div>
+                  <div className="w-16 text-right">
+                    <span className="font-black text-yellow-300">{p.score+(scoringAdjustments[p.id]??0)}</span>
+                    <span className="text-xs text-gray-400 block">total</span>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+          <div className="flex gap-2 mb-3">
+            {[-200,-100,-50,50,100,200].map(v=>(
+              <button key={v} onClick={()=>{
+                if(players[currentPlayerIdx])
+                  setScoringAdjustments(prev=>({...prev,[players[currentPlayerIdx].id]:(prev[players[currentPlayerIdx].id]??0)+v}))
+              }} className={`flex-1 py-2 rounded-xl text-xs font-bold ${v>0?'bg-green-600/30 hover:bg-green-600/50 text-green-300':'bg-red-600/30 hover:bg-red-600/50 text-red-300'} transition-all`}>
+                {v>0?`+${v}`:v}
+              </button>
+            ))}
+          </div>
+          <p className="text-xs text-gray-500 text-center mb-4">Quick buttons apply to current player: <span className="text-yellow-300">{players[currentPlayerIdx]?.nickname}</span></p>
+          <Button onClick={confirmScoring}
+            className="w-full bg-[#6366f1] hover:bg-[#4f46e5] text-white font-bold text-lg py-5 rounded-2xl">
+            {isLast?'Final Results ✓':'Confirm & Continue'} <ChevronRight className="h-5 w-5 ml-1"/>
+          </Button>
+        </div>
+      </div>
+    )
+  }
+
   if(phase==='leaderboard'){
     const allAnswered=answeredQuestions.size>=questions.length
     const isLast=isFreeChoice?allAnswered:currentIdx>=questions.length-1
