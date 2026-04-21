@@ -33,6 +33,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       selectionMode: body.selectionMode || 'LINEAR',
       scoringMode: body.scoringMode || 'SPEED_ACCURACY',
       questionsCount: body.questionsCount ? parseInt(body.questionsCount) : null,
+      fixedQuestionIds: body.fixedQuestionIds ?? null,
       timeLimitSeconds: body.timeLimitSeconds ? parseInt(body.timeLimitSeconds) : 30,
       answerRevealSeconds: body.answerRevealSeconds ? parseInt(body.answerRevealSeconds) : 4,
       responseSeconds: body.responseSeconds ? parseInt(body.responseSeconds) : 10,

@@ -31,6 +31,7 @@ type Gameshow = {
   selectionMode: SelectionMode
   scoringMode: ScoringMode
   questionsCount: number | null
+  fixedQuestionIds: string | null
   timeLimitSeconds: number
   enableLifelines: boolean
   enableStreak: boolean
@@ -42,6 +43,14 @@ type Gameshow = {
   shuffleQuestions: boolean
   createdAt: string
   _count?: { sessions: number }
+}
+
+type QuizQuestion = {
+  id: string
+  stem: string
+  questionType: string
+  difficulty: string
+  topic: string | null
 }
 
 const TYPE_LABELS: Record<GameshowType, string> = {
@@ -70,6 +79,7 @@ const emptyForm = {
   selectionMode: 'LINEAR' as SelectionMode,
   scoringMode: 'SPEED_ACCURACY' as ScoringMode,
   questionsCount: '',
+  questionSelectionMode: 'RANDOM' as 'RANDOM' | 'FIXED',
   timeLimitSeconds: '30',
   answerRevealSeconds: '4',
   responseSeconds: '10',
@@ -95,6 +105,9 @@ export default function GameshowsPage() {
   const [deleteId, setDeleteId] = useState<string | null>(null)
   const [isDeleting, setIsDeleting] = useState(false)
   const [settingsTab, setSettingsTab] = useState('general')
+  const [allQuestions, setAllQuestions] = useState<QuizQuestion[]>([])
+  const [selectedQuestionIds, setSelectedQuestionIds] = useState<string[]>([])
+  const [loadingQuestions, setLoadingQuestions] = useState(false)
 
   useEffect(() => { fetchData() }, [])
 
@@ -110,15 +123,33 @@ export default function GameshowsPage() {
     }
   }
 
+  const fetchQuestions = async () => {
+    if (allQuestions.length > 0) return // already loaded
+    setLoadingQuestions(true)
+    try {
+      const res = await fetch(`/api/quiz-sets/${params.quizId}/questions`)
+      if (res.ok) {
+        const data = await res.json()
+        setAllQuestions(Array.isArray(data) ? data : (data.questions ?? []))
+      }
+    } catch {}
+    setLoadingQuestions(false)
+  }
+
   const openNew = () => {
     setEditingGameshow(null)
     setForm({ ...emptyForm })
+    setSelectedQuestionIds([])
     setSettingsTab('general')
     setDialogOpen(true)
+    fetchQuestions()
   }
 
   const openEdit = (g: Gameshow) => {
     setEditingGameshow(g)
+    let fixedIds: string[] = []
+    try { if (g.fixedQuestionIds) fixedIds = JSON.parse(g.fixedQuestionIds) } catch {}
+    setSelectedQuestionIds(fixedIds)
     setForm({
       name: g.name,
       description: g.description ?? '',
@@ -127,6 +158,7 @@ export default function GameshowsPage() {
       selectionMode: g.selectionMode,
       scoringMode: g.scoringMode,
       questionsCount: g.questionsCount?.toString() ?? '',
+      questionSelectionMode: fixedIds.length > 0 ? 'FIXED' : 'RANDOM',
       timeLimitSeconds: g.timeLimitSeconds.toString(),
       answerRevealSeconds: '4',
       responseSeconds: '10',
@@ -141,6 +173,7 @@ export default function GameshowsPage() {
     })
     setSettingsTab('general')
     setDialogOpen(true)
+    fetchQuestions()
   }
 
   const handleSave = async () => {
@@ -150,6 +183,7 @@ export default function GameshowsPage() {
     }
     setIsSaving(true)
     try {
+      const isFixed = form.questionSelectionMode === 'FIXED' && selectedQuestionIds.length > 0
       const payload = {
         name: form.name.trim(),
         description: form.description.trim() || null,
@@ -157,7 +191,8 @@ export default function GameshowsPage() {
         playMode: form.playMode,
         selectionMode: form.selectionMode,
         scoringMode: form.scoringMode,
-        questionsCount: form.questionsCount ? parseInt(form.questionsCount) : null,
+        questionsCount: isFixed ? selectedQuestionIds.length : (form.questionsCount ? parseInt(form.questionsCount) : null),
+        fixedQuestionIds: isFixed ? JSON.stringify(selectedQuestionIds) : null,
         timeLimitSeconds: parseInt(form.timeLimitSeconds),
         answerRevealSeconds: parseInt(form.answerRevealSeconds),
         responseSeconds: parseInt(form.responseSeconds),
@@ -336,9 +371,10 @@ export default function GameshowsPage() {
           </DialogHeader>
 
           <Tabs value={settingsTab} onValueChange={setSettingsTab}>
-            <TabsList className="grid grid-cols-3 w-full">
+            <TabsList className="grid grid-cols-4 w-full">
               <TabsTrigger value="general">General</TabsTrigger>
               <TabsTrigger value="gameplay">Gameplay</TabsTrigger>
+              <TabsTrigger value="questions">Questions</TabsTrigger>
               <TabsTrigger value="advanced">Advanced</TabsTrigger>
             </TabsList>
 
@@ -416,15 +452,6 @@ export default function GameshowsPage() {
                   placeholder="Custom (seconds)"
                 />
               </div>
-              <div className="space-y-1.5">
-                <Label>Number of questions (blank = all)</Label>
-                <Input
-                  type="number" min="1"
-                  value={form.questionsCount}
-                  onChange={e => setForm({ ...form, questionsCount: e.target.value })}
-                  placeholder="Use all questions"
-                />
-              </div>
               <div className="space-y-2 pt-2 border-t">
                 <BoolCheckbox k="shuffleQuestions" label="Shuffle question order" />
                 {form.playMode !== 'SINGLE' && (
@@ -500,6 +527,117 @@ export default function GameshowsPage() {
                         onChange={e => setForm({ ...form, responseSeconds: e.target.value })} />
                     </div>
                   )}
+                </div>
+              )}
+            </TabsContent>
+
+            {/* Questions Tab */}
+            <TabsContent value="questions" className="space-y-4 pt-4">
+              <div className="space-y-3">
+                <Label>Question Selection</Label>
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setForm({ ...form, questionSelectionMode: 'RANDOM' })}
+                    className={`p-3 rounded-lg border-2 text-left transition-all ${
+                      form.questionSelectionMode === 'RANDOM'
+                        ? 'border-[#028a39] bg-green-50 text-[#028a39]'
+                        : 'border-gray-200 hover:border-gray-300'
+                    }`}
+                  >
+                    <div className="font-semibold text-sm">🎲 Random</div>
+                    <div className="text-xs text-gray-500 mt-0.5">Use all questions, shuffle if enabled</div>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setForm({ ...form, questionSelectionMode: 'FIXED' })}
+                    className={`p-3 rounded-lg border-2 text-left transition-all ${
+                      form.questionSelectionMode === 'FIXED'
+                        ? 'border-[#028a39] bg-green-50 text-[#028a39]'
+                        : 'border-gray-200 hover:border-gray-300'
+                    }`}
+                  >
+                    <div className="font-semibold text-sm">📌 Fixed Set</div>
+                    <div className="text-xs text-gray-500 mt-0.5">Choose specific questions in order</div>
+                  </button>
+                </div>
+              </div>
+
+              {form.questionSelectionMode === 'FIXED' && (
+                <div className="space-y-2">
+                  <div className="flex items-center justify-between">
+                    <Label>Select Questions ({selectedQuestionIds.length} selected)</Label>
+                    <div className="flex gap-2">
+                      <Button size="sm" variant="outline" onClick={() => setSelectedQuestionIds(allQuestions.map(q => q.id))} className="text-xs h-7">
+                        All
+                      </Button>
+                      <Button size="sm" variant="outline" onClick={() => setSelectedQuestionIds([])} className="text-xs h-7">
+                        None
+                      </Button>
+                    </div>
+                  </div>
+                  {loadingQuestions ? (
+                    <div className="flex items-center justify-center py-8">
+                      <Loader2 className="h-5 w-5 animate-spin text-gray-400" />
+                    </div>
+                  ) : (
+                    <div className="border rounded-lg divide-y max-h-64 overflow-y-auto">
+                      {allQuestions.length === 0 ? (
+                        <div className="text-center text-gray-400 text-sm py-6">No questions found</div>
+                      ) : allQuestions.map((q, idx) => {
+                        const checked = selectedQuestionIds.includes(q.id)
+                        const order = selectedQuestionIds.indexOf(q.id)
+                        return (
+                          <label key={q.id} className={`flex items-start gap-3 p-3 cursor-pointer hover:bg-gray-50 transition-colors ${
+                            checked ? 'bg-green-50' : ''
+                          }`}>
+                            <Checkbox
+                              checked={checked}
+                              onCheckedChange={c => {
+                                if (c) {
+                                  setSelectedQuestionIds(prev => [...prev, q.id])
+                                } else {
+                                  setSelectedQuestionIds(prev => prev.filter(id => id !== q.id))
+                                }
+                              }}
+                              className="mt-0.5"
+                            />
+                            <div className="flex-1 min-w-0">
+                              <div className="flex items-center gap-2">
+                                {checked && (
+                                  <span className="flex-shrink-0 w-5 h-5 rounded-full bg-[#028a39] text-white text-xs flex items-center justify-center font-bold">
+                                    {order + 1}
+                                  </span>
+                                )}
+                                <span className="text-sm font-medium truncate">{idx + 1}. {q.stem}</span>
+                              </div>
+                              <div className="flex items-center gap-2 mt-0.5">
+                                <span className="text-xs text-gray-400">{q.questionType}</span>
+                                <span className="text-xs text-gray-400">·</span>
+                                <span className="text-xs text-gray-400">{q.difficulty}</span>
+                                {q.topic && <><span className="text-xs text-gray-400">·</span><span className="text-xs text-gray-400">{q.topic}</span></>}
+                              </div>
+                            </div>
+                          </label>
+                        )
+                      })}
+                    </div>
+                  )}
+                  {selectedQuestionIds.length > 0 && (
+                    <p className="text-xs text-gray-500">Questions will be played in the order selected (top = first).</p>
+                  )}
+                </div>
+              )}
+
+              {form.questionSelectionMode === 'RANDOM' && (
+                <div className="space-y-1.5">
+                  <Label>Number of questions (blank = all)</Label>
+                  <Input
+                    type="number" min="1"
+                    value={form.questionsCount}
+                    onChange={e => setForm({ ...form, questionsCount: e.target.value })}
+                    placeholder="Use all questions"
+                  />
                 </div>
               )}
             </TabsContent>

@@ -14,27 +14,42 @@ export async function GET(
         include: {
           questions: {
             orderBy: { sortOrder: 'asc' },
-            select: {
-              id: true,
-              stem: true,
-              questionType: true,
-              options: true,
-              correctAnswer: true,
-              explanation: true,
-              difficulty: true,
-              points: true,
-              topic: true,
-              tags: true,
-              sortOrder: true,
-            }
           }
         }
       }
     }
   })
-  
+
   if (!gameshow) return NextResponse.json({ error: 'Gameshow not found' }, { status: 404 })
-  
+
+  const qs = (gameshow as any).quizSet?.questions ?? []
+
+  // If fixedQuestionIds is set, filter to only those questions in that order
+  let questions = qs
+  if (gameshow.fixedQuestionIds) {
+    try {
+      const ids: string[] = JSON.parse(gameshow.fixedQuestionIds)
+      const idMap = new Map(qs.map((q: any) => [q.id, q]))
+      const fixed = ids.map((id: string) => idMap.get(id)).filter(Boolean)
+      if (fixed.length > 0) questions = fixed
+    } catch {}
+  }
+
+  // Strip sensitive fields — only expose needed fields
+  const safeQuestions = questions.map((q: any) => ({
+    id: q.id,
+    stem: q.stem,
+    questionType: q.questionType,
+    options: q.options,
+    correctAnswer: q.correctAnswer,
+    explanation: q.explanation,
+    difficulty: q.difficulty,
+    points: q.points,
+    topic: q.topic,
+    tags: q.tags,
+    sortOrder: q.sortOrder,
+  }))
+
   return NextResponse.json({
     id: gameshow.id,
     shareCode: gameshow.shareCode,
@@ -44,6 +59,8 @@ export async function GET(
     playMode: gameshow.playMode,
     selectionMode: gameshow.selectionMode,
     scoringMode: gameshow.scoringMode,
+    questionsCount: gameshow.questionsCount,
+    fixedQuestionIds: gameshow.fixedQuestionIds,
     timeLimitSeconds: gameshow.timeLimitSeconds,
     answerRevealSeconds: gameshow.answerRevealSeconds,
     responseSeconds: gameshow.responseSeconds,
@@ -57,7 +74,7 @@ export async function GET(
     maxPlayers: gameshow.maxPlayers,
     requireLogin: gameshow.requireLogin,
     shuffleQuestions: gameshow.shuffleQuestions,
-    quizSetTitle: (gameshow as any).quizSet.title,
-    questions: (gameshow as any).quizSet.questions,
+    quizSetTitle: (gameshow as any).quizSet?.title ?? '',
+    questions: safeQuestions,
   })
 }
