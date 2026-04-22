@@ -187,6 +187,10 @@ model Document {
   sectionName String?  // Denormalized section name for display
   isManualInput Boolean  @default(false) // true = content pasted manually, not uploaded
   content       String?  // manual input text content
+  topicIds     String?  // JSON array of topic IDs ["id1","id2"]
+  topicNames   String?  // JSON array of topic names ["CIT","PIT"]
+  sectionIds   String?  // JSON array of section IDs
+  sectionNames String?  // JSON array of section names
 
   // Relations
   session Session @relation(fields: [sessionId], references: [id], onDelete: Cascade)

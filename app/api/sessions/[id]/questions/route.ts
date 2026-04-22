@@ -2,14 +2,18 @@ import { NextRequest, NextResponse } from 'next/server'
 import { auth } from '@/auth'
 import { db } from '@/lib/db'
 
-export async function GET(_req: NextRequest, { params }: { params: { id: string } }) {
+export async function GET(req: NextRequest, { params }: { params: { id: string } }) {
   const session = await auth()
   if (!session?.user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
+  const limitParam = req.nextUrl.searchParams.get('limit')
+  const limit = limitParam ? Math.min(parseInt(limitParam, 10) || 50, 200) : undefined
 
   const questions = await db.question.findMany({
     where: { sessionId: params.id },
     include: { section: { select: { id: true, name: true } } },
     orderBy: { createdAt: 'desc' },
+    ...(limit ? { take: limit } : {}),
   })
   return NextResponse.json(questions)
 }

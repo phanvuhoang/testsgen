@@ -11,7 +11,9 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useToast } from '@/components/ui/use-toast'
-import { Upload, FileText, Trash2, Loader2, Save, Tag, Puzzle } from 'lucide-react'
+import { Checkbox } from '@/components/ui/checkbox'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
+import { Upload, FileText, Trash2, Loader2, Save, Tag, Puzzle, ChevronDown } from 'lucide-react'
 import { formatDate, formatFileSize } from '@/lib/utils'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 
@@ -23,11 +25,17 @@ type Document = {
   filePath: string
   uploadedAt: string
   description?: string | null
+  // Legacy single fields (keep for compat)
   topicId?: string | null
   topicName?: string | null
   sectionId?: string | null
   sectionName?: string | null
   isManualInput?: boolean
+  // NEW multi fields
+  topicIds?: string | null   // JSON string e.g. '["id1","id2"]'
+  topicNames?: string | null // JSON string
+  sectionIds?: string | null
+  sectionNames?: string | null
 }
 
 const fileTypes = ['SYLLABUS', 'TAX_REGULATIONS', 'SAMPLE_QUESTIONS', 'STUDY_MATERIAL', 'RATES_TARIFF', 'OTHER']
@@ -48,6 +56,11 @@ const fileTypeColors: Record<string, string> = {
   OTHER: 'bg-gray-100 text-gray-800',
 }
 
+const parseJsonArr = (s: string | null | undefined): string[] => {
+  if (!s) return []
+  try { return JSON.parse(s) } catch { return [] }
+}
+
 export default function DocumentsPage() {
   const params = useParams()
   const { toast } = useToast()
@@ -57,17 +70,25 @@ export default function DocumentsPage() {
   const [selectedType, setSelectedType] = useState('SYLLABUS')
   const [topics, setTopics] = useState<{id: string; name: string; isOverall: boolean; parentId: string | null}[]>([])
   const [sections, setSections] = useState<{id: string; name: string}[]>([])
-  const [selectedTopicId, setSelectedTopicId] = useState<string>('none')
-  const [selectedSectionId, setSelectedSectionId] = useState<string>('none')
+  const [selectedTopicIds, setSelectedTopicIds] = useState<string[]>([])
+  const [selectedSectionIds, setSelectedSectionIds] = useState<string[]>([])
   const [docDescription, setDocDescription] = useState('')
   const fileInputRef = useRef<HTMLInputElement>(null)
 
+  // Upload popover state
+  const [topicPopoverOpen, setTopicPopoverOpen] = useState(false)
+  const [sectionPopoverOpen, setSectionPopoverOpen] = useState(false)
+
   // Edit tag state
   const [editTagDocId, setEditTagDocId] = useState<string | null>(null)
-  const [editTagTopic, setEditTagTopic] = useState<string>('none')
-  const [editTagSection, setEditTagSection] = useState<string>('none')
+  const [editTagTopics, setEditTagTopics] = useState<string[]>([])
+  const [editTagSections, setEditTagSections] = useState<string[]>([])
   const [editTagDesc, setEditTagDesc] = useState<string>('')
   const [isSavingTag, setIsSavingTag] = useState(false)
+
+  // Edit tag popover state
+  const [editTopicPopoverOpen, setEditTopicPopoverOpen] = useState(false)
+  const [editSectionPopoverOpen, setEditSectionPopoverOpen] = useState(false)
 
   // Parse state
   const [parsingDocId, setParsingDocId] = useState<string | null>(null)
@@ -92,14 +113,22 @@ export default function DocumentsPage() {
   const handleUpload = async (file: File) => {
     setIsUploading(true)
     try {
+      const topicObjects = topics.filter(t => selectedTopicIds.includes(t.id))
+      const sectionObjects = sections.filter(s => selectedSectionIds.includes(s.id))
       const formData = new FormData()
       formData.append('file', file)
       formData.append('fileType', selectedType)
       formData.append('sessionId', params.sessionId as string)
-      formData.append('topicId', selectedTopicId !== 'none' ? selectedTopicId : '')
-      formData.append('topicName', selectedTopicId !== 'none' ? (topics.find(t => t.id === selectedTopicId)?.name ?? '') : '')
-      formData.append('sectionId', selectedSectionId !== 'none' ? selectedSectionId : '')
-      formData.append('sectionName', selectedSectionId !== 'none' ? (sections.find(s => s.id === selectedSectionId)?.name ?? '') : '')
+      // Legacy single fields (first item)
+      formData.append('topicId', selectedTopicIds[0] ?? '')
+      formData.append('topicName', topicObjects[0]?.name ?? '')
+      formData.append('sectionId', selectedSectionIds[0] ?? '')
+      formData.append('sectionName', sectionObjects[0]?.name ?? '')
+      // New multi fields
+      formData.append('topicIds', JSON.stringify(selectedTopicIds))
+      formData.append('topicNames', JSON.stringify(topicObjects.map(t => t.name)))
+      formData.append('sectionIds', JSON.stringify(selectedSectionIds))
+      formData.append('sectionNames', JSON.stringify(sectionObjects.map(s => s.name)))
       formData.append('description', docDescription)
       const res = await fetch(`/api/sessions/${params.sessionId}/documents`, {
         method: 'POST',
@@ -128,16 +157,20 @@ export default function DocumentsPage() {
   const handleSaveTag = async (docId: string) => {
     setIsSavingTag(true)
     try {
-      const topicObj = topics.find(t => t.id === editTagTopic)
-      const sectionObj = sections.find(s => s.id === editTagSection)
+      const topicObjs = topics.filter(t => editTagTopics.includes(t.id))
+      const sectionObjs = sections.filter(s => editTagSections.includes(s.id))
       const res = await fetch(`/api/sessions/${params.sessionId}/documents/${docId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          topicId: editTagTopic !== 'none' ? editTagTopic : null,
-          topicName: editTagTopic !== 'none' ? (topicObj?.name ?? null) : null,
-          sectionId: editTagSection !== 'none' ? editTagSection : null,
-          sectionName: editTagSection !== 'none' ? (sectionObj?.name ?? null) : null,
+          topicId: editTagTopics[0] ?? null,
+          topicName: topicObjs[0]?.name ?? null,
+          sectionId: editTagSections[0] ?? null,
+          sectionName: sectionObjs[0]?.name ?? null,
+          topicIds: JSON.stringify(editTagTopics),
+          topicNames: JSON.stringify(topicObjs.map(t => t.name)),
+          sectionIds: JSON.stringify(editTagSections),
+          sectionNames: JSON.stringify(sectionObjs.map(s => s.name)),
           description: editTagDesc || null,
         }),
       })
@@ -173,7 +206,7 @@ export default function DocumentsPage() {
     <div className="p-6 max-w-4xl mx-auto">
       <div className="flex items-center justify-between mb-6">
         <h2 className="text-lg font-semibold">Documents</h2>
-        <div className="flex gap-2 flex-wrap">
+        <div className="flex gap-2 flex-wrap items-center">
           <Select value={selectedType} onValueChange={setSelectedType}>
             <SelectTrigger className="w-48">
               <SelectValue />
@@ -185,29 +218,67 @@ export default function DocumentsPage() {
             </SelectContent>
           </Select>
 
-          {/* Topic tagging */}
-          <Select value={selectedTopicId} onValueChange={setSelectedTopicId}>
-            <SelectTrigger className="w-40">
-              <SelectValue placeholder="Topic (optional)" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="none">No topic</SelectItem>
-              {topics.filter(t => !t.isOverall).map(t => (
-                <SelectItem key={t.id} value={t.id}>{t.parentId ? `↳ ${t.name}` : t.name}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+          {/* Topic multi-select */}
+          <Popover open={topicPopoverOpen} onOpenChange={setTopicPopoverOpen}>
+            <PopoverTrigger asChild>
+              <Button variant="outline" size="sm" className="h-9 text-xs gap-1">
+                {selectedTopicIds.length === 0
+                  ? 'Topics (optional)'
+                  : `${selectedTopicIds.length} topic${selectedTopicIds.length > 1 ? 's' : ''}`}
+                <ChevronDown className="h-3 w-3 opacity-60" />
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-56 p-2" align="start">
+              <p className="text-xs font-semibold mb-1 text-gray-500">Select topics</p>
+              {topics.filter(t => !t.isOverall).length === 0 ? (
+                <p className="text-xs text-gray-400 py-1">No topics available</p>
+              ) : (
+                topics.filter(t => !t.isOverall).map(t => (
+                  <div
+                    key={t.id}
+                    className="flex items-center gap-2 py-1 cursor-pointer hover:bg-gray-50 rounded px-1"
+                    onClick={() => setSelectedTopicIds(prev =>
+                      prev.includes(t.id) ? prev.filter(x => x !== t.id) : [...prev, t.id]
+                    )}
+                  >
+                    <Checkbox checked={selectedTopicIds.includes(t.id)} onCheckedChange={() => {}} />
+                    <span className="text-xs">{t.parentId ? `↳ ${t.name}` : t.name}</span>
+                  </div>
+                ))
+              )}
+            </PopoverContent>
+          </Popover>
 
-          {/* Section tagging */}
-          <Select value={selectedSectionId} onValueChange={setSelectedSectionId}>
-            <SelectTrigger className="w-40">
-              <SelectValue placeholder="Section (optional)" />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="none">No section</SelectItem>
-              {sections.map(s => <SelectItem key={s.id} value={s.id}>{s.name}</SelectItem>)}
-            </SelectContent>
-          </Select>
+          {/* Section multi-select */}
+          <Popover open={sectionPopoverOpen} onOpenChange={setSectionPopoverOpen}>
+            <PopoverTrigger asChild>
+              <Button variant="outline" size="sm" className="h-9 text-xs gap-1">
+                {selectedSectionIds.length === 0
+                  ? 'Sections (optional)'
+                  : `${selectedSectionIds.length} section${selectedSectionIds.length > 1 ? 's' : ''}`}
+                <ChevronDown className="h-3 w-3 opacity-60" />
+              </Button>
+            </PopoverTrigger>
+            <PopoverContent className="w-56 p-2" align="start">
+              <p className="text-xs font-semibold mb-1 text-gray-500">Select sections</p>
+              {sections.length === 0 ? (
+                <p className="text-xs text-gray-400 py-1">No sections available</p>
+              ) : (
+                sections.map(s => (
+                  <div
+                    key={s.id}
+                    className="flex items-center gap-2 py-1 cursor-pointer hover:bg-gray-50 rounded px-1"
+                    onClick={() => setSelectedSectionIds(prev =>
+                      prev.includes(s.id) ? prev.filter(x => x !== s.id) : [...prev, s.id]
+                    )}
+                  >
+                    <Checkbox checked={selectedSectionIds.includes(s.id)} onCheckedChange={() => {}} />
+                    <span className="text-xs">{s.name}</span>
+                  </div>
+                ))
+              )}
+            </PopoverContent>
+          </Popover>
 
           {selectedType === 'OTHER' && (
             <Input
@@ -280,8 +351,20 @@ export default function DocumentsPage() {
                       {doc.isManualInput && <span className="text-xs px-2 py-0.5 rounded-full bg-purple-100 text-purple-700">Manual</span>}
                       <span className="text-xs text-gray-500">{formatFileSize(doc.fileSize)}</span>
                       <span className="text-xs text-gray-500">{formatDate(doc.uploadedAt)}</span>
-                      {doc.topicName && <span className="text-xs px-1.5 py-0.5 bg-blue-50 text-blue-700 rounded">{doc.topicName}</span>}
-                      {doc.sectionName && <span className="text-xs px-1.5 py-0.5 bg-green-50 text-green-700 rounded">{doc.sectionName}</span>}
+                      {/* Show all topic badges */}
+                      {parseJsonArr(doc.topicNames).length > 0
+                        ? parseJsonArr(doc.topicNames).map((name, i) => (
+                            <span key={i} className="text-xs px-1.5 py-0.5 bg-blue-50 text-blue-700 rounded">{name}</span>
+                          ))
+                        : doc.topicName && <span className="text-xs px-1.5 py-0.5 bg-blue-50 text-blue-700 rounded">{doc.topicName}</span>
+                      }
+                      {/* Show all section badges */}
+                      {parseJsonArr(doc.sectionNames).length > 0
+                        ? parseJsonArr(doc.sectionNames).map((name, i) => (
+                            <span key={i} className="text-xs px-1.5 py-0.5 bg-green-50 text-green-700 rounded">{name}</span>
+                          ))
+                        : doc.sectionName && <span className="text-xs px-1.5 py-0.5 bg-green-50 text-green-700 rounded">{doc.sectionName}</span>
+                      }
                       {doc.fileType === 'OTHER' && doc.description && <span className="text-xs text-gray-400 italic">{doc.description}</span>}
                     </div>
                   </div>
@@ -307,9 +390,15 @@ export default function DocumentsPage() {
                       title="Edit tags"
                       onClick={() => {
                         setEditTagDocId(doc.id)
-                        setEditTagTopic(doc.topicId ?? 'none')
-                        setEditTagSection(doc.sectionId ?? 'none')
+                        setEditTagTopics(parseJsonArr(doc.topicIds).length > 0
+                          ? parseJsonArr(doc.topicIds)
+                          : (doc.topicId ? [doc.topicId] : []))
+                        setEditTagSections(parseJsonArr(doc.sectionIds).length > 0
+                          ? parseJsonArr(doc.sectionIds)
+                          : (doc.sectionId ? [doc.sectionId] : []))
                         setEditTagDesc(doc.description ?? '')
+                        setEditTopicPopoverOpen(false)
+                        setEditSectionPopoverOpen(false)
                       }}
                     >
                       <Tag className="h-4 w-4" />
@@ -329,26 +418,68 @@ export default function DocumentsPage() {
                   <div className="mt-3 pt-3 border-t space-y-2">
                     <div className="grid grid-cols-2 gap-2">
                       <div className="space-y-1">
-                        <Label className="text-xs">Topic</Label>
-                        <Select value={editTagTopic} onValueChange={setEditTagTopic}>
-                          <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="No topic" /></SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="none">No topic</SelectItem>
-                            {topics.filter(t => !t.isOverall).map(t => (
-                              <SelectItem key={t.id} value={t.id} className="text-xs">{t.parentId ? `↳ ${t.name}` : t.name}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
+                        <Label className="text-xs">Topics</Label>
+                        <Popover open={editTopicPopoverOpen} onOpenChange={setEditTopicPopoverOpen}>
+                          <PopoverTrigger asChild>
+                            <Button variant="outline" size="sm" className="h-8 text-xs w-full justify-between gap-1">
+                              {editTagTopics.length === 0
+                                ? 'No topics'
+                                : `${editTagTopics.length} topic${editTagTopics.length > 1 ? 's' : ''}`}
+                              <ChevronDown className="h-3 w-3 opacity-60" />
+                            </Button>
+                          </PopoverTrigger>
+                          <PopoverContent className="w-52 p-2" align="start">
+                            <p className="text-xs font-semibold mb-1 text-gray-500">Select topics</p>
+                            {topics.filter(t => !t.isOverall).length === 0 ? (
+                              <p className="text-xs text-gray-400 py-1">No topics available</p>
+                            ) : (
+                              topics.filter(t => !t.isOverall).map(t => (
+                                <div
+                                  key={t.id}
+                                  className="flex items-center gap-2 py-1 cursor-pointer hover:bg-gray-50 rounded px-1"
+                                  onClick={() => setEditTagTopics(prev =>
+                                    prev.includes(t.id) ? prev.filter(x => x !== t.id) : [...prev, t.id]
+                                  )}
+                                >
+                                  <Checkbox checked={editTagTopics.includes(t.id)} onCheckedChange={() => {}} />
+                                  <span className="text-xs">{t.parentId ? `↳ ${t.name}` : t.name}</span>
+                                </div>
+                              ))
+                            )}
+                          </PopoverContent>
+                        </Popover>
                       </div>
                       <div className="space-y-1">
-                        <Label className="text-xs">Section</Label>
-                        <Select value={editTagSection} onValueChange={setEditTagSection}>
-                          <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="No section" /></SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="none">No section</SelectItem>
-                            {sections.map(s => <SelectItem key={s.id} value={s.id} className="text-xs">{s.name}</SelectItem>)}
-                          </SelectContent>
-                        </Select>
+                        <Label className="text-xs">Sections</Label>
+                        <Popover open={editSectionPopoverOpen} onOpenChange={setEditSectionPopoverOpen}>
+                          <PopoverTrigger asChild>
+                            <Button variant="outline" size="sm" className="h-8 text-xs w-full justify-between gap-1">
+                              {editTagSections.length === 0
+                                ? 'No sections'
+                                : `${editTagSections.length} section${editTagSections.length > 1 ? 's' : ''}`}
+                              <ChevronDown className="h-3 w-3 opacity-60" />
+                            </Button>
+                          </PopoverTrigger>
+                          <PopoverContent className="w-52 p-2" align="start">
+                            <p className="text-xs font-semibold mb-1 text-gray-500">Select sections</p>
+                            {sections.length === 0 ? (
+                              <p className="text-xs text-gray-400 py-1">No sections available</p>
+                            ) : (
+                              sections.map(s => (
+                                <div
+                                  key={s.id}
+                                  className="flex items-center gap-2 py-1 cursor-pointer hover:bg-gray-50 rounded px-1"
+                                  onClick={() => setEditTagSections(prev =>
+                                    prev.includes(s.id) ? prev.filter(x => x !== s.id) : [...prev, s.id]
+                                  )}
+                                >
+                                  <Checkbox checked={editTagSections.includes(s.id)} onCheckedChange={() => {}} />
+                                  <span className="text-xs">{s.name}</span>
+                                </div>
+                              ))
+                            )}
+                          </PopoverContent>
+                        </Popover>
                       </div>
                     </div>
                     {doc.fileType === 'OTHER' && (

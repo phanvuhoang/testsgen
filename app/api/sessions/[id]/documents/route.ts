@@ -40,6 +40,10 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
           topicName: body.topicName || null,
           sectionId: body.sectionId || null,
           sectionName: body.sectionName || null,
+          topicIds: body.topicIds || null,
+          topicNames: body.topicNames || null,
+          sectionIds: body.sectionIds || null,
+          sectionNames: body.sectionNames || null,
         }
       })
       return NextResponse.json(doc)
@@ -78,6 +82,10 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
         topicName: formData.get('topicName') as string || null,
         sectionId: formData.get('sectionId') as string || null,
         sectionName: formData.get('sectionName') as string || null,
+        topicIds: formData.get('topicIds') as string || null,
+        topicNames: formData.get('topicNames') as string || null,
+        sectionIds: formData.get('sectionIds') as string || null,
+        sectionNames: formData.get('sectionNames') as string || null,
       } as any,
     })
     return NextResponse.json(doc, { status: 201 })

@@ -18,6 +18,10 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
         sectionId: body.sectionId !== undefined ? body.sectionId : undefined,
         sectionName: body.sectionName !== undefined ? body.sectionName : undefined,
         description: body.description !== undefined ? body.description : undefined,
+        topicIds: body.topicIds !== undefined ? body.topicIds : undefined,
+        topicNames: body.topicNames !== undefined ? body.topicNames : undefined,
+        sectionIds: body.sectionIds !== undefined ? body.sectionIds : undefined,
+        sectionNames: body.sectionNames !== undefined ? body.sectionNames : undefined,
       },
     })
     return NextResponse.json(doc)

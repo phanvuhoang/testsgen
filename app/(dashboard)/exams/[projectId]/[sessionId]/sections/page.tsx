@@ -95,16 +95,14 @@ const SectionForm = ({
           <Input value={data.name || ''} onChange={e => onChange('name', e.target.value)} placeholder="e.g. Section A — Multiple Choice" />
         </div>
         <div className="space-y-1">
-          <Label className="text-xs">Questions to Generate (Bank size)</Label>
-          <Input type="number" min={1} value={data.questionsInBank || 40} onChange={e => onChange('questionsInBank', Number(e.target.value))} className="h-9" />
-          <p className="text-xs text-gray-400">How many questions to generate into the question bank for this section</p>
+          <Label className="text-xs">Number of questions required in the Section</Label>
+          <Input type="number" min={1} value={data.questionsInExam ?? totalQ} onChange={e => onChange('questionsInExam', Number(e.target.value))} className="h-9" />
+          <p className="text-xs text-gray-400">Number of questions in the actual exam / Mock exam for this section</p>
         </div>
         <div className="space-y-1">
-          <Label className="text-xs">In-exam count</Label>
-          <div className="h-9 flex items-center text-sm text-gray-600 font-medium">
-            {totalQ} questions · {totalPts} marks
-          </div>
-          <p className="text-xs text-gray-400">Actual questions in the real exam for this section</p>
+          <Label className="text-xs">Question bank target (to generate)</Label>
+          <Input type="number" min={1} value={data.questionsInBank || 40} onChange={e => onChange('questionsInBank', Number(e.target.value))} className="h-9" />
+          <p className="text-xs text-gray-400">How many questions to generate into the bank (usually higher than exam count)</p>
         </div>
       </div>
 
@@ -442,7 +440,7 @@ export default function SectionsPage() {
                           }
                         })()}
                         <div className="flex gap-4 text-xs text-gray-500 mt-1">
-                          <span>In exam: <strong>{(() => { try { const qt = JSON.parse(sec.questionTypes || '[]'); return qt.reduce((a: number, r: any) => a + r.count, 0) } catch { return sec.questionsInExam } })()} q</strong></span>
+                          <span>Required in section: <strong>{sec.questionsInExam} q</strong></span>
                           <span>Bank target: <strong>{sec.questionsInBank} q</strong></span>
                         </div>
                       </div>
