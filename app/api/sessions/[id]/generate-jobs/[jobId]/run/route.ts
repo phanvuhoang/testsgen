@@ -82,6 +82,12 @@ export async function POST(_req: NextRequest, { params }: { params: { id: string
       const sectionIds = sectionConfigs.map((s: any) => s.sectionId)
       const sections = await (db as any).examSection.findMany({ where: { id: { in: sectionIds } } })
 
+      // Load all parsed sample questions for this session once
+      const allParsedQuestions = await (db as any).parsedQuestion.findMany({
+        where: { sessionId },
+        orderBy: { sortOrder: 'asc' },
+      }) as any[]
+
       let progress = 0
 
       for (const sectionConfig of sectionConfigs) {
@@ -92,22 +98,61 @@ export async function POST(_req: NextRequest, { params }: { params: { id: string
         const sec = sections.find((s: any) => s.id === sectionConfig.sectionId)
         if (!sec) continue
 
+        // Build sample questions context filtered by selected topics
+        const selectedTopics: string[] = sectionConfig.selectedTopicIds && sectionConfig.selectedTopicIds.length > 0
+          ? sectionConfig.selectedTopicIds
+          : []
+        const selectedTopicNames: string[] = sectionConfig.selectedTopicNames || []
+
+        // Filter sample questions: if specific samples were selected use those;
+        // otherwise filter by selected topics matching topicId or topicName
+        let filteredSamples: any[] = []
+        if (sectionConfig.selectedSampleIds && sectionConfig.selectedSampleIds.length > 0) {
+          filteredSamples = allParsedQuestions.filter((q: any) =>
+            sectionConfig.selectedSampleIds.includes(q.id)
+          )
+        } else if (selectedTopics.length > 0 || selectedTopicNames.length > 0) {
+          filteredSamples = allParsedQuestions.filter((q: any) => {
+            const byId = selectedTopics.length > 0 && q.topicId && selectedTopics.includes(q.topicId)
+            const byName = selectedTopicNames.length > 0 && q.topicName &&
+              selectedTopicNames.some((n: string) => n.toLowerCase() === q.topicName.toLowerCase())
+            return byId || byName
+          })
+        } else {
+          filteredSamples = allParsedQuestions
+        }
+
+        const sampleQuestionsFiltered = filteredSamples.length > 0
+          ? filteredSamples.slice(0, 20).map((q: any) =>
+              `Q: ${q.content}\n${q.answer ? `A: ${q.answer}` : ''}`.trim()
+            ).join('\n\n---\n\n')
+          : undefined
+
         const generatorConfig = {
           sectionName: sec.name,
           questionType: sec.questionType,
           marksPerQuestion: sec.marksPerQuestion,
-          count: sectionConfig.count || sec.questionsInBank,
+          count: sectionConfig.count || sec.questionsInBank || 2,
           topics: sec.topics || undefined,
           sectionInstructions: sec.instructions || undefined,
           aiInstructions: sec.aiInstructions || undefined,
           extraInstructions: extraInstructions || undefined,
+          customInstructions: sectionConfig.customInstructions || undefined,
           overallTopic,
           syllabus: joinContent('SYLLABUS'),
           regulations: joinContent('TAX_REGULATIONS'),
           studyMaterial: joinContent('STUDY_MATERIAL'),
           sampleQuestions: joinContent('SAMPLE_QUESTIONS'),
+          sampleQuestionsFiltered,
           ratesTariff: joinContent('RATES_TARIFF'),
           otherContext: joinContent('OTHER') + sessionVarsText,
+          // New per-generation fields
+          selectedTopics: selectedTopicNames.length > 0 ? selectedTopicNames : undefined,
+          selectedQuestionTypes: sectionConfig.selectedQuestionTypes || undefined,
+          syllabusCode: sectionConfig.syllabusCode || undefined,
+          issues: sectionConfig.issues || undefined,
+          difficultyLevel: sectionConfig.difficultyLevel || 'STANDARD',
+          // Legacy fallback
           questionTypes: sec.questionTypes || undefined,
           topicBreakdown: sec.topicBreakdown || undefined,
           referenceQuestionId: sectionConfig.referenceQuestionId,
