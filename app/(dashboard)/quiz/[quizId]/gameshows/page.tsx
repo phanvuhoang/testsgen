@@ -13,7 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Checkbox } from '@/components/ui/checkbox'
 import { useToast } from '@/components/ui/use-toast'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
-import { Loader2, Plus, Trash2, ExternalLink, Copy, Gamepad2, Pencil, BarChart2 } from 'lucide-react'
+import { Loader2, Plus, Trash2, ExternalLink, Copy, Gamepad2, Pencil, BarChart2, ChevronDown, ChevronUp } from 'lucide-react'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 
 type GameshowType = 'WWTBAM' | 'KAHOOT' | 'JEOPARDY'
@@ -121,6 +121,8 @@ export default function GameshowsPage() {
   const [analyticsGameshow, setAnalyticsGameshow] = useState<Gameshow | null>(null)
   const [analyticsData, setAnalyticsData] = useState<any>(null)
   const [analyticsLoading, setAnalyticsLoading] = useState(false)
+  const [expandedPlayers, setExpandedPlayers] = useState<Set<string>>(new Set())
+  const [deletingSessionId, setDeletingSessionId] = useState<string | null>(null)
 
   useEffect(() => { fetchData() }, [])
 
@@ -269,6 +271,22 @@ export default function GameshowsPage() {
     } finally {
       setIsDeleting(false)
     }
+  }
+
+  const deleteAnalyticsSession = async (sessionId: string) => {
+    if (!confirm('Delete this session? This cannot be undone.')) return
+    setDeletingSessionId(sessionId)
+    try {
+      const res = await fetch(`/api/gameshow/analytics/session/${sessionId}`, { method: 'DELETE' })
+      if (res.ok) {
+        setAnalyticsData((prev: any) => prev ? {
+          ...prev,
+          sessions: prev.sessions.filter((s: any) => s.sessionId !== sessionId),
+          total: prev.total - 1,
+        } : prev)
+      }
+    } catch {}
+    setDeletingSessionId(null)
   }
 
   const openAnalytics = async (g: Gameshow) => {
@@ -758,32 +776,79 @@ export default function GameshowsPage() {
                 </div>
                 {(analyticsData.sessions ?? []).map((session: any, si: number) => (
                   <div key={session.sessionId} className="border rounded-xl overflow-hidden">
-                    <div className="bg-gray-50 px-4 py-2 flex items-center justify-between">
-                      <div className="flex items-center gap-2">
-                        <span className="font-semibold text-sm">Session {si + 1}</span>
-                        <span className="text-xs text-gray-400 font-mono">{session.roomCode}</span>
-                        <span className={`text-xs px-2 py-0.5 rounded-full ${session.status === 'FINISHED' ? 'bg-gray-100 text-gray-500' : 'bg-green-100 text-green-700'}`}>{session.status}</span>
-                      </div>
-                      <span className="text-xs text-gray-400">{new Date(session.createdAt).toLocaleDateString('vi-VN')}</span>
+                    <div className="flex items-center gap-2 px-4 py-2 bg-gray-50 border-b flex-wrap">
+                      <span className="font-semibold text-sm">Session {si + 1}</span>
+                      <span className="text-xs text-gray-400 font-mono">{session.roomCode}</span>
+                      <span className={`text-xs px-2 py-0.5 rounded-full ${session.status === 'FINISHED' ? 'bg-gray-100 text-gray-500' : 'bg-green-100 text-green-700'}`}>{session.status}</span>
+                      <span className="text-xs text-gray-400 ml-auto">{new Date(session.createdAt).toLocaleDateString('vi-VN')}</span>
+                      <Button
+                        size="sm" variant="ghost"
+                        className="h-6 text-xs text-red-500 hover:text-red-700 hover:bg-red-50 ml-1"
+                        disabled={deletingSessionId === session.sessionId}
+                        onClick={() => deleteAnalyticsSession(session.sessionId)}
+                      >
+                        {deletingSessionId === session.sessionId ? <Loader2 className="h-3 w-3 animate-spin" /> : <Trash2 className="h-3 w-3" />}
+                        <span className="ml-1">Delete</span>
+                      </Button>
                     </div>
                     {session.players && session.players.length > 0 ? (
                       <div className="divide-y">
-                        {[...session.players].sort((a: any, b: any) => b.score - a.score).map((p: any, rank: number) => (
-                          <div key={p.nickname + rank} className="flex items-center justify-between px-4 py-2.5">
-                            <div className="flex items-center gap-3">
-                              <span className="text-sm text-gray-400 w-5">{rank + 1}.</span>
-                              <span className="font-medium text-sm">{p.nickname}</span>
+                        {[...session.players].sort((a: any, b: any) => b.score - a.score).map((p: any, rank: number) => {
+                          const pKey = `${session.sessionId}-${p.nickname}`
+                          const isExpanded = expandedPlayers.has(pKey)
+                          const answers: any[] = p.answers ?? []
+                          return (
+                            <div key={rank}>
+                              <div className="flex items-center gap-3 px-4 py-2">
+                                <span className="text-sm font-bold text-gray-400 w-6">#{rank + 1}</span>
+                                <span className="font-medium text-sm flex-1">{p.nickname}</span>
+                                <span className="text-xs text-gray-500">{p.correctCount}✓ {p.wrongCount}✗</span>
+                                <span className="font-bold text-[#028a39] text-sm">{p.score} pts</span>
+                                {answers.length > 0 && (
+                                  <Button
+                                    variant="ghost" size="icon" className="h-6 w-6"
+                                    onClick={() => setExpandedPlayers(prev => {
+                                      const s = new Set(prev)
+                                      s.has(pKey) ? s.delete(pKey) : s.add(pKey)
+                                      return s
+                                    })}
+                                  >
+                                    {isExpanded ? <ChevronUp className="h-3 w-3" /> : <ChevronDown className="h-3 w-3" />}
+                                  </Button>
+                                )}
+                              </div>
+                              {isExpanded && answers.length > 0 && (
+                                <div className="px-4 pb-3 bg-gray-50/50">
+                                  <table className="w-full text-xs border-collapse">
+                                    <thead>
+                                      <tr className="text-gray-500">
+                                        <th className="text-left py-1 pr-2 font-medium">Q#</th>
+                                        <th className="text-left py-1 pr-2 font-medium">Answer</th>
+                                        <th className="text-center py-1 pr-2 font-medium">Result</th>
+                                        <th className="text-right py-1 pr-2 font-medium">Points</th>
+                                        <th className="text-right py-1 font-medium">Time</th>
+                                      </tr>
+                                    </thead>
+                                    <tbody>
+                                      {answers.map((ans: any, ai: number) => (
+                                        <tr key={ai} className="border-t border-gray-100">
+                                          <td className="py-1 pr-2 text-gray-400">Q{ai + 1}</td>
+                                          <td className="py-1 pr-2 max-w-[120px] truncate" title={ans.answer ?? ''}>{ans.answer ?? '—'}</td>
+                                          <td className="py-1 pr-2 text-center">{ans.correct ? <span className="text-green-600 font-bold">✓</span> : <span className="text-red-500 font-bold">✗</span>}</td>
+                                          <td className="py-1 pr-2 text-right text-[#028a39] font-medium">+{ans.points ?? 0}</td>
+                                          <td className="py-1 text-right text-gray-400">{ans.elapsedMs ? `${(ans.elapsedMs / 1000).toFixed(1)}s` : '—'}</td>
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
+                                </div>
+                              )}
                             </div>
-                            <div className="flex items-center gap-4 text-sm">
-                              <span className="text-green-600 font-medium">{p.correctCount ?? 0}✓</span>
-                              <span className="text-red-500">{p.wrongCount ?? 0}✗</span>
-                              <span className="font-bold text-[#028a39] w-20 text-right">{p.score.toLocaleString()} pts</span>
-                            </div>
-                          </div>
-                        ))}
+                          )
+                        })}
                       </div>
                     ) : (
-                      <p className="text-sm text-gray-400 px-4 py-3 italic">No player data recorded.</p>
+                      <div className="px-4 py-3 text-sm text-gray-400">No players recorded</div>
                     )}
                   </div>
                 ))}

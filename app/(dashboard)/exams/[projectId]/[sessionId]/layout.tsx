@@ -7,6 +7,7 @@ import { Button } from '@/components/ui/button'
 import { ArrowLeft } from 'lucide-react'
 
 const tabs = [
+  { label: 'Topics', href: 'topics' },
   { label: 'Documents', href: 'documents' },
   { label: 'Sections', href: 'sections' },
   { label: 'Generate', href: 'generate' },

@@ -158,6 +158,7 @@ export default function KahootPage() {
   const [showBuzz, setShowBuzz] = useState(false) // show the buzzer phase UI
 
   const timerRef = useRef<NodeJS.Timeout|null>(null)
+  const revealTimeoutRef = useRef<NodeJS.Timeout|null>(null)
   const timeCountPlayedRef = useRef(false)
   const currentQuestion = questions[currentIdx]
   const currentPlayer = players[currentPlayerIdx]
@@ -241,10 +242,24 @@ export default function KahootPage() {
     return () => clearInterval(lobbyPollRef.current!)
   }, [phase, joinRoomCode, myPlayerId])
 
-  // Timer
+  // Timer for normal mode — auto-starts when question begins
+  useEffect(() => {
+    if (phase !== 'question' || submitted) return
+    if (config?.clickStartToCount || isBuzzerMode) return
+    clearInterval(timerRef.current!)
+    timerRef.current = setInterval(() => {
+      setTimeLeft(prev => {
+        if (prev<=5&&!timeCountPlayedRef.current){timeCountPlayedRef.current=true;audio.playTimeCount()}
+        if (prev<=1){clearInterval(timerRef.current!);handleTimeout();return 0}
+        return prev-1
+      })
+    }, 1000)
+    return ()=>clearInterval(timerRef.current!)
+  }, [phase, currentIdx])
+
+  // Timer for clickStartToCount / buzz mode — starts when timerRunning becomes true
   useEffect(() => {
     if (!timerRunning) return
-    // Clear any existing interval first (guard against double-fire)
     clearInterval(timerRef.current!)
     timerRef.current = setInterval(() => {
       setTimeLeft(prev => {
@@ -262,7 +277,7 @@ export default function KahootPage() {
     audio.playOnce('lost', 0.9)
     setIsCorrect(false); setSubmitted(true)
     buildDistribution()
-    setTimeout(()=>setPhase('reveal'), 800)
+    revealTimeoutRef.current = setTimeout(()=>setPhase('reveal'), 800)
   }, [submitted])
 
   const buildDistribution = () => {
@@ -299,7 +314,7 @@ export default function KahootPage() {
     updatePlayer(correct,pts)
     if(correct){audio.playOnce('win',0.9);if((currentPlayer?.streak??0)>=2)setShowConfetti(true);setTimeout(()=>setShowConfetti(false),1500)}
     else audio.playOnce('lost',0.9)
-    setTimeout(()=>setPhase('reveal'),1200)
+    revealTimeoutRef.current = setTimeout(()=>setPhase('reveal'),1200)
   }
 
   const handleMultipleSubmit=()=>{
@@ -315,7 +330,7 @@ export default function KahootPage() {
     buildDistribution(); updatePlayer(correct,pts)
     if(correct){audio.playOnce('win',0.9);setShowConfetti(true);setTimeout(()=>setShowConfetti(false),1500)}
     else audio.playOnce('lost',0.9)
-    setTimeout(()=>setPhase('reveal'),1200)
+    revealTimeoutRef.current = setTimeout(()=>setPhase('reveal'),1200)
   }
 
   const handleFillSubmit=()=>{
@@ -331,7 +346,7 @@ export default function KahootPage() {
     buildDistribution(); updatePlayer(correct,pts)
     if(correct){audio.playOnce('win',0.9);setShowConfetti(true);setTimeout(()=>setShowConfetti(false),1500)}
     else audio.playOnce('lost',0.9)
-    setTimeout(()=>setPhase('reveal'),1200)
+    revealTimeoutRef.current = setTimeout(()=>setPhase('reveal'),1200)
   }
 
   const updatePlayer=(correct:boolean,pts:number)=>{
@@ -398,10 +413,17 @@ export default function KahootPage() {
         setPhase('lobby'); return
       }catch{}
     }
-    beginQuestion(0,qs)
+    if(config.selectionMode === 'FREE_CHOICE') {
+      audio.playBg('selecting', 0.5)
+      setPhase('select')
+    } else {
+      beginQuestion(0,qs)
+    }
   }
 
   const beginQuestion=(idx:number,qs?:Question[])=>{
+    // Cancel any pending reveal timeout to prevent it firing after we start a new question
+    clearTimeout(revealTimeoutRef.current!)
     // Always clear any running timer first to prevent double-ticking or stale intervals
     clearInterval(timerRef.current!)
     setTimerRunning(false)
@@ -426,7 +448,7 @@ export default function KahootPage() {
       setTimerRunning(false)
     } else {
       audio.playBg('kahoot-play',0.55)
-      setTimerRunning(true)
+      // Timer will auto-start via useEffect on [phase, currentIdx]
     }
   }
 
@@ -440,6 +462,14 @@ export default function KahootPage() {
     audio.playBg('kahoot-play',0.55)
     setQuestionStartTime(Date.now())
     setTimerRunning(true)
+    clearInterval(timerRef.current!)
+    timerRef.current = setInterval(() => {
+      setTimeLeft(prev => {
+        if (prev<=5&&!timeCountPlayedRef.current){timeCountPlayedRef.current=true;audio.playTimeCount()}
+        if (prev<=1){clearInterval(timerRef.current!);handleTimeout();return 0}
+        return prev-1
+      })
+    }, 1000)
   }
 
   const handleStartCount=()=>{
@@ -447,6 +477,14 @@ export default function KahootPage() {
     audio.playBg('kahoot-play',0.55)
     setQuestionStartTime(Date.now())
     setTimerRunning(true)
+    clearInterval(timerRef.current!)
+    timerRef.current = setInterval(() => {
+      setTimeLeft(prev => {
+        if (prev<=5&&!timeCountPlayedRef.current){timeCountPlayedRef.current=true;audio.playTimeCount()}
+        if (prev<=1){clearInterval(timerRef.current!);handleTimeout();return 0}
+        return prev-1
+      })
+    }, 1000)
   }
 
   const advanceFromLeaderboard=(isLast:boolean)=>{

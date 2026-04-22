@@ -18,7 +18,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   if (!session?.user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
 
   const body = await req.json()
-  const sec = await db.examSection.create({
+  const sec = await (db as any).examSection.create({
     data: {
       sessionId: params.id,
       name: body.name,
@@ -30,6 +30,8 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       topics: body.topics,
       aiInstructions: body.aiInstructions,
       sortOrder: body.sortOrder || 0,
+      questionTypes: body.questionTypes ?? null,
+      topicBreakdown: body.topicBreakdown ?? null,
     },
   })
   return NextResponse.json(sec, { status: 201 })

@@ -21,6 +21,13 @@ type Document = {
 }
 
 const fileTypes = ['SYLLABUS', 'TAX_REGULATIONS', 'SAMPLE_QUESTIONS', 'STUDY_MATERIAL', 'OTHER']
+const fileTypeLabels: Record<string, string> = {
+  SYLLABUS: 'Syllabus',
+  TAX_REGULATIONS: 'Regulations',
+  SAMPLE_QUESTIONS: 'Sample Questions',
+  STUDY_MATERIAL: 'Study Material',
+  OTHER: 'Other',
+}
 const fileTypeColors: Record<string, string> = {
   SYLLABUS: 'bg-blue-100 text-blue-800',
   TAX_REGULATIONS: 'bg-purple-100 text-purple-800',
@@ -94,7 +101,7 @@ export default function DocumentsPage() {
             </SelectTrigger>
             <SelectContent>
               {fileTypes.map((t) => (
-                <SelectItem key={t} value={t}>{t.replace(/_/g, ' ')}</SelectItem>
+                <SelectItem key={t} value={t}>{fileTypeLabels[t] ?? t.replace(/_/g, ' ')}</SelectItem>
               ))}
             </SelectContent>
           </Select>
@@ -109,7 +116,7 @@ export default function DocumentsPage() {
           <input
             ref={fileInputRef}
             type="file"
-            accept=".pdf,.docx,.txt"
+            accept=".pdf,.docx,.txt,.xlsx,.xls"
             className="hidden"
             onChange={(e) => {
               const file = e.target.files?.[0]
@@ -132,7 +139,7 @@ export default function DocumentsPage() {
       >
         <Upload className="h-8 w-8 text-gray-400 mx-auto mb-2" />
         <p className="text-gray-600 font-medium">Drop files here or click to upload</p>
-        <p className="text-sm text-gray-400 mt-1">PDF, DOCX, TXT — used as AI context for question generation</p>
+        <p className="text-sm text-gray-400 mt-1">PDF, DOCX, TXT, XLSX — used as AI context for question generation</p>
       </div>
 
       {isLoading ? (
@@ -154,7 +161,7 @@ export default function DocumentsPage() {
                   <p className="font-medium text-sm truncate">{doc.fileName}</p>
                   <div className="flex gap-2 mt-1">
                     <span className={`text-xs px-2 py-0.5 rounded-full ${fileTypeColors[doc.fileType]}`}>
-                      {doc.fileType.replace(/_/g, ' ')}
+                      {fileTypeLabels[doc.fileType] ?? doc.fileType.replace(/_/g, ' ')}
                     </span>
                     <span className="text-xs text-gray-500">{formatFileSize(doc.fileSize)}</span>
                     <span className="text-xs text-gray-500">{formatDate(doc.uploadedAt)}</span>
