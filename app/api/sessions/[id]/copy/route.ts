@@ -8,7 +8,7 @@ import { db } from '@/lib/db'
 export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
   try {
     const body = await req.json()
-    const { targetSessionId, copyDocuments = false, copySections = true, copyTopics = true } = body
+    const { targetSessionId, copyDocTypes, copySections = true, copyTopics = true } = body
 
     if (!targetSessionId) {
       return NextResponse.json({ error: 'targetSessionId required' }, { status: 400 })
@@ -56,12 +56,69 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     // Copy topics (if model exists — try/catch in case model not yet available)
     if (copyTopics) {
       try {
-        const sourceTopics = await (db as any).topic.findMany({ where: { sessionId: params.id }, orderBy: { sortOrder: 'asc' } })
-        for (const t of sourceTopics) {
-          await (db as any).topic.create({
-            data: { sessionId: targetSessionId, name: t.name, description: t.description, sortOrder: t.sortOrder }
+        const sourceTopics = await (db as any).topic.findMany({
+          where: { sessionId: params.id },
+          orderBy: [{ isOverall: 'desc' }, { parentId: 'asc' }, { sortOrder: 'asc' }],
+        })
+        // First pass: create root topics and overall topic (no parentId)
+        const idMap: Record<string, string> = {}
+        for (const t of sourceTopics.filter((t: any) => !t.parentId)) {
+          const created = await (db as any).topic.create({
+            data: {
+              sessionId: targetSessionId,
+              name: t.name,
+              description: t.description,
+              sortOrder: t.sortOrder,
+              isOverall: t.isOverall ?? false,
+              parentId: null,
+            }
           })
+          idMap[t.id] = created.id
           results.topics++
+        }
+        // Second pass: create child topics
+        for (const t of sourceTopics.filter((t: any) => !!t.parentId)) {
+          const newParentId = idMap[t.parentId] ?? null
+          const created = await (db as any).topic.create({
+            data: {
+              sessionId: targetSessionId,
+              name: t.name,
+              description: t.description,
+              sortOrder: t.sortOrder,
+              isOverall: false,
+              parentId: newParentId,
+            }
+          })
+          idMap[t.id] = created.id
+          results.topics++
+        }
+      } catch {}
+    }
+
+    // Copy documents by type
+    if (copyDocTypes && copyDocTypes.length > 0) {
+      try {
+        const sourceDocs = await db.document.findMany({
+          where: { sessionId: params.id, fileType: { in: copyDocTypes as any[] } }
+        })
+        for (const doc of sourceDocs) {
+          await (db as any).document.create({
+            data: {
+              sessionId: targetSessionId,
+              fileName: doc.fileName,
+              fileType: doc.fileType,
+              fileSize: doc.fileSize,
+              filePath: doc.filePath, // shared file path (no re-upload)
+              description: (doc as any).description ?? null,
+              topicId: null, // topics in target may differ
+              topicName: (doc as any).topicName ?? null,
+              sectionId: null,
+              sectionName: (doc as any).sectionName ?? null,
+              isManualInput: (doc as any).isManualInput ?? false,
+              content: (doc as any).content ?? null,
+            }
+          })
+          results.documents++
         }
       } catch {}
     }

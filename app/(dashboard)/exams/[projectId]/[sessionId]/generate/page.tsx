@@ -49,6 +49,16 @@ export default function GeneratePage() {
   const [isDone, setIsDone] = useState(false)
   const [selectedModel, setSelectedModel] = useState('deepseek:deepseek-reasoner')
   const [aiModels, setAIModels] = useState<{id:string;label:string}[]>([])
+  const [docSummary, setDocSummary] = useState<{type: string; count: number}[]>([])
+
+  const docTypeLabels: Record<string, string> = {
+    SYLLABUS: 'Syllabus',
+    TAX_REGULATIONS: 'Regulations',
+    SAMPLE_QUESTIONS: 'Sample Questions',
+    STUDY_MATERIAL: 'Study Material',
+    RATES_TARIFF: 'Rates/Tariff',
+    OTHER: 'Other',
+  }
 
   useEffect(() => {
     fetchSections()
@@ -74,6 +84,12 @@ export default function GeneratePage() {
     } finally {
       setIsLoading(false)
     }
+    // Fetch doc summary for context
+    fetch(`/api/sessions/${params.sessionId}/documents`).then(r => r.ok ? r.json() : []).then((docs: any[]) => {
+      const typeCount: Record<string, number> = {}
+      for (const d of docs) { typeCount[d.fileType] = (typeCount[d.fileType] || 0) + 1 }
+      setDocSummary(Object.entries(typeCount).map(([type, count]) => ({ type, count })))
+    }).catch(() => {})
   }
 
   const handleGenerate = async () => {
@@ -165,6 +181,18 @@ export default function GeneratePage() {
             </div>
           ) : (
             <>
+              {docSummary.length > 0 && (
+                <div className="p-3 bg-green-50 border border-green-200 rounded-lg mb-4">
+                  <p className="text-xs font-semibold text-green-800 mb-1">AI Context available:</p>
+                  <div className="flex flex-wrap gap-1">
+                    {docSummary.map(({type, count}) => (
+                      <span key={type} className="text-xs px-2 py-0.5 bg-white border border-green-200 rounded-full text-green-700">
+                        {docTypeLabels[type] ?? type.replace(/_/g, ' ')} ({count})
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
               <div className="flex items-center gap-2 text-sm">
                 <button onClick={() => toggleAll(true)} className="text-primary hover:underline">Select all</button>
                 <span className="text-gray-300">|</span>

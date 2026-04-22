@@ -8,6 +8,7 @@ import { Badge } from '@/components/ui/badge'
 import { Plus, ArrowLeft, Calendar, BookOpen, FileText } from 'lucide-react'
 import { formatDate } from '@/lib/utils'
 import { CopySessionButton } from '@/components/copy-session-dialog'
+import { SessionRenameButton, SessionDeleteButton } from '@/components/session-actions'
 
 export default async function ProjectPage({ params }: { params: { projectId: string } }) {
   const session = await auth()
@@ -93,6 +94,8 @@ export default async function ProjectPage({ params }: { params: { projectId: str
                   </div>
                 </div>
                 <div className="flex items-center gap-1">
+                  <SessionRenameButton session={{ id: sess.id, name: sess.name }} />
+                  <SessionDeleteButton session={{ id: sess.id, name: sess.name }} />
                   <CopySessionButton
                     sourceSession={{ id: sess.id, name: sess.name }}
                     allSessions={project.sessions.map(s => ({ id: s.id, name: s.name }))}

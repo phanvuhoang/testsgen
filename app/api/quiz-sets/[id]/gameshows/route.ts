@@ -44,6 +44,8 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       categoriesCount: body.categoriesCount ? parseInt(body.categoriesCount) : 5,
       tiersPerCategory: body.tiersPerCategory ? parseInt(body.tiersPerCategory) : 5,
       tierPoints: body.tierPoints ?? '[10,25,50,100,200]',
+      categoryNames: body.categoryNames || null,
+      jeopardyTags: body.jeopardyTags || null,
       maxPlayers: body.maxPlayers ? parseInt(body.maxPlayers) : 4,
       requireLogin: body.requireLogin ?? false,
       shuffleQuestions: body.shuffleQuestions ?? true,

@@ -40,13 +40,26 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     return NextResponse.json({ error: 'No sections selected' }, { status: 400 })
   }
 
-  // Get session documents for context
-  const docs = await db.document.findMany({ where: { sessionId: params.id } })
-  let documentContent = ''
-  for (const doc of docs.slice(0, 3)) {
-    const text = await extractDocumentText(doc.filePath)
-    documentContent += `\n--- ${doc.fileName} ---\n${text}\n`
+  // Get session info and documents
+  const sessionData = await (db as any).session.findUnique({
+    where: { id: params.id },
+    include: { topics: { where: { isOverall: true } } }
+  })
+  const overallTopic = sessionData?.topics?.[0]?.name || undefined
+
+  // Get documents by type
+  const docs = await (db as any).document.findMany({ where: { sessionId: params.id }, orderBy: { uploadedAt: 'asc' } }) as any[]
+
+  const docsByType: Record<string, string[]> = {}
+  for (const doc of docs) {
+    const text = doc.isManualInput ? (doc.content || '') : await extractDocumentText(doc.filePath)
+    if (!text) continue
+    const key = doc.fileType as string
+    if (!docsByType[key]) docsByType[key] = []
+    docsByType[key].push(`[${doc.fileName}]\n${text}`)
   }
+
+  const joinContent = (key: string) => (docsByType[key] || []).join('\n\n---\n\n').slice(0, 20000)
 
   // Get section details
   const sectionIds = sectionConfigs.map((s: { sectionId: string }) => s.sectionId)
@@ -71,7 +84,19 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
           sectionInstructions: sec.instructions || undefined,
           aiInstructions: sec.aiInstructions || undefined,
           extraInstructions: extraInstructions || undefined,
-          documentContent: documentContent.slice(0, 30000),
+          overallTopic,
+          // Document contexts by type:
+          syllabus: joinContent('SYLLABUS'),
+          regulations: joinContent('TAX_REGULATIONS'),
+          studyMaterial: joinContent('STUDY_MATERIAL'),
+          sampleQuestions: joinContent('SAMPLE_QUESTIONS'),
+          ratesTariff: joinContent('RATES_TARIFF'),
+          otherContext: joinContent('OTHER'),
+          // Legacy fallback:
+          documentContent: undefined,
+          // Flexible question types from section:
+          questionTypes: (sec as any).questionTypes || undefined,
+          topicBreakdown: (sec as any).topicBreakdown || undefined,
         }
 
         for await (const q of generateExamQuestions(generatorConfig, modelId)) {
@@ -84,7 +109,11 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
                 stem: String(q.stem || ''),
                 options: q.options as any,
                 correctAnswer: String(q.correctAnswer || ''),
-                markingScheme: String(q.markingScheme || ''),
+                markingScheme: [
+                  q.markingScheme,
+                  q.explanation && `\nExplanation: ${q.explanation}`,
+                  q.reference && `\nReference: ${q.reference}`
+                ].filter(Boolean).join('\n\n'),
                 modelAnswer: String(q.modelAnswer || ''),
                 topic: String(q.topic || ''),
                 difficulty: (String(q.difficulty || 'MEDIUM')).toUpperCase() as 'EASY' | 'MEDIUM' | 'HARD',

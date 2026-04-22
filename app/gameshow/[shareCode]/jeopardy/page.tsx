@@ -25,6 +25,7 @@ type GameshowConfig = {
   timeLimitSeconds: number; responseSeconds: number; answerRevealSeconds: number
   shuffleQuestions: boolean; showLeaderboard: boolean; maxPlayers: number
   categoriesCount: number; tiersPerCategory: number; tierPoints: string | null
+  categoryNames?: string | null
   quizSetTitle: string; questions: Question[]
   clickStartToCount: boolean; manualScoring: boolean; shortLink: string | null
 }
@@ -175,23 +176,65 @@ export default function JeopardyPage() {
     points = points.slice(0, numTiers)
     setTierPoints(points)
 
+    // Build category names: use configured names if available, otherwise fall back to question topics
+    let configuredNames: string[] = []
+    try { if (cfg.categoryNames) configuredNames = JSON.parse(cfg.categoryNames) } catch {}
     const topicSet = new Set(qs.map(q => q.topic).filter(Boolean) as string[])
     const topicList = Array.from(topicSet)
     const catNames: string[] = []
     for (let i = 0; i < numCats; i++) {
-      catNames.push(topicList[i] || `Category ${i + 1}`)
+      catNames.push(configuredNames[i] || topicList[i] || `Category ${i + 1}`)
     }
     setCategories(catNames)
 
-    const shuffledQs = shuffle(qs)
-    const boardData: BoardTile[][] = catNames.map((cat, ci) =>
-      points.map((pts, ti) => {
-        const qIdx = ci * numTiers + ti
-        const q = shuffledQs[qIdx % shuffledQs.length]
-        return { questionId: q.id, category: cat, points: pts, state: 'available' as TileState }
-      })
-    )
-    setBoard(boardData)
+    // Parse jeopardy tags if available
+    let jTags: Record<string, {category: number, tier: number}> = {}
+    try { if ((cfg as any).jeopardyTags) jTags = JSON.parse((cfg as any).jeopardyTags) } catch {}
+    const hasTagging = Object.keys(jTags).length > 0
+
+    if (hasTagging) {
+      // Place questions by tag
+      const grid: BoardTile[][] = Array.from({length: numCats}, () => Array(numTiers).fill(null))
+      const usedSlots = new Set<string>()
+      // Place tagged questions
+      for (const q of qs) {
+        const tag = jTags[q.id]
+        if (!tag) continue
+        const ci = tag.category - 1
+        const ti = tag.tier - 1
+        if (ci >= 0 && ci < numCats && ti >= 0 && ti < numTiers && !usedSlots.has(`${ci}-${ti}`)) {
+          grid[ci][ti] = { questionId: q.id, category: catNames[ci], points: points[ti] ?? (ti + 1) * 100, state: 'available' }
+          usedSlots.add(`${ci}-${ti}`)
+        }
+      }
+      // Fill remaining slots with untagged questions
+      const untagged = qs.filter(q => !jTags[q.id])
+      let ui = 0
+      for (let ci = 0; ci < numCats; ci++) {
+        for (let ti = 0; ti < numTiers; ti++) {
+          if (!grid[ci][ti] && ui < untagged.length) {
+            grid[ci][ti] = { questionId: untagged[ui].id, category: catNames[ci], points: points[ti] ?? (ti + 1) * 100, state: 'available' }
+            ui++
+          }
+          if (!grid[ci][ti]) {
+            // Fill with placeholder if no question available
+            grid[ci][ti] = { questionId: '', category: catNames[ci], points: points[ti] ?? 0, state: 'answered' }
+          }
+        }
+      }
+      setBoard(grid)
+    } else {
+      // Original logic: distribute questions across the grid
+      const shuffledQs = shuffle(qs)
+      const boardData: BoardTile[][] = catNames.map((cat, ci) =>
+        points.map((pts, ti) => {
+          const qIdx = ci * numTiers + ti
+          const q = shuffledQs[qIdx % shuffledQs.length]
+          return { questionId: q.id, category: cat, points: pts, state: 'available' as TileState }
+        })
+      )
+      setBoard(boardData)
+    }
   }
 
   const startGame = () => {

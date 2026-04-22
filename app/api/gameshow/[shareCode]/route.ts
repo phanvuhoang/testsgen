@@ -71,6 +71,8 @@ export async function GET(
     categoriesCount: gameshow.categoriesCount,
     tiersPerCategory: gameshow.tiersPerCategory,
     tierPoints: gameshow.tierPoints,
+    categoryNames: (gameshow as any).categoryNames ?? null,
+    jeopardyTags: (gameshow as any).jeopardyTags ?? null,
     maxPlayers: gameshow.maxPlayers,
     requireLogin: gameshow.requireLogin,
     shuffleQuestions: gameshow.shuffleQuestions,

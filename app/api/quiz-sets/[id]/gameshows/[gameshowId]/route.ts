@@ -64,6 +64,8 @@ export async function PATCH(
       categoriesCount: body.categoriesCount != null ? parseInt(body.categoriesCount) : undefined,
       tiersPerCategory: body.tiersPerCategory != null ? parseInt(body.tiersPerCategory) : undefined,
       tierPoints: body.tierPoints,
+      categoryNames: body.categoryNames !== undefined ? body.categoryNames : undefined,
+      jeopardyTags: body.jeopardyTags !== undefined ? body.jeopardyTags : undefined,
       maxPlayers: body.maxPlayers != null ? parseInt(body.maxPlayers) : undefined,
       requireLogin: body.requireLogin,
       shuffleQuestions: body.shuffleQuestions,

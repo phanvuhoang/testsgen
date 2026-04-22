@@ -39,6 +39,7 @@ enum FileType {
   TAX_REGULATIONS
   SAMPLE_QUESTIONS
   STUDY_MATERIAL
+  RATES_TARIFF
   OTHER
 }
 
@@ -169,13 +170,20 @@ model Session {
 }
 
 model Document {
-  id         String   @id @default(cuid())
-  sessionId  String
-  fileName   String
-  fileType   FileType @default(OTHER)
-  fileSize   Int
-  filePath   String
-  uploadedAt DateTime @default(now())
+  id          String   @id @default(cuid())
+  sessionId   String
+  fileName    String
+  fileType    FileType @default(OTHER)
+  fileSize    Int
+  filePath    String
+  uploadedAt  DateTime @default(now())
+  description String?  // For OTHER type: what is this document?
+  topicId     String?  // Optional: link to a Topic
+  topicName   String?  // Denormalized topic name for display
+  sectionId   String?  // Optional: link to an ExamSection
+  sectionName String?  // Denormalized section name for display
+  isManualInput Boolean  @default(false) // true = content pasted manually, not uploaded
+  content       String?  // manual input text content
 
   // Relations
   session Session @relation(fields: [sessionId], references: [id], onDelete: Cascade)
@@ -189,10 +197,14 @@ model Topic {
   name        String
   description String?
   sortOrder   Int      @default(0)
+  isOverall   Boolean  @default(false)  // true = this is the "Overall Topic" for the session
+  parentId    String?  // null = root topic; set = sub-topic of parentId
   createdAt   DateTime @default(now())
 
   // Relations
-  session Session @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  session  Session  @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  parent   Topic?   @relation("TopicChildren", fields: [parentId], references: [id])
+  children Topic[]  @relation("TopicChildren")
 
   @@map("testsgen_topics")
 }
@@ -636,6 +648,8 @@ model Gameshow {
   tiersPerCategory  Int        @default(5)
   // Point values per tier: JSON array e.g. [10,25,50,100,200]
   tierPoints        String?    // JSON array e.g. "[10,25,50,100,200]"
+  categoryNames     String?    // JSON array e.g. ["CIT", "PIT", "VAT", "TP", "Other"]
+  jeopardyTags      String?    // JSON: {questionId: {category: number, tier: number}}
 
   // Multiplayer settings
   maxPlayers        Int        @default(4)

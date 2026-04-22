@@ -40,9 +40,19 @@ const allQuestionTypes = [
 ]
 
 type QTypeRow = { type: string; count: number; marksEach: number }
-type TopicRow = { topicName: string; count: number }
+type TopicRow = { topicId?: string; topicName: string; count: number }
 
-const SectionForm = ({ data, onChange }: { data: Partial<Section>; onChange: (field: string, val: any) => void }) => {
+type SessionTopic = { id: string; name: string; parentId: string | null }
+
+const SectionForm = ({
+  data,
+  onChange,
+  sessionTopics,
+}: {
+  data: Partial<Section>
+  onChange: (field: string, val: any) => void
+  sessionTopics: SessionTopic[]
+}) => {
   const [qtRows, setQtRows] = useState<QTypeRow[]>(() => {
     try {
       return data.questionTypes
@@ -133,21 +143,45 @@ const SectionForm = ({ data, onChange }: { data: Partial<Section>; onChange: (fi
       {/* Topic Breakdown (optional) */}
       <div className="space-y-2">
         <div className="flex items-center justify-between">
-          <Label className="text-xs font-semibold">Topic Breakdown <span className="font-normal text-gray-400">(optional)</span></Label>
-          <Button type="button" variant="outline" size="sm" className="h-6 text-xs"
-            onClick={() => updateTopicRows([...topicRows, { topicName: '', count: 1 }])}>
-            <Plus className="h-3 w-3 mr-1" />Add Topic
-          </Button>
+          <Label className="text-xs font-semibold">
+            Topic Breakdown <span className="font-normal text-gray-400">(optional)</span>
+          </Label>
+          {sessionTopics.length > 0 ? (
+            <Button type="button" variant="outline" size="sm" className="h-6 text-xs"
+              onClick={() => updateTopicRows([...topicRows, { topicId: '', topicName: '', count: 1 }])}>
+              <Plus className="h-3 w-3 mr-1" />Add Topic
+            </Button>
+          ) : (
+            <span className="text-xs text-gray-400">Add topics in the Topics tab first</span>
+          )}
         </div>
-        {topicRows.length === 0 && <p className="text-xs text-gray-400">e.g. 4 questions on CIT, 4 on PIT, 2 on VAT</p>}
+        {topicRows.length === 0 && sessionTopics.length > 0 && (
+          <p className="text-xs text-gray-400">e.g. 4 questions on CIT, 4 on PIT, 2 on VAT</p>
+        )}
         {topicRows.map((row, i) => (
           <div key={i} className="grid grid-cols-[1fr_80px_32px] gap-2 items-center">
-            <Input value={row.topicName} placeholder="Topic name (e.g. CIT)"
-              onChange={e => updateTopicRows(topicRows.map((r, j) => j === i ? { ...r, topicName: e.target.value } : r))}
-              className="h-8 text-xs" />
+            {sessionTopics.length > 0 ? (
+              <Select value={row.topicId || ''} onValueChange={v => {
+                const t = sessionTopics.find(x => x.id === v)
+                updateTopicRows(topicRows.map((r, j) => j === i ? { ...r, topicId: v, topicName: t?.name ?? v } : r))
+              }}>
+                <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Select topic..." /></SelectTrigger>
+                <SelectContent>
+                  {sessionTopics.map(t => (
+                    <SelectItem key={t.id} value={t.id} className="text-xs">
+                      {t.parentId ? `↳ ${t.name}` : t.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            ) : (
+              <Input value={row.topicName} placeholder="Topic name (e.g. CIT)"
+                onChange={e => updateTopicRows(topicRows.map((r, j) => j === i ? { ...r, topicName: e.target.value, topicId: '' } : r))}
+                className="h-8 text-xs" />
+            )}
             <Input type="number" value={row.count} min={1}
               onChange={e => updateTopicRows(topicRows.map((r, j) => j === i ? { ...r, count: Number(e.target.value) || 1 } : r))}
-              className="h-8 text-xs" placeholder="Count" />
+              className="h-8 text-xs" />
             <Button type="button" variant="ghost" size="icon" className="h-8 w-8 text-red-400"
               onClick={() => updateTopicRows(topicRows.filter((_, j) => j !== i))}>
               <X className="h-3 w-3" />
@@ -190,9 +224,22 @@ export default function SectionsPage() {
     instructions: '',
     aiInstructions: '',
   })
+  const [sessionTopics, setSessionTopics] = useState<SessionTopic[]>([])
 
   useEffect(() => {
     fetchSections()
+    fetch(`/api/sessions/${params.sessionId}/topics`).then(r => r.ok ? r.json() : [])
+      .then((data: any[]) => {
+        // Flatten: root topics + their children (excluding overall)
+        const flat: SessionTopic[] = []
+        for (const t of data) {
+          if (!t.isOverall) {
+            flat.push({ id: t.id, name: t.name, parentId: t.parentId })
+            if (t.children) for (const c of t.children) flat.push({ id: c.id, name: c.name, parentId: t.id })
+          }
+        }
+        setSessionTopics(flat)
+      }).catch(() => {})
   }, [])
 
   const fetchSections = async () => {
@@ -317,6 +364,7 @@ export default function SectionsPage() {
             <SectionForm
               data={form}
               onChange={(field, val) => setForm((prev) => ({ ...prev, [field]: val }))}
+              sessionTopics={sessionTopics}
             />
             <div className="flex gap-2 mt-3 justify-end">
               <Button variant="outline" size="sm" onClick={() => setIsAdding(false)}>
@@ -350,6 +398,7 @@ export default function SectionsPage() {
                       <SectionForm
                         data={sec}
                         onChange={(field, val) => updateSection(sec.id, field, val)}
+                        sessionTopics={sessionTopics}
                       />
                       <div className="flex gap-2 mt-3 justify-end">
                         <Button variant="outline" size="sm" onClick={() => setEditingId(null)}>Cancel</Button>

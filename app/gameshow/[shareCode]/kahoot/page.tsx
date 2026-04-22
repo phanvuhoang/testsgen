@@ -159,6 +159,7 @@ export default function KahootPage() {
 
   const timerRef = useRef<NodeJS.Timeout|null>(null)
   const revealTimeoutRef = useRef<NodeJS.Timeout|null>(null)
+  const leaderboardTimeoutRef = useRef<NodeJS.Timeout|null>(null)
   const timeCountPlayedRef = useRef(false)
   const currentQuestion = questions[currentIdx]
   const currentPlayer = players[currentPlayerIdx]
@@ -422,8 +423,9 @@ export default function KahootPage() {
   }
 
   const beginQuestion=(idx:number,qs?:Question[])=>{
-    // Cancel any pending reveal timeout to prevent it firing after we start a new question
+    // Cancel any pending reveal or leaderboard timeouts
     clearTimeout(revealTimeoutRef.current!)
+    clearTimeout(leaderboardTimeoutRef.current!)
     // Always clear any running timer first to prevent double-ticking or stale intervals
     clearInterval(timerRef.current!)
     setTimerRunning(false)
@@ -516,7 +518,7 @@ export default function KahootPage() {
     if(config?.showLeaderboard&&players.length>0){
       audio.playBg('leaderboard',0.6)
       setPhase('leaderboard')
-      setTimeout(()=>advanceFromLeaderboard(isLast),5000)
+      leaderboardTimeoutRef.current = setTimeout(()=>advanceFromLeaderboard(isLast),5000)
     } else {
       advanceFromLeaderboard(isLast)
     }
@@ -535,7 +537,7 @@ export default function KahootPage() {
     if(config?.showLeaderboard){
       audio.playBg('leaderboard',0.6)
       setPhase('leaderboard')
-      setTimeout(()=>advanceFromLeaderboard(isLast),5000)
+      leaderboardTimeoutRef.current = setTimeout(()=>advanceFromLeaderboard(isLast),5000)
     } else {
       advanceFromLeaderboard(isLast)
     }
@@ -953,7 +955,7 @@ export default function KahootPage() {
 
           <div className="flex gap-3">
             {isFreeChoice&&(
-              <Button onClick={()=>{audio.stopAll();audio.playBg('selecting',0.5);setPhase('select')}}
+              <Button onClick={()=>{clearTimeout(leaderboardTimeoutRef.current!);audio.stopAll();audio.playBg('selecting',0.5);setPhase('select')}}
                 variant="outline" className="flex-1 border-indigo-500/30 text-indigo-300 hover:bg-indigo-900/20">
                 Board
               </Button>

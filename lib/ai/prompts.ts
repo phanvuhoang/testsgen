@@ -23,6 +23,16 @@ export type ExamGenerationConfig = {
   aiInstructions?: string
   extraInstructions?: string
   documentContent?: string
+  // New fields:
+  overallTopic?: string          // Session overall topic name
+  syllabus?: string              // Syllabus document content
+  regulations?: string           // Regulations/Tax law content
+  studyMaterial?: string         // Study material content
+  sampleQuestions?: string       // Sample questions & answers for style reference
+  ratesTariff?: string           // Rates & tariff tables
+  otherContext?: string          // Other supporting documents
+  questionTypes?: string         // JSON: [{type, count, marksEach}] - flexible question type breakdown
+  topicBreakdown?: string        // JSON: [{topicId?, topicName, count}] - per-topic question breakdown
 }
 
 export type GradingConfig = {
@@ -90,76 +100,128 @@ Quality rules:
 }
 
 export function buildExamQuestionPrompt(config: ExamGenerationConfig): string {
+  // Parse flexible question types if available
+  let qtRows: {type: string; count: number; marksEach: number}[] = []
+  try { if (config.questionTypes) qtRows = JSON.parse(config.questionTypes) } catch {}
+
+  // Parse topic breakdown if available
+  let topicBreakdown: {topicId?: string; topicName: string; count: number}[] = []
+  try { if (config.topicBreakdown) topicBreakdown = JSON.parse(config.topicBreakdown) } catch {}
+
   const typeInstructions: Record<string, string> = {
-    MCQ_SINGLE: `Generate Multiple Choice questions with:
-- A clear question stem (can include a short scenario)
-- Exactly 4 answer options (A, B, C, D) with only one correct
-- The correct answer indicated
-- A marking scheme explaining why the answer is correct and why distractors are wrong`,
-    
-    MCQ_MULTIPLE: `Generate Multiple Choice questions (multiple correct answers) with:
-- A clear question stem
-- Exactly 4-5 answer options with potentially multiple correct answers
-- All correct answers indicated
-- A marking scheme`,
-    
-    SCENARIO: `Generate Scenario-Based questions with:
-- A realistic business scenario with specific details and financial data
-- Required tasks broken into sub-parts: (a), (b), (c) etc. with marks per sub-part
-- A comprehensive model answer with all workings shown
-- A detailed marking scheme listing every mark-worthy point`,
-    
-    ESSAY: `Generate Long Form Essay questions with:
-- A complex scenario requiring analysis and professional judgment
-- Required tasks with clear mark allocation
-- A model answer hitting all key points
-- A marking scheme with specific marks for each point`,
-    
-    SHORT_ANSWER: `Generate Short Answer questions with:
-- A concise, specific question
-- A model answer (3-5 sentences)
-- A marking scheme indicating key points worth marks`,
+    MCQ_SINGLE: 'Multiple Choice (one correct answer): 4 options, 1 correct.',
+    MCQ_MULTIPLE: 'Multiple Choice (multiple correct): 4-5 options, ≥2 correct.',
+    FILL_BLANK: 'Fill in the blank: stem contains "___", provide correct answer.',
+    SHORT_ANSWER: 'Short Answer: concise question, 2-5 sentence model answer.',
+    ESSAY: 'Long Form Essay: complex scenario, sub-parts (a)(b)(c), full model answer.',
+    SCENARIO: 'Scenario-Based: realistic scenario with data, required calculations/analysis, full workings.',
+    CASE_STUDY: 'Case Study: detailed case with multiple parts, marking scheme per part.',
+    OTHER: 'As appropriate for the context.',
   }
 
-  return `You are an expert professional exam question writer specializing in ${config.sectionName}.
+  // Build the document context section
+  const contextParts: string[] = []
 
-SECTION DETAILS:
-- Section: ${config.sectionName}
-- Question Type: ${config.questionType}
-- Marks per Question: ${config.marksPerQuestion}
-- Topics: ${config.topics || 'As covered in the documents'}
+  if (config.syllabus) {
+    contextParts.push(`=== SYLLABUS ===
+IMPORTANT: Only generate questions on topics LISTED in the syllabus.
+If the syllabus marks any section as [EXCLUDE] or "excluded", do NOT generate questions on those topics.
+${config.syllabus.slice(0, 15000)}`)
+  }
 
-DOCUMENT CONTENT:
-${config.documentContent || 'No document provided — use your expert knowledge.'}
+  if (config.regulations) {
+    contextParts.push(`=== REGULATIONS / STUDY MATERIAL ===
+Base questions on the following regulations. Use specific article numbers, percentages, thresholds, and rules where applicable.
+DO NOT hallucinate figures — only use numbers explicitly stated in the text below.
+${config.regulations.slice(0, 20000)}`)
+  }
 
-${config.sectionInstructions ? `SECTION INSTRUCTIONS:\n${config.sectionInstructions}` : ''}
-${config.aiInstructions ? `AI GENERATION INSTRUCTIONS:\n${config.aiInstructions}` : ''}
-${config.extraInstructions ? `EXTRA INSTRUCTIONS:\n${config.extraInstructions}` : ''}
+  if (config.studyMaterial && config.studyMaterial !== config.regulations) {
+    contextParts.push(`=== STUDY MATERIAL ===
+${config.studyMaterial.slice(0, 10000)}`)
+  }
 
-QUESTION FORMAT:
-${typeInstructions[config.questionType] || typeInstructions.MCQ_SINGLE}
+  if (config.ratesTariff) {
+    contextParts.push(`=== RATES & TARIFF TABLES ===
+When generating calculation questions (e.g. tax computation), use ONLY the rates and thresholds in this table.
+${config.ratesTariff.slice(0, 8000)}`)
+  }
 
-Generate exactly ${config.count} questions.
+  if (config.sampleQuestions) {
+    contextParts.push(`=== SAMPLE QUESTIONS & ANSWERS (STYLE REFERENCE) ===
+Use the following as style reference for question format, difficulty level, and answer depth.
+DO NOT copy questions verbatim — generate NEW questions in the same style.
+${config.sampleQuestions.slice(0, 12000)}`)
+  }
 
-OUTPUT FORMAT:
-Return a JSON array where each question has:
-{
-  "stem": "Full question text",
-  "options": ["A. ...", "B. ...", "C. ...", "D. ..."] or null for written questions,
-  "correctAnswer": "Correct answer or option text",
-  "markingScheme": "Detailed marking scheme",
-  "modelAnswer": "Complete model answer with workings",
-  "topic": "Specific topic this question covers",
-  "difficulty": "EASY" | "MEDIUM" | "HARD",
-  "marks": ${config.marksPerQuestion}
-}
+  if (config.otherContext) {
+    contextParts.push(`=== ADDITIONAL CONTEXT ===
+${config.otherContext.slice(0, 8000)}`)
+  }
 
-CRITICAL RULES:
-1. Questions MUST reference specific content from the uploaded documents
-2. Use realistic details (specific numbers, percentages, company names)
-3. For professional exams: use industry-standard terminology
-4. Marking schemes must clearly specify which points earn marks
-5. Return ONLY the JSON array, no other text.`
+  if (config.documentContent && contextParts.length === 0) {
+    contextParts.push(`=== DOCUMENT CONTENT ===
+${config.documentContent.slice(0, 30000)}`)
+  }
+
+  const hasDocuments = contextParts.length > 0
+
+  // Build question specification
+  let questionSpec = ''
+  if (qtRows.length > 0) {
+    questionSpec = `QUESTION TYPE BREAKDOWN:\n${qtRows.map(r => `- ${r.count} × ${typeInstructions[r.type] || r.type} (${r.marksEach} marks each)`).join('\n')}`
+  } else {
+    questionSpec = `QUESTION TYPE: ${typeInstructions[config.questionType] || config.questionType}\nMARKS PER QUESTION: ${config.marksPerQuestion}`
+  }
+
+  let topicSpec = ''
+  if (topicBreakdown.length > 0) {
+    topicSpec = `\nTOPIC DISTRIBUTION:\n${topicBreakdown.map(t => `- ${t.count} questions on: ${t.topicName}`).join('\n')}`
+  } else if (config.topics) {
+    topicSpec = `\nTOPICS TO COVER: ${config.topics}`
+  }
+
+  return `You are an expert professional exam question writer${config.overallTopic ? ` specializing in ${config.overallTopic}` : ''}.
+
+SECTION: ${config.sectionName}
+TOTAL QUESTIONS TO GENERATE: ${config.count}
+${questionSpec}${topicSpec}
+
+${contextParts.length > 0 ? contextParts.join('\n\n') : (config.overallTopic ? `No specific documents provided. Generate questions based on your expert knowledge of: ${config.overallTopic}` : 'No documents provided.')}
+
+${config.sectionInstructions ? `\nSECTION INSTRUCTIONS:\n${config.sectionInstructions}` : ''}
+${config.aiInstructions ? `\nAI GENERATION INSTRUCTIONS:\n${config.aiInstructions}` : ''}
+${config.extraInstructions ? `\nEXTRA INSTRUCTIONS:\n${config.extraInstructions}` : ''}
+
+GENERATION RULES:
+1. ${hasDocuments ? 'Base ALL questions on the provided documents. DO NOT hallucinate facts, figures, or rules.' : 'Generate questions based on your expert knowledge.'}
+2. For syllabus-constrained generation: ONLY test content explicitly listed in the Syllabus section. Skip [EXCLUDE] topics.
+3. For calculations: use ONLY rates/thresholds from the Rates & Tariff section.
+4. Style questions similarly to the Sample Questions (if provided) — same format, depth, and language.
+5. Distribute questions across topics as specified in the Topic Distribution.
+6. Each question MUST include a detailed explanation showing:
+   - The correct answer and WHY it is correct
+   - The calculation method or reasoning used
+   - Why the distractors (wrong answers) are incorrect
+   - A short reference to the relevant regulation/syllabus section/study material
+
+OUTPUT FORMAT (JSON array, no markdown fences, no other text):
+[
+  {
+    "stem": "Full question text. For scenarios: include all relevant data.",
+    "options": ["Option A text", "Option B text", "Option C text", "Option D text"] or null for written questions,
+    "correctAnswer": "Exact correct answer text (for MCQ: exact option text; for MULTIPLE: options joined by '||')",
+    "markingScheme": "Detailed marking scheme — list each mark-worthy point explicitly",
+    "modelAnswer": "Complete model answer with full workings (calculations, reasoning, conclusions)",
+    "explanation": "Why this is correct, why distractors are wrong, calculation method used",
+    "reference": "Brief reference: e.g. 'Article 3, Circular 78/2014; PIT Law 2007 s.22'",
+    "topic": "Specific topic this question tests",
+    "difficulty": "EASY" | "MEDIUM" | "HARD",
+    "marks": ${config.marksPerQuestion}
+  }
+]
+
+IMPORTANT: Return ONLY the JSON array. No preamble, no explanation, no markdown fences.`
 }
 
 export function buildGradingPrompt(config: GradingConfig): string {

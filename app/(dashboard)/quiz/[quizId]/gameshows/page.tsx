@@ -46,6 +46,8 @@ type Gameshow = {
   buzzerMode: boolean
   manualScoring: boolean
   shortLink: string | null
+  categoryNames?: string | null
+  jeopardyTags?: string | null
   createdAt: string
   _count?: { sessions: number }
 }
@@ -101,6 +103,8 @@ const emptyForm = {
   buzzerMode: 'false',
   manualScoring: 'false',
   shortLink: '',
+  categoryNames: '[]',
+  jeopardyTags: '{}',
 }
 
 export default function GameshowsPage() {
@@ -190,6 +194,8 @@ export default function GameshowsPage() {
       buzzerMode: String(g.buzzerMode ?? false),
         manualScoring: String(g.manualScoring ?? false),
       shortLink: g.shortLink ?? '',
+      categoryNames: g.categoryNames ?? '[]',
+      jeopardyTags: g.jeopardyTags ?? '{}',
     })
     setSettingsTab('general')
     setDialogOpen(true)
@@ -229,6 +235,8 @@ export default function GameshowsPage() {
         buzzerMode: (form as any).buzzerMode === 'true',
         manualScoring: (form as any).manualScoring === 'true',
         shortLink: (form as any).shortLink?.trim() || null,
+        categoryNames: (form as any).categoryNames || '[]',
+        jeopardyTags: (form as any).jeopardyTags || '{}',
       }
 
       let res: Response
@@ -574,6 +582,34 @@ export default function GameshowsPage() {
                       </Select>
                     </div>
                   </div>
+                  {/* Category names — only for Jeopardy */}
+                  {form.type === 'JEOPARDY' && (
+                    <div className="space-y-2">
+                      <Label className="text-xs">Category Names</Label>
+                      {Array.from({ length: parseInt(form.categoriesCount) || 5 }).map((_, i) => {
+                        let names: string[] = []
+                        try { names = JSON.parse((form as any).categoryNames || '[]') } catch {}
+                        const val = names[i] || `Category ${i + 1}`
+                        return (
+                          <div key={i} className="flex items-center gap-2">
+                            <span className="text-xs text-gray-500 w-20">Category {i + 1}</span>
+                            <Input
+                              value={val}
+                              onChange={e => {
+                                let arr: string[] = []
+                                try { arr = JSON.parse((form as any).categoryNames || '[]') } catch {}
+                                arr = [...arr]
+                                arr[i] = e.target.value
+                                setForm({ ...form, categoryNames: JSON.stringify(arr) } as any)
+                              }}
+                              className="h-7 text-xs"
+                              placeholder={`Category ${i + 1}`}
+                            />
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )}
                   <div className="space-y-1.5">
                     <Label>Answer reveal time (seconds)</Label>
                     <Input type="number" min="2" max="15" value={form.answerRevealSeconds}
@@ -677,6 +713,40 @@ export default function GameshowsPage() {
                                 {q.topic && <><span className="text-xs text-gray-400">·</span><span className="text-xs text-gray-400">{q.topic}</span></>}
                               </div>
                             </div>
+                            {form.type === 'JEOPARDY' && (() => {
+                              let tags: Record<string, {category: number, tier: number}> = {}
+                              try { tags = JSON.parse((form as any).jeopardyTags || '{}') } catch {}
+                              const tag = tags[q.id] || { category: 1, tier: 1 }
+                              return (
+                                <div className="flex gap-1 ml-2">
+                                  <Select value={String(tag.category)} onValueChange={v => {
+                                    let t: Record<string, any> = {}; try { t = JSON.parse((form as any).jeopardyTags || '{}') } catch {}
+                                    t[q.id] = { ...tag, category: Number(v) }
+                                    setForm({ ...form, jeopardyTags: JSON.stringify(t) } as any)
+                                  }}>
+                                    <SelectTrigger className="h-6 w-24 text-xs"><SelectValue /></SelectTrigger>
+                                    <SelectContent>
+                                      {Array.from({ length: parseInt(form.categoriesCount) || 5 }, (_, i) => {
+                                        let names: string[] = []; try { names = JSON.parse((form as any).categoryNames || '[]') } catch {}
+                                        return <SelectItem key={i+1} value={String(i+1)} className="text-xs">{names[i] || `Cat ${i+1}`}</SelectItem>
+                                      })}
+                                    </SelectContent>
+                                  </Select>
+                                  <Select value={String(tag.tier)} onValueChange={v => {
+                                    let t: Record<string, any> = {}; try { t = JSON.parse((form as any).jeopardyTags || '{}') } catch {}
+                                    t[q.id] = { ...tag, tier: Number(v) }
+                                    setForm({ ...form, jeopardyTags: JSON.stringify(t) } as any)
+                                  }}>
+                                    <SelectTrigger className="h-6 w-20 text-xs"><SelectValue /></SelectTrigger>
+                                    <SelectContent>
+                                      {Array.from({ length: parseInt(form.tiersPerCategory) || 5 }, (_, i) => (
+                                        <SelectItem key={i+1} value={String(i+1)} className="text-xs">Tier {i+1}</SelectItem>
+                                      ))}
+                                    </SelectContent>
+                                  </Select>
+                                </div>
+                              )
+                            })()}
                           </label>
                         )
                       })}
