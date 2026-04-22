@@ -28,6 +28,9 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
         ...(body.topic !== undefined ? { topic: body.topic } : {}),
         ...(body.difficulty !== undefined ? { difficulty: body.difficulty } : {}),
         ...(body.status !== undefined ? { status: body.status } : {}),
+        ...(body.optionExplanations !== undefined ? { optionExplanations: body.optionExplanations } : {}),
+        ...(body.syllabusCode !== undefined ? { syllabusCode: body.syllabusCode } : {}),
+        ...(body.regulationRefs !== undefined ? { regulationRefs: body.regulationRefs } : {}),
       },
       include: { section: { select: { id: true, name: true } } },
     })

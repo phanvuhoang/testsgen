@@ -202,19 +202,20 @@ export async function POST(_req: NextRequest, { params }: { params: { id: string
                 stem: String(q.stem || ''),
                 options: q.options as any,
                 correctAnswer: String(q.correctAnswer || ''),
-                markingScheme: [
-                  q.markingScheme,
-                  q.explanation && `\nExplanation: ${q.explanation}`,
-                  q.reference && `\nReference: ${q.reference}`,
-                ]
-                  .filter(Boolean)
-                  .join('\n\n'),
-                modelAnswer: String(q.modelAnswer || ''),
+                markingScheme: String(q.markingScheme || ''),
+                modelAnswer: [
+                  q.modelAnswer,
+                  q.reference && `<p class="text-xs text-gray-500 mt-2"><strong>Ref:</strong> ${q.reference}</p>`,
+                ].filter(Boolean).join('\n'),
                 topic: String(q.topic || ''),
                 difficulty: (String(q.difficulty || 'MEDIUM')).toUpperCase() as any,
                 status: 'NEEDS_REVIEW',
                 questionType: sec.questionType,
                 marks: sec.marksPerQuestion,
+                // New fields from examsgen-style output
+                optionExplanations: q.optionExplanations ? q.optionExplanations as any : undefined,
+                syllabusCode: q.syllabusCode ? String(q.syllabusCode) : undefined,
+                regulationRefs: q.reference ? String(q.reference) : (q.regulationRefs ? String(q.regulationRefs) : undefined),
               },
             })
             progress++

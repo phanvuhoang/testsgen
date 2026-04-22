@@ -162,10 +162,12 @@ export default function GeneratePage() {
   // Job / generation
   const [isGenerating, setIsGenerating] = useState(false)
   const [activeJobId, setActiveJobId] = useState<string | null>(null)
+  const [jobCreatedAt, setJobCreatedAt] = useState<string | null>(null) // ISO string
   const [jobStatus, setJobStatus] = useState<string>('')
   const [progress, setProgress] = useState(0)
   const [totalToGen, setTotalToGen] = useState(0)
   const [isDone, setIsDone] = useState(false)
+  const [jobFromResumed, setJobFromResumed] = useState(false) // true = found on mount (tab was closed)
   const pollRef = useRef<NodeJS.Timeout | null>(null)
 
   // Results
@@ -270,19 +272,28 @@ export default function GeneratePage() {
         setJobStatus(job.status)
         if (job.status === 'RUNNING' || job.status === 'PENDING') {
           setIsGenerating(true)
+          setJobCreatedAt(job.createdAt || null)
+          setJobFromResumed(true)
           pollJobStatus(job.id)
         } else if (job.status === 'DONE') {
+          // Tab was closed and re-opened — job already done. Don't flood display with old questions.
+          // Just show a banner linking to question bank.
           setIsDone(true)
-          fetchRecentQuestions()
+          setJobFromResumed(true)
+          setProgress(job.progress || 0)
         }
       }
     } catch {}
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId])
 
-  const fetchRecentQuestions = async (limit = 100) => {
+  // Only fetch questions created since the job started (so we don't show old questions)
+  const fetchRecentQuestions = async (since?: string) => {
     try {
-      const res = await fetch(`/api/sessions/${sessionId}/questions?limit=${limit}`)
+      const url = since
+        ? `/api/sessions/${sessionId}/questions?limit=200&since=${encodeURIComponent(since)}`
+        : `/api/sessions/${sessionId}/questions?limit=200`
+      const res = await fetch(url)
       if (res.ok) setGenerated(await res.json())
     } catch {}
   }
@@ -300,7 +311,8 @@ export default function GeneratePage() {
           if (job.status === 'DONE') {
             setIsDone(true)
             setIsGenerating(false)
-            await fetchRecentQuestions()
+            // Only fetch questions created since this job started
+            await fetchRecentQuestions(jobCreatedAt || undefined)
             toast({ title: `✓ ${job.progress} questions generated`, description: 'Saved to question bank.' })
           } else if (job.status === 'FAILED') {
             setIsGenerating(false)
@@ -333,6 +345,7 @@ export default function GeneratePage() {
     setIsDone(false)
     setProgress(0)
     setActiveJobId(null)
+    setJobFromResumed(false)
 
     const sectionConfigsPayload = enabledConfigs.map((c) => {
       const topicObjs = flatTopics.filter((t) => c.selectedTopicIds.includes(t.id))
@@ -370,6 +383,7 @@ export default function GeneratePage() {
       if (!jobRes.ok) throw new Error('Failed to create generation job')
       const job = await jobRes.json()
       setActiveJobId(job.id)
+      setJobCreatedAt(job.createdAt || new Date().toISOString())
       setTotalToGen(job.total || total)
       fetch(`/api/sessions/${sessionId}/generate-jobs/${job.id}/run`, { method: 'POST' }).catch(() => {})
       pollJobStatus(job.id)

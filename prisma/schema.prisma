@@ -295,20 +295,23 @@ model ExamSection {
 }
 
 model Question {
-  id            String         @id @default(cuid())
-  sessionId     String
-  sectionId     String
-  stem          String
-  options       Json?
-  correctAnswer String?
-  markingScheme String?
-  modelAnswer   String?
-  topic         String?
-  difficulty    Difficulty     @default(MEDIUM)
-  status        QuestionStatus @default(NEEDS_REVIEW)
-  questionType  QuestionType   @default(MCQ_SINGLE)
-  marks         Int            @default(1)
-  createdAt     DateTime       @default(now())
+  id                 String         @id @default(cuid())
+  sessionId          String
+  sectionId          String
+  stem               String
+  options            Json?
+  correctAnswer      String?
+  markingScheme      String?
+  modelAnswer        String?
+  topic              String?
+  difficulty         Difficulty     @default(MEDIUM)
+  status             QuestionStatus @default(NEEDS_REVIEW)
+  questionType       QuestionType   @default(MCQ_SINGLE)
+  marks              Int            @default(1)
+  optionExplanations Json?          // {A: "...", B: "...", C: "...", D: "..."}
+  syllabusCode       String?        // e.g. "C2d, C2n"
+  regulationRefs     String?        // e.g. "Article 9, Decree 320/2025/ND-CP"
+  createdAt          DateTime       @default(now())
 
   // Relations
   session         Session           @relation(fields: [sessionId], references: [id], onDelete: Cascade)

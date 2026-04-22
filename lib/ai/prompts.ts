@@ -254,8 +254,26 @@ export function buildExamQuestionPrompt(config: ExamGenerationConfig): string {
     ? `MARK ALLOCATION: Each question is worth ${config.marksPerQuestion} marks total:\n- ${calcMarks} marks for calculation/computation steps\n- ${config.marksPerQuestion - calcMarks} marks for theory/identification/written explanation\nDesign question parts accordingly.\n\n`
     : ''
 
-  return `${languageInstruction}${calcMarksInstruction}You are an expert professional exam question writer${config.overallTopic ? ` specialising in ${config.overallTopic}` : ''}.
+  // ── System / persona prompt ──────────────────────────────────────────────
+  const personaLine = config.overallTopic
+    ? `You are a Senior ${config.overallTopic} Examiner with 30+ years of experience setting professional-level exam questions.`
+    : `You are a Senior Professional Examiner with 30+ years of experience setting professional-level exam questions.`
 
+  // ── Anti-hallucination block ──────────────────────────────────────────────
+  const antiHallucinationRules = hasDocuments ? `
+## CRITICAL ANTI-HALLUCINATION RULES — READ FIRST
+1. ONLY cite regulations, laws, decrees, circulars, and articles that appear VERBATIM in the REGULATIONS / TAX LAW section provided below.
+2. If you need to reference a regulation but cannot find its exact name/number in the provided documents, write "See uploaded regulations" instead of inventing a name.
+3. NEVER invent law names, article numbers, decree numbers, or circular numbers. If the regulation content is present but the formal citation is unclear, use a descriptive reference like "per the tax regulations provided".
+4. ALL numerical rates, thresholds, percentages, and deadlines in your questions MUST come directly from the provided documents. Do NOT use your training data for these figures.
+5. If no regulations document is provided: do NOT write questions that require citing specific law articles. Write conceptual or calculation-based questions using the rates provided in the Rates & Tariff section only.
+6. SAMPLE QUESTIONS are for STYLE REFERENCE only. Study their format, question depth, option structure, and explanation style — but do NOT copy their content or extract regulation names from them.` : '';
+
+  return `${personaLine}
+
+${antiHallucinationRules}
+
+${languageInstruction}${calcMarksInstruction}
 ## GENERATION PARAMETERS
 SECTION: ${config.sectionName}
 TOTAL QUESTIONS TO GENERATE: ${config.count}
@@ -278,10 +296,10 @@ ${config.customInstructions ? `Additional instructions: ${config.customInstructi
 ${config.extraInstructions ? `Global instructions: ${config.extraInstructions}\n` : ''}
 
 ## GENERATION RULES
-1. ${hasDocuments ? 'Base ALL questions strictly on the provided documents. DO NOT hallucinate facts, figures, law articles, or tax rates.' : 'Generate questions based on expert knowledge.'}
+1. ${hasDocuments ? 'Base ALL questions strictly on the provided documents. DO NOT hallucinate facts, figures, law articles, or tax rates not found in the documents.' : 'Generate questions based on expert knowledge.'}
 2. SYLLABUS CONSTRAINT: If a syllabus is provided, ONLY test topics listed there. Never generate questions on [EXCLUDE] topics.
-3. RATES CONSTRAINT: For calculation questions, use ONLY the rates/thresholds from the Rates & Tariff section.
-4. STYLE MATCHING: If sample questions are provided, match their format, language, depth, and structure exactly.
+3. RATES CONSTRAINT: For calculation questions, use ONLY the rates/thresholds explicitly stated in the provided Rates & Tariff section or Regulations section.
+4. STYLE MATCHING: If sample questions are provided, match their format, language, depth, option phrasing, and structure exactly. This is the highest priority for style.
 5. TOPIC DISTRIBUTION: If multiple topics are specified and count doesn't divide evenly, distribute randomly — AI chooses which topics to cover.
 6. TYPE DISTRIBUTION: If multiple question types are specified and count doesn't divide evenly, AI assigns types randomly — but each type must appear at least once if count allows.
 7. Each question MUST include:
@@ -289,19 +307,17 @@ ${config.extraInstructions ? `Global instructions: ${config.extraInstructions}\n
    - Detailed marking scheme (one point per line, each line shows mark allocation)
    - Complete model answer with calculations in table format if \u22653 rows
    - Per-option explanations (for MCQ): correct option shows inline calculation; wrong options get ONE short sentence
-   - Reference at end: "Ref: Article X, Decree Y"
-   - Syllabus codes tested at end
+   - regulationRefs: ONLY cite regulations whose names appear verbatim in the provided REGULATIONS section. If unsure, write "See uploaded regulations".
+   - syllabusCode: syllabus codes tested (e.g. "C2d, C2n")
 
 EXPLANATION STYLE (CRITICAL \u2014 follow examsgen format):
 - Correct option: show calculations inline like "Annual salary = 50mil \u00d7 9 months = 450mil (0.5mk)"
-- When \u22653 calculation rows: use markdown table format:
-  | Item | Calculation | Amount | Marks |
-  |------|-------------|--------|-------|
-  | Salary | 50 \u00d7 9 | 450 mil | 0.5mk |
+- When \u22653 calculation rows: use HTML table format:
+  <table><tr><th>Item</th><th>Calculation</th><th>Amount</th><th>Marks</th></tr><tr><td>Salary</td><td>50 \u00d7 9</td><td>450 mil</td><td>0.5mk</td></tr></table>
 - Wrong options: ONE short sentence only, e.g. "Wrong rate: 20% used instead of 22%"
 - NEVER write verbose Step 1/Step 2 paragraphs
-- Reference at end: "Ref: Article X, Decree Y"
-- Syllabus codes: "Tested: C2d, C2n" at end
+- modelAnswer: use HTML tables for calculations (\u22653 rows), use <strong> for key figures
+- markingScheme: use HTML table format: <table><tr><th>Item</th><th>Marks</th></tr>...
 
 ## OUTPUT FORMAT
 Return a JSON array only — no markdown fences, no preamble, no explanation.
@@ -316,9 +332,9 @@ Return a JSON array only — no markdown fences, no preamble, no explanation.
       "C": "Forgot to deduct compulsory insurance",
       "D": "Applied annual threshold incorrectly"
     },
-    "markingScheme": "concise marking scheme, one point per line, each line shows mark allocation",
-    "modelAnswer": "Full answer with calculations in table format if \u22653 rows",
-    "reference": "Article 9, Decree 320/2025/ND-CP; Circular 78/2014 s.3",
+    "markingScheme": "<table><tr><th>Item</th><th>Marks</th></tr><tr><td>Correct identification</td><td>1mk</td></tr></table>",
+    "modelAnswer": "Full answer with HTML table for calculations if \u22653 rows",
+    "reference": "Only cite if regulation name appears verbatim in the provided documents. Otherwise: See uploaded regulations.",
     "syllabusCode": "C2d, C2n",
     "topic": "Specific topic/subtopic this question tests",
     "difficulty": "EASY" | "MEDIUM" | "HARD",
