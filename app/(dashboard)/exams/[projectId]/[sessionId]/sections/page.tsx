@@ -95,14 +95,16 @@ const SectionForm = ({
           <Input value={data.name || ''} onChange={e => onChange('name', e.target.value)} placeholder="e.g. Section A — Multiple Choice" />
         </div>
         <div className="space-y-1">
-          <Label className="text-xs">Questions in Bank</Label>
-          <Input type="number" value={data.questionsInBank || 40} onChange={e => onChange('questionsInBank', Number(e.target.value))} className="h-9" />
+          <Label className="text-xs">Questions to Generate (Bank size)</Label>
+          <Input type="number" min={1} value={data.questionsInBank || 40} onChange={e => onChange('questionsInBank', Number(e.target.value))} className="h-9" />
+          <p className="text-xs text-gray-400">How many questions to generate into the question bank for this section</p>
         </div>
         <div className="space-y-1">
-          <Label className="text-xs">Exam summary</Label>
+          <Label className="text-xs">In-exam count</Label>
           <div className="h-9 flex items-center text-sm text-gray-600 font-medium">
             {totalQ} questions · {totalPts} marks
           </div>
+          <p className="text-xs text-gray-400">Actual questions in the real exam for this section</p>
         </div>
       </div>
 
@@ -439,7 +441,10 @@ export default function SectionsPage() {
                             return null
                           }
                         })()}
-                        <div className="text-xs text-gray-400 mt-1">Bank: {sec.questionsInBank} questions</div>
+                        <div className="flex gap-4 text-xs text-gray-500 mt-1">
+                          <span>In exam: <strong>{(() => { try { const qt = JSON.parse(sec.questionTypes || '[]'); return qt.reduce((a: number, r: any) => a + r.count, 0) } catch { return sec.questionsInExam } })()} q</strong></span>
+                          <span>Bank target: <strong>{sec.questionsInBank} q</strong></span>
+                        </div>
                       </div>
                       <div className="flex gap-1 shrink-0">
                         <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setEditingId(sec.id)}>

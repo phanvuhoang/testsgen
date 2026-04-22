@@ -11,7 +11,7 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useToast } from '@/components/ui/use-toast'
-import { Upload, FileText, Trash2, Loader2, Save } from 'lucide-react'
+import { Upload, FileText, Trash2, Loader2, Save, Tag, Puzzle } from 'lucide-react'
 import { formatDate, formatFileSize } from '@/lib/utils'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 
@@ -62,6 +62,17 @@ export default function DocumentsPage() {
   const [docDescription, setDocDescription] = useState('')
   const fileInputRef = useRef<HTMLInputElement>(null)
 
+  // Edit tag state
+  const [editTagDocId, setEditTagDocId] = useState<string | null>(null)
+  const [editTagTopic, setEditTagTopic] = useState<string>('none')
+  const [editTagSection, setEditTagSection] = useState<string>('none')
+  const [editTagDesc, setEditTagDesc] = useState<string>('')
+  const [isSavingTag, setIsSavingTag] = useState(false)
+
+  // Parse state
+  const [parsingDocId, setParsingDocId] = useState<string | null>(null)
+  const [parsedResult, setParsedResult] = useState<{docId: string; count: number} | null>(null)
+
   useEffect(() => {
     fetchDocs()
     fetch(`/api/sessions/${params.sessionId}/topics`).then(r => r.ok ? r.json() : []).then(setTopics).catch(() => {})
@@ -111,6 +122,50 @@ export default function DocumentsPage() {
     if (res.ok) {
       setDocs((prev) => prev.filter((d) => d.id !== id))
       toast({ title: 'Document deleted' })
+    }
+  }
+
+  const handleSaveTag = async (docId: string) => {
+    setIsSavingTag(true)
+    try {
+      const topicObj = topics.find(t => t.id === editTagTopic)
+      const sectionObj = sections.find(s => s.id === editTagSection)
+      const res = await fetch(`/api/sessions/${params.sessionId}/documents/${docId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          topicId: editTagTopic !== 'none' ? editTagTopic : null,
+          topicName: editTagTopic !== 'none' ? (topicObj?.name ?? null) : null,
+          sectionId: editTagSection !== 'none' ? editTagSection : null,
+          sectionName: editTagSection !== 'none' ? (sectionObj?.name ?? null) : null,
+          description: editTagDesc || null,
+        }),
+      })
+      if (!res.ok) throw new Error()
+      const updated = await res.json()
+      setDocs(prev => prev.map(d => d.id === docId ? { ...d, ...updated } : d))
+      setEditTagDocId(null)
+      toast({ title: 'Tags updated' })
+    } catch { toast({ title: 'Failed to save tags', variant: 'destructive' }) }
+    finally { setIsSavingTag(false) }
+  }
+
+  const handleParseDocument = async (docId: string) => {
+    setParsingDocId(docId)
+    try {
+      const res = await fetch(`/api/sessions/${params.sessionId}/documents/${docId}/parse`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ useAI: true }),
+      })
+      const data = await res.json()
+      if (data.error && !data.parsed) throw new Error(data.error)
+      setParsedResult({ docId, count: data.count ?? 0 })
+      toast({ title: `Parsed ${data.count} questions`, description: 'View them in the Samples tab' })
+    } catch (e) {
+      toast({ title: 'Parse failed', description: String(e), variant: 'destructive' })
+    } finally {
+      setParsingDocId(null)
     }
   }
 
@@ -213,29 +268,108 @@ export default function DocumentsPage() {
         <div className="space-y-2">
           {docs.map((doc) => (
             <Card key={doc.id}>
-              <CardContent className="p-4 flex items-center gap-4">
-                <FileText className="h-8 w-8 text-gray-400 shrink-0" />
-                <div className="flex-1 min-w-0">
-                  <p className="font-medium text-sm truncate">{doc.fileName}</p>
-                  <div className="flex gap-2 mt-1 flex-wrap items-center">
-                    <span className={`text-xs px-2 py-0.5 rounded-full ${fileTypeColors[doc.fileType] ?? 'bg-gray-100 text-gray-800'}`}>
-                      {fileTypeLabels[doc.fileType] ?? doc.fileType.replace(/_/g, ' ')}
-                    </span>
-                    <span className="text-xs text-gray-500">{formatFileSize(doc.fileSize)}</span>
-                    <span className="text-xs text-gray-500">{formatDate(doc.uploadedAt)}</span>
-                    {doc.topicName && <span className="text-xs px-1.5 py-0.5 bg-blue-50 text-blue-700 rounded">{doc.topicName}</span>}
-                    {doc.sectionName && <span className="text-xs px-1.5 py-0.5 bg-green-50 text-green-700 rounded">{doc.sectionName}</span>}
-                    {doc.description && <span className="text-xs text-gray-400 italic">{doc.description}</span>}
+              <CardContent className="p-4">
+                <div className="flex items-center gap-4">
+                  <FileText className="h-8 w-8 text-gray-400 shrink-0" />
+                  <div className="flex-1 min-w-0">
+                    <p className="font-medium text-sm truncate">{doc.fileName}</p>
+                    <div className="flex gap-2 mt-1 flex-wrap items-center">
+                      <span className={`text-xs px-2 py-0.5 rounded-full ${fileTypeColors[doc.fileType] ?? 'bg-gray-100 text-gray-800'}`}>
+                        {fileTypeLabels[doc.fileType] ?? doc.fileType.replace(/_/g, ' ')}
+                      </span>
+                      {doc.isManualInput && <span className="text-xs px-2 py-0.5 rounded-full bg-purple-100 text-purple-700">Manual</span>}
+                      <span className="text-xs text-gray-500">{formatFileSize(doc.fileSize)}</span>
+                      <span className="text-xs text-gray-500">{formatDate(doc.uploadedAt)}</span>
+                      {doc.topicName && <span className="text-xs px-1.5 py-0.5 bg-blue-50 text-blue-700 rounded">{doc.topicName}</span>}
+                      {doc.sectionName && <span className="text-xs px-1.5 py-0.5 bg-green-50 text-green-700 rounded">{doc.sectionName}</span>}
+                      {doc.fileType === 'OTHER' && doc.description && <span className="text-xs text-gray-400 italic">{doc.description}</span>}
+                    </div>
+                  </div>
+                  <div className="flex gap-1 shrink-0">
+                    {doc.fileType === 'SAMPLE_QUESTIONS' && (
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 text-purple-500 hover:text-purple-700"
+                        title="Parse into individual questions"
+                        onClick={() => handleParseDocument(doc.id)}
+                      >
+                        {parsingDocId === doc.id
+                          ? <Loader2 className="h-4 w-4 animate-spin text-purple-500" />
+                          : <Puzzle className="h-4 w-4" />
+                        }
+                      </Button>
+                    )}
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 text-gray-400 hover:text-blue-600"
+                      title="Edit tags"
+                      onClick={() => {
+                        setEditTagDocId(doc.id)
+                        setEditTagTopic(doc.topicId ?? 'none')
+                        setEditTagSection(doc.sectionId ?? 'none')
+                        setEditTagDesc(doc.description ?? '')
+                      }}
+                    >
+                      <Tag className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 text-red-500 hover:text-red-700"
+                      onClick={() => handleDelete(doc.id)}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
                   </div>
                 </div>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="text-red-500 hover:text-red-700 h-8 w-8"
-                  onClick={() => handleDelete(doc.id)}
-                >
-                  <Trash2 className="h-4 w-4" />
-                </Button>
+                {/* Inline tag editor */}
+                {editTagDocId === doc.id && (
+                  <div className="mt-3 pt-3 border-t space-y-2">
+                    <div className="grid grid-cols-2 gap-2">
+                      <div className="space-y-1">
+                        <Label className="text-xs">Topic</Label>
+                        <Select value={editTagTopic} onValueChange={setEditTagTopic}>
+                          <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="No topic" /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="none">No topic</SelectItem>
+                            {topics.filter(t => !t.isOverall).map(t => (
+                              <SelectItem key={t.id} value={t.id} className="text-xs">{t.parentId ? `↳ ${t.name}` : t.name}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-xs">Section</Label>
+                        <Select value={editTagSection} onValueChange={setEditTagSection}>
+                          <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="No section" /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="none">No section</SelectItem>
+                            {sections.map(s => <SelectItem key={s.id} value={s.id} className="text-xs">{s.name}</SelectItem>)}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                    </div>
+                    {doc.fileType === 'OTHER' && (
+                      <div className="space-y-1">
+                        <Label className="text-xs">Description</Label>
+                        <Input
+                          value={editTagDesc}
+                          onChange={e => setEditTagDesc(e.target.value)}
+                          className="h-8 text-xs"
+                          placeholder="Describe this document..."
+                        />
+                      </div>
+                    )}
+                    <div className="flex gap-2 justify-end">
+                      <Button variant="outline" size="sm" onClick={() => setEditTagDocId(null)}>Cancel</Button>
+                      <Button size="sm" disabled={isSavingTag} onClick={() => handleSaveTag(doc.id)}>
+                        {isSavingTag ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <Save className="h-3 w-3 mr-1" />}Save Tags
+                      </Button>
+                    </div>
+                  </div>
+                )}
               </CardContent>
             </Card>
           ))}

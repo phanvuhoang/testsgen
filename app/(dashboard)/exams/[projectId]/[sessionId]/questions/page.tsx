@@ -4,13 +4,16 @@ import { useEffect, useState } from 'react'
 import { useParams } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Skeleton } from '@/components/ui/skeleton'
+import { Checkbox } from '@/components/ui/checkbox'
 import { useToast } from '@/components/ui/use-toast'
-import { Search, Download, Pencil, Trash2, ChevronDown, ChevronUp, Check, ThumbsUp, AlertCircle } from 'lucide-react'
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { Search, Download, Pencil, Trash2, ChevronDown, ChevronUp, Check, ThumbsUp, AlertCircle, RefreshCw, BookOpen, Loader2 } from 'lucide-react'
 
 type Question = {
   id: string
@@ -33,6 +36,12 @@ const difficultyColor: Record<string, string> = {
   HARD: 'bg-red-100 text-red-800',
 }
 
+const statusConfig: Record<string, { label: string; className: string }> = {
+  APPROVED: { label: 'Approved', className: 'bg-green-50 text-green-700 border-green-200' },
+  NEEDS_REVIEW: { label: 'Review', className: 'bg-yellow-50 text-yellow-700 border-yellow-200' },
+  REJECTED: { label: 'Rejected', className: 'bg-red-50 text-red-700 border-red-200' },
+}
+
 export default function ExamQuestionsPage() {
   const params = useParams()
   const { toast } = useToast()
@@ -45,6 +54,12 @@ export default function ExamQuestionsPage() {
   const [expandedId, setExpandedId] = useState<string | null>(null)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editForm, setEditForm] = useState<Partial<Question>>({})
+  // Regenerate state
+  const [regenId, setRegenId] = useState<string | null>(null)
+  const [regenInstructions, setRegenInstructions] = useState('')
+  const [isRegenerating, setIsRegenerating] = useState(false)
+  // Bulk selection state
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
 
   useEffect(() => {
     fetchQuestions()
@@ -95,6 +110,81 @@ export default function ExamQuestionsPage() {
     })
     if (res.ok) {
       setQuestions((prev) => prev.map((q) => q.id === id ? { ...q, status: newStatus } : q))
+    }
+  }
+
+  const handleRegenerate = async () => {
+    if (!regenId) return
+    const q = questions.find(x => x.id === regenId)
+    if (!q) return
+    setIsRegenerating(true)
+    try {
+      const res = await fetch(`/api/sessions/${params.sessionId}/generate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sections: [{ sectionId: q.section.id, count: 1 }],
+          extraInstructions: `Regenerate question to replace existing question "${q.stem.slice(0, 100)}". ${regenInstructions}`,
+          replaceQuestionId: regenId,
+        }),
+      })
+      if (res.ok && res.body) {
+        const reader = res.body.getReader()
+        const decoder = new TextDecoder()
+        while (true) {
+          const { done, value } = await reader.read()
+          if (done) break
+          const chunk = decoder.decode(value)
+          for (const line of chunk.split('\n')) {
+            if (line.startsWith('data: ') && line.slice(6) !== '[DONE]') {
+              try {
+                const newQ = JSON.parse(line.slice(6))
+                if (newQ.id) {
+                  // Delete old, add new
+                  await fetch(`/api/sessions/${params.sessionId}/questions/${regenId}`, { method: 'DELETE' })
+                  setQuestions(prev => prev.map(x => x.id === regenId ? { ...x, ...newQ } : x))
+                  setRegenId(null)
+                  setRegenInstructions('')
+                  toast({ title: 'Question regenerated' })
+                }
+              } catch {}
+            }
+          }
+        }
+      }
+    } catch { toast({ title: 'Regeneration failed', variant: 'destructive' }) }
+    finally { setIsRegenerating(false) }
+  }
+
+  const handleBulkApprove = async () => {
+    for (const id of Array.from(selectedIds)) {
+      await fetch(`/api/sessions/${params.sessionId}/questions/${id}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'APPROVED' }),
+      })
+    }
+    setQuestions(prev => prev.map(q => selectedIds.has(q.id) ? { ...q, status: 'APPROVED' } : q))
+    const count = selectedIds.size
+    setSelectedIds(new Set())
+    toast({ title: `${count} questions approved` })
+  }
+
+  const handleBulkDelete = async () => {
+    if (!confirm(`Delete ${selectedIds.size} questions?`)) return
+    for (const id of Array.from(selectedIds)) {
+      await fetch(`/api/sessions/${params.sessionId}/questions/${id}`, { method: 'DELETE' })
+    }
+    setQuestions(prev => prev.filter(q => !selectedIds.has(q.id)))
+    const count = selectedIds.size
+    setSelectedIds(new Set())
+    toast({ title: `${count} questions deleted` })
+  }
+
+  const toggleSelectAll = () => {
+    if (selectedIds.size === filtered.length) {
+      setSelectedIds(new Set())
+    } else {
+      setSelectedIds(new Set(filtered.map(q => q.id)))
     }
   }
 
@@ -165,6 +255,7 @@ export default function ExamQuestionsPage() {
             <SelectItem value="all">All statuses</SelectItem>
             <SelectItem value="APPROVED">Approved</SelectItem>
             <SelectItem value="NEEDS_REVIEW">Needs Review</SelectItem>
+            <SelectItem value="REJECTED">Rejected</SelectItem>
           </SelectContent>
         </Select>
       </div>
@@ -177,41 +268,75 @@ export default function ExamQuestionsPage() {
         <div className="text-center py-16 text-gray-500">No questions found</div>
       ) : (
         <div className="space-y-2">
+          {/* Bulk action bar */}
+          <div className="flex items-center gap-3 mb-2">
+            <Checkbox
+              checked={selectedIds.size === filtered.length && filtered.length > 0}
+              onCheckedChange={toggleSelectAll}
+              className="shrink-0"
+            />
+            <span className="text-xs text-gray-500">{selectedIds.size > 0 ? `${selectedIds.size} selected` : 'Select all'}</span>
+          </div>
+
+          {selectedIds.size > 0 && (
+            <div className="flex items-center gap-3 p-3 bg-blue-50 border border-blue-200 rounded-lg mb-2">
+              <span className="text-sm font-medium">{selectedIds.size} selected</span>
+              <Button size="sm" variant="outline" className="h-7 text-xs" onClick={handleBulkApprove}>Approve All</Button>
+              <Button size="sm" variant="outline" className="h-7 text-xs text-red-600" onClick={handleBulkDelete}>Delete Selected</Button>
+              <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => setSelectedIds(new Set())}>Clear</Button>
+            </div>
+          )}
+
           {filtered.map((q) => (
             <Card key={q.id} className="overflow-hidden">
-              <div
-                className="p-4 flex items-start justify-between gap-2 cursor-pointer hover:bg-gray-50"
-                onClick={() => setExpandedId(expandedId === q.id ? null : q.id)}
-              >
-                <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium line-clamp-2">{q.stem}</p>
-                  <div className="flex gap-2 mt-1 flex-wrap">
-                    <span className="text-xs text-gray-400">{q.section?.name}</span>
-                    <Badge variant="outline" className="text-xs py-0">{q.questionType.replace(/_/g, ' ')}</Badge>
-                    <span className={`text-xs px-2 py-0.5 rounded-full ${difficultyColor[q.difficulty]}`}>{q.difficulty}</span>
-                    <span className="text-xs text-gray-500">{q.marks}m</span>
-                    {q.topic && <span className="text-xs bg-gray-100 px-2 py-0.5 rounded">{q.topic}</span>}
+              <div className="p-4 flex items-start justify-between gap-2">
+                <div className="flex items-start gap-3 flex-1 min-w-0">
+                  <Checkbox
+                    checked={selectedIds.has(q.id)}
+                    onCheckedChange={v => {
+                      setSelectedIds(prev => {
+                        const next = new Set(prev)
+                        v ? next.add(q.id) : next.delete(q.id)
+                        return next
+                      })
+                    }}
+                    className="mt-1 shrink-0"
+                    onClick={e => e.stopPropagation()}
+                  />
+                  <div
+                    className="flex-1 min-w-0 cursor-pointer"
+                    onClick={() => setExpandedId(expandedId === q.id ? null : q.id)}
+                  >
+                    <p className="text-sm font-medium line-clamp-2">{q.stem}</p>
+                    <div className="flex gap-2 mt-1 flex-wrap">
+                      <span className="text-xs text-gray-400">{q.section?.name}</span>
+                      <Badge variant="outline" className="text-xs py-0">{q.questionType.replace(/_/g, ' ')}</Badge>
+                      <span className={`text-xs px-2 py-0.5 rounded-full ${difficultyColor[q.difficulty]}`}>{q.difficulty}</span>
+                      <span className="text-xs text-gray-500">{q.marks}m</span>
+                      {q.topic && <span className="text-xs bg-gray-100 px-2 py-0.5 rounded">{q.topic}</span>}
+                    </div>
                   </div>
                 </div>
                 <div className="flex items-center gap-1 shrink-0">
                   <button
                     onClick={(e) => { e.stopPropagation(); toggleStatus(q.id, q.status) }}
-                    className={`flex items-center gap-1 px-2 py-1 rounded text-xs ${
-                      q.status === 'APPROVED'
-                        ? 'bg-primary/10 text-primary'
-                        : 'bg-yellow-50 text-yellow-700'
-                    }`}
+                    className={`flex items-center gap-1 px-2 py-1 rounded text-xs border ${(statusConfig[q.status] ?? statusConfig['NEEDS_REVIEW']).className}`}
                   >
                     {q.status === 'APPROVED' ? <ThumbsUp className="h-3 w-3" /> : <AlertCircle className="h-3 w-3" />}
-                    {q.status === 'APPROVED' ? 'Approved' : 'Review'}
+                    {(statusConfig[q.status] ?? statusConfig['NEEDS_REVIEW']).label}
                   </button>
+                  <Button size="icon" variant="ghost" className="h-7 w-7" title="Regenerate" onClick={(e) => { e.stopPropagation(); setRegenId(q.id); setRegenInstructions('') }}>
+                    <RefreshCw className="h-3 w-3" />
+                  </Button>
                   <Button size="icon" variant="ghost" className="h-7 w-7" onClick={(e) => { e.stopPropagation(); setEditingId(q.id); setEditForm(q); setExpandedId(q.id) }}>
                     <Pencil className="h-3 w-3" />
                   </Button>
                   <Button size="icon" variant="ghost" className="h-7 w-7 text-red-500" onClick={(e) => { e.stopPropagation(); handleDelete(q.id) }}>
                     <Trash2 className="h-3 w-3" />
                   </Button>
-                  {expandedId === q.id ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                  <button onClick={() => setExpandedId(expandedId === q.id ? null : q.id)}>
+                    {expandedId === q.id ? <ChevronUp className="h-4 w-4" /> : <ChevronDown className="h-4 w-4" />}
+                  </button>
                 </div>
               </div>
 
@@ -223,21 +348,29 @@ export default function ExamQuestionsPage() {
                         value={editForm.stem || ''}
                         onChange={(e) => setEditForm({ ...editForm, stem: e.target.value })}
                         className="min-h-[80px]"
+                        placeholder="Question stem..."
                       />
                       {q.options && (
                         <div className="space-y-1">
+                          <Label className="text-xs font-semibold">Options</Label>
                           {(editForm.options || q.options).map((opt: string, i: number) => (
                             <Input key={i} value={opt} onChange={(e) => {
                               const opts = [...(editForm.options || q.options || [])]
                               opts[i] = e.target.value
                               setEditForm({ ...editForm, options: opts })
-                            }} />
+                            }} placeholder={`Option ${String.fromCharCode(65 + i)}`} />
                           ))}
                           <Input value={editForm.correctAnswer || ''} onChange={(e) => setEditForm({ ...editForm, correctAnswer: e.target.value })} placeholder="Correct answer" />
                         </div>
                       )}
-                      <Textarea value={editForm.markingScheme || ''} onChange={(e) => setEditForm({ ...editForm, markingScheme: e.target.value })} placeholder="Marking scheme..." />
-                      <Textarea value={editForm.modelAnswer || ''} onChange={(e) => setEditForm({ ...editForm, modelAnswer: e.target.value })} placeholder="Model answer..." />
+                      <div className="space-y-1">
+                        <Label className="text-xs font-semibold">Marking Scheme</Label>
+                        <Textarea value={editForm.markingScheme || ''} onChange={(e) => setEditForm({ ...editForm, markingScheme: e.target.value })} placeholder="Marking scheme..." className="min-h-[60px]" />
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-xs font-semibold">Model Answer</Label>
+                        <Textarea value={editForm.modelAnswer || ''} onChange={(e) => setEditForm({ ...editForm, modelAnswer: e.target.value })} placeholder="Model answer..." className="min-h-[60px]" />
+                      </div>
                       <div className="flex gap-2 justify-end">
                         <Button variant="outline" size="sm" onClick={() => setEditingId(null)}>Cancel</Button>
                         <Button size="sm" onClick={() => handleSave(q.id)}>
@@ -247,20 +380,36 @@ export default function ExamQuestionsPage() {
                     </div>
                   ) : (
                     <div className="space-y-3 text-sm">
-                      {q.options?.map((opt, i) => (
-                        <div key={i} className={`px-3 py-1.5 rounded ${opt === q.correctAnswer ? 'bg-primary/10 text-primary font-medium' : 'text-gray-700'}`}>
-                          {String.fromCharCode(65 + i)}. {opt} {opt === q.correctAnswer && '✓'}
+                      {/* Full stem */}
+                      <p className="text-sm whitespace-pre-wrap">{q.stem}</p>
+
+                      {/* MCQ Options */}
+                      {q.options && q.options.length > 0 && (
+                        <div className="space-y-1">
+                          {q.options.map((opt, i) => (
+                            <div key={i} className={`px-3 py-1.5 rounded ${opt === q.correctAnswer ? 'bg-green-50 text-green-800 font-medium border border-green-200' : 'bg-white text-gray-700 border border-gray-100'}`}>
+                              {String.fromCharCode(65 + i)}. {opt} {opt === q.correctAnswer && <span className="ml-1 text-green-600">✓</span>}
+                            </div>
+                          ))}
                         </div>
-                      ))}
-                      {!q.options && q.correctAnswer && (
-                        <div className="p-2 bg-primary/10 rounded text-primary text-xs"><strong>Answer:</strong> {q.correctAnswer}</div>
                       )}
+
+                      {/* Correct answer for non-MCQ */}
+                      {!q.options && q.correctAnswer && (
+                        <div className="p-2 bg-green-50 border border-green-200 rounded text-green-800 text-xs">
+                          <strong>Correct Answer:</strong> {q.correctAnswer}
+                        </div>
+                      )}
+
+                      {/* Marking Scheme */}
                       {q.markingScheme && (
-                        <div className="p-3 bg-blue-50 rounded text-blue-900">
-                          <p className="text-xs font-semibold mb-1">Marking Scheme</p>
+                        <div className="p-3 bg-blue-50 border border-blue-100 rounded text-blue-900">
+                          <p className="text-xs font-semibold mb-1 flex items-center gap-1"><BookOpen className="h-3 w-3" />Marking Scheme</p>
                           <p className="text-xs whitespace-pre-wrap">{q.markingScheme}</p>
                         </div>
                       )}
+
+                      {/* Model Answer */}
                       {q.modelAnswer && (
                         <div className="p-3 bg-gray-100 rounded">
                           <p className="text-xs font-semibold mb-1">Model Answer</p>
@@ -275,6 +424,26 @@ export default function ExamQuestionsPage() {
           ))}
         </div>
       )}
+
+      {/* Regenerate Dialog */}
+      <Dialog open={!!regenId} onOpenChange={v => !v && setRegenId(null)}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader><DialogTitle>Regenerate Question</DialogTitle></DialogHeader>
+          <div className="space-y-3">
+            <p className="text-sm text-gray-500">Generate a new question to replace this one.</p>
+            <div className="space-y-1">
+              <Label className="text-xs">Specific instructions (optional)</Label>
+              <Textarea value={regenInstructions} onChange={e => setRegenInstructions(e.target.value)} className="h-20 text-sm" placeholder="e.g. Make it harder, focus on transfer pricing..." />
+            </div>
+            <div className="flex gap-2 justify-end">
+              <Button variant="outline" size="sm" onClick={() => setRegenId(null)}>Cancel</Button>
+              <Button size="sm" onClick={handleRegenerate} disabled={isRegenerating}>
+                {isRegenerating ? <Loader2 className="h-4 w-4 animate-spin mr-1" /> : <RefreshCw className="h-4 w-4 mr-1" />}Regenerate
+              </Button>
+            </div>
+          </div>
+        </DialogContent>
+      </Dialog>
     </div>
   )
 }

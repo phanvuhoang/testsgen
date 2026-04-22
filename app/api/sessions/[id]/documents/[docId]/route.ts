@@ -4,6 +4,28 @@ import { db } from '@/lib/db'
 import { unlink } from 'fs/promises'
 import { join } from 'path'
 
+export async function PATCH(req: NextRequest, { params }: { params: { id: string; docId: string } }) {
+  const session = await auth()
+  if (!session?.user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
+
+  try {
+    const body = await req.json()
+    const doc = await (db as any).document.update({
+      where: { id: params.docId },
+      data: {
+        topicId: body.topicId !== undefined ? body.topicId : undefined,
+        topicName: body.topicName !== undefined ? body.topicName : undefined,
+        sectionId: body.sectionId !== undefined ? body.sectionId : undefined,
+        sectionName: body.sectionName !== undefined ? body.sectionName : undefined,
+        description: body.description !== undefined ? body.description : undefined,
+      },
+    })
+    return NextResponse.json(doc)
+  } catch (e) {
+    return NextResponse.json({ error: 'Failed to update' }, { status: 500 })
+  }
+}
+
 export async function DELETE(_req: NextRequest, { params }: { params: { id: string; docId: string } }) {
   const session = await auth()
   if (!session?.user) return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })

@@ -9,10 +9,12 @@ import { ArrowLeft } from 'lucide-react'
 const tabs = [
   { label: 'Topics', href: 'topics' },
   { label: 'Documents', href: 'documents' },
+  { label: 'Samples', href: 'samples' },
   { label: 'Sections', href: 'sections' },
   { label: 'Generate', href: 'generate' },
   { label: 'Question Bank', href: 'questions' },
   { label: 'Mock Exams', href: 'mock-exams' },
+  { label: 'Variables', href: 'variables' },
 ]
 
 export default async function SessionLayout({

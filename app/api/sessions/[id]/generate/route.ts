@@ -47,6 +47,16 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   })
   const overallTopic = sessionData?.topics?.[0]?.name || undefined
 
+  // Get session variables
+  let sessionVarsText = ''
+  try {
+    const svars = await (db as any).sessionVariable.findMany({ where: { sessionId: params.id } }) as any[]
+    if (svars.length > 0) {
+      sessionVarsText = '\n\nSESSION VARIABLES (use these for calculations):\n' + 
+        svars.map((v: any) => `${v.varLabel}: ${v.varValue}${v.varUnit ? ' ' + v.varUnit : ''}`).join('\n')
+    }
+  } catch {}
+
   // Get documents by type
   const docs = await (db as any).document.findMany({ where: { sessionId: params.id }, orderBy: { uploadedAt: 'asc' } }) as any[]
 
@@ -91,7 +101,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
           studyMaterial: joinContent('STUDY_MATERIAL'),
           sampleQuestions: joinContent('SAMPLE_QUESTIONS'),
           ratesTariff: joinContent('RATES_TARIFF'),
-          otherContext: joinContent('OTHER'),
+          otherContext: joinContent('OTHER') + sessionVarsText,
           // Legacy fallback:
           documentContent: undefined,
           // Flexible question types from section:
