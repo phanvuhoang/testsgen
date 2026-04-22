@@ -25,6 +25,33 @@ async function extractDocumentText(filePath: string): Promise<string> {
   }
 }
 
+// Helper: filter docs relevant to a section config (topic/section-aware)
+function getRelevantDocs(allDocs: any[], sectionConfig: any, sec: any): any[] {
+  const selectedTopicIds: string[] = sectionConfig.selectedTopicIds || []
+  const selectedSectionId: string = sectionConfig.sectionId
+
+  if (selectedTopicIds.length === 0) {
+    return allDocs.filter((d: any) => {
+      const hasTopicTag = d.topicId || (d.topicIds && d.topicIds !== '[]')
+      const hasSectionTag = d.sectionId === selectedSectionId ||
+        (d.sectionIds && (() => { try { return JSON.parse(d.sectionIds || '[]').includes(selectedSectionId) } catch { return false } })())
+      return !hasTopicTag || hasSectionTag
+    })
+  }
+
+  return allDocs.filter((d: any) => {
+    const docTopicIds: string[] = d.topicIds
+      ? (() => { try { return JSON.parse(d.topicIds) } catch { return d.topicId ? [d.topicId] : [] } })()
+      : (d.topicId ? [d.topicId] : [])
+
+    // Untagged docs (no topic) are always included as general context
+    if (docTopicIds.length === 0) return true
+
+    // Include if at least one selected topic matches
+    return docTopicIds.some((id: string) => selectedTopicIds.includes(id))
+  })
+}
+
 export async function POST(_req: NextRequest, { params }: { params: { id: string; jobId: string } }) {
   const job = await (db as any).generateJob.findUnique({ where: { id: params.jobId } })
   if (!job || (job.status !== 'PENDING' && job.status !== 'RUNNING')) {
@@ -36,7 +63,7 @@ export async function POST(_req: NextRequest, { params }: { params: { id: string
 
   // Parse config
   const config = JSON.parse(job.config)
-  const { sectionConfigs, extraInstructions, modelId } = config
+  const { sectionConfigs, extraInstructions, modelId, language } = config
 
   const sessionId = params.id
   const jobId = params.jobId
@@ -62,21 +89,11 @@ export async function POST(_req: NextRequest, { params }: { params: { id: string
         }
       } catch {}
 
-      // Get documents by type
-      const docs = await (db as any).document.findMany({
+      // Fetch ALL docs (context scoping happens per-section)
+      const allDocs = await (db as any).document.findMany({
         where: { sessionId },
         orderBy: { uploadedAt: 'asc' },
       }) as any[]
-
-      const docsByType: Record<string, string[]> = {}
-      for (const doc of docs) {
-        const text = doc.isManualInput ? (doc.content || '') : await extractDocumentText(doc.filePath)
-        if (!text) continue
-        const key = doc.fileType as string
-        if (!docsByType[key]) docsByType[key] = []
-        docsByType[key].push(`[${doc.fileName}]\n${text}`)
-      }
-      const joinContent = (key: string) => (docsByType[key] || []).join('\n\n---\n\n').slice(0, 20000)
 
       // Get section details
       const sectionIds = sectionConfigs.map((s: any) => s.sectionId)
@@ -128,6 +145,18 @@ export async function POST(_req: NextRequest, { params }: { params: { id: string
             ).join('\n\n---\n\n')
           : undefined
 
+        // Build per-section scoped docs
+        const relevantDocs = getRelevantDocs(allDocs, sectionConfig, sec)
+        const relevantDocsByType: Record<string, string[]> = {}
+        for (const doc of relevantDocs) {
+          const text = doc.isManualInput ? (doc.content || '') : await extractDocumentText(doc.filePath)
+          if (!text) continue
+          const key = doc.fileType as string
+          if (!relevantDocsByType[key]) relevantDocsByType[key] = []
+          relevantDocsByType[key].push(`[${doc.fileName}]\n${text}`)
+        }
+        const joinScopedContent = (key: string) => (relevantDocsByType[key] || []).join('\n\n---\n\n').slice(0, 20000)
+
         const generatorConfig = {
           sectionName: sec.name,
           questionType: sec.questionType,
@@ -139,19 +168,21 @@ export async function POST(_req: NextRequest, { params }: { params: { id: string
           extraInstructions: extraInstructions || undefined,
           customInstructions: sectionConfig.customInstructions || undefined,
           overallTopic,
-          syllabus: joinContent('SYLLABUS'),
-          regulations: joinContent('TAX_REGULATIONS'),
-          studyMaterial: joinContent('STUDY_MATERIAL'),
-          sampleQuestions: joinContent('SAMPLE_QUESTIONS'),
+          syllabus: joinScopedContent('SYLLABUS'),
+          regulations: joinScopedContent('TAX_REGULATIONS'),
+          studyMaterial: joinScopedContent('STUDY_MATERIAL'),
+          sampleQuestions: joinScopedContent('SAMPLE_QUESTIONS'),
           sampleQuestionsFiltered,
-          ratesTariff: joinContent('RATES_TARIFF'),
-          otherContext: joinContent('OTHER') + sessionVarsText,
+          ratesTariff: joinScopedContent('RATES_TARIFF'),
+          otherContext: joinScopedContent('OTHER') + sessionVarsText,
           // New per-generation fields
           selectedTopics: selectedTopicNames.length > 0 ? selectedTopicNames : undefined,
           selectedQuestionTypes: sectionConfig.selectedQuestionTypes || undefined,
           syllabusCode: sectionConfig.syllabusCode || undefined,
           issues: sectionConfig.issues || undefined,
           difficultyLevel: sectionConfig.difficultyLevel || 'STANDARD',
+          language: language || 'ENG',
+          calculationMarks: sectionConfig.calculationMarks || 0,
           // Legacy fallback
           questionTypes: sec.questionTypes || undefined,
           topicBreakdown: sec.topicBreakdown || undefined,

@@ -13,7 +13,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { useToast } from '@/components/ui/use-toast'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
-import { Upload, FileText, Trash2, Loader2, Save, Tag, Puzzle, ChevronDown } from 'lucide-react'
+import { Upload, FileText, Trash2, Loader2, Save, Tag, Puzzle, ChevronDown, X } from 'lucide-react'
 import { formatDate, formatFileSize } from '@/lib/utils'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 
@@ -93,6 +93,10 @@ export default function DocumentsPage() {
   // Parse state
   const [parsingDocId, setParsingDocId] = useState<string | null>(null)
   const [parsedResult, setParsedResult] = useState<{docId: string; count: number} | null>(null)
+
+  // Filter state
+  const [filterType, setFilterType] = useState<string>('ALL')
+  const [searchQuery, setSearchQuery] = useState('')
 
   useEffect(() => {
     fetchDocs()
@@ -326,6 +330,41 @@ export default function DocumentsPage() {
         <p className="text-sm text-gray-400 mt-1">PDF, DOCX, TXT, XLSX — used as AI context for question generation</p>
       </div>
 
+      {docs.length > 0 && (
+        <div className="flex items-center gap-2 mb-4 flex-wrap">
+          <Input
+            placeholder="Search by filename…"
+            value={searchQuery}
+            onChange={e => setSearchQuery(e.target.value)}
+            className="h-8 w-48 text-xs"
+          />
+          {['ALL', ...Array.from(new Set(docs.map(d => d.fileType)))].map(type => {
+            const count = type === 'ALL' ? docs.length : docs.filter(d => d.fileType === type).length
+            return (
+              <button
+                key={type}
+                onClick={() => setFilterType(type)}
+                className={`text-xs px-3 py-1 rounded-full border transition-colors ${
+                  filterType === type
+                    ? 'bg-[#028a39] text-white border-[#028a39]'
+                    : 'bg-white text-gray-600 border-gray-300 hover:border-[#028a39] hover:text-[#028a39]'
+                }`}
+              >
+                {type === 'ALL' ? 'All' : (fileTypeLabels[type] ?? type.replace(/_/g, ' '))} ({count})
+              </button>
+            )
+          })}
+          {(filterType !== 'ALL' || searchQuery) && (
+            <button
+              onClick={() => { setFilterType('ALL'); setSearchQuery('') }}
+              className="text-xs text-gray-400 hover:text-gray-600 flex items-center gap-1"
+            >
+              <X className="h-3 w-3" /> Clear
+            </button>
+          )}
+        </div>
+      )}
+
       {isLoading ? (
         <div className="space-y-3">
           {Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-16 w-full" />)}
@@ -337,7 +376,16 @@ export default function DocumentsPage() {
         </div>
       ) : (
         <div className="space-y-2">
-          {docs.map((doc) => (
+          {(() => {
+            const filteredDocs = docs.filter(d => {
+              const typeMatch = filterType === 'ALL' || d.fileType === filterType
+              const searchMatch = !searchQuery || d.fileName.toLowerCase().includes(searchQuery.toLowerCase())
+              return typeMatch && searchMatch
+            })
+            if (filteredDocs.length === 0) return (
+              <div className="text-center py-8 text-gray-400 text-sm">No documents match the filter.</div>
+            )
+            return filteredDocs.map((doc: Document) => (
             <Card key={doc.id}>
               <CardContent className="p-4">
                 <div className="flex items-center gap-4">
@@ -503,7 +551,9 @@ export default function DocumentsPage() {
                 )}
               </CardContent>
             </Card>
-          ))}
+          ))
+          })()
+          }
         </div>
       )}
     </div>

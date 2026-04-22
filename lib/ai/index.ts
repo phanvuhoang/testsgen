@@ -52,6 +52,12 @@ export function getAvailableModels(): AIModelChoice[] {
       provider: 'anthropic',
       model: 'claude-sonnet-4-5',
     },
+    {
+      id: 'claudible:claude-haiku-4.5',
+      label: 'Claudible Haiku 4.5',
+      provider: 'claudible',
+      model: process.env.CLAUDIBLE_MODEL || 'claude-haiku-4.5',
+    },
   ]
 }
 
@@ -95,6 +101,11 @@ function getOpenAICompatibleClient(provider: string): OpenAI {
       })
     case 'openai':
       return new OpenAI({ apiKey: process.env.OPENAI_API_KEY || '' })
+    case 'claudible':
+      return new OpenAI({
+        apiKey: process.env.CLAUDIBLE_API_KEY || '',
+        baseURL: process.env.CLAUDIBLE_BASE_URL || 'https://claudible.io/v1',
+      })
     default:
       throw new Error(`Provider ${provider} not supported via OpenAI client`)
   }
@@ -106,11 +117,15 @@ async function generateWithOpenAICompat(
   prompt: string
 ): Promise<string> {
   const client = getOpenAICompatibleClient(provider)
-  const response = await client.chat.completions.create({
+  const createParams: any = {
     model,
     messages: [{ role: 'user', content: prompt }],
     temperature: 0.7,
-  })
+  }
+  if (provider === 'claudible') {
+    createParams.max_tokens = 8000
+  }
+  const response = await client.chat.completions.create(createParams)
   return response.choices[0]?.message?.content || ''
 }
 

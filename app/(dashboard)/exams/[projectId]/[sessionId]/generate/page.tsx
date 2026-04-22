@@ -80,6 +80,8 @@ type SectionGenConfig = {
   difficultyLevel: 'STANDARD' | 'EASY' | 'HARD' | 'MIXED'
   // 8. Additional instructions
   customInstructions: string
+  // 9. Calculation marks split (0 = no split)
+  calculationMarks: number
 }
 
 type GeneratedQuestion = {
@@ -155,6 +157,7 @@ export default function GeneratePage() {
   const [expandedSec, setExpandedSec] = useState<Set<string>>(new Set())
   const [extraInstructions, setExtraInstructions] = useState('')
   const [selectedModel, setSelectedModel] = useState('deepseek:deepseek-reasoner')
+  const [generateLanguage, setGenerateLanguage] = useState<'ENG' | 'VIE'>('ENG')
 
   // Job / generation
   const [isGenerating, setIsGenerating] = useState(false)
@@ -208,6 +211,7 @@ export default function GeneratePage() {
             issues: '',
             difficultyLevel: 'STANDARD',
             customInstructions: '',
+            calculationMarks: 0,
           }
         })
         setSectionConfigs(configs)
@@ -345,6 +349,7 @@ export default function GeneratePage() {
           : [],
         difficultyLevel: c.difficultyLevel,
         customInstructions: c.customInstructions || undefined,
+        calculationMarks: c.calculationMarks || 0,
       }
     })
 
@@ -359,6 +364,7 @@ export default function GeneratePage() {
           extraInstructions,
           modelId: selectedModel,
           total,
+          language: generateLanguage,
         }),
       })
       if (!jobRes.ok) throw new Error('Failed to create generation job')
@@ -732,6 +738,26 @@ export default function GeneratePage() {
                 </div>
               )}
 
+              {/* Language toggle */}
+              <div className="flex items-center gap-2">
+                <Label className="text-xs font-semibold shrink-0">Generate language:</Label>
+                <div className="flex rounded-md border overflow-hidden">
+                  {(['ENG', 'VIE'] as const).map(lang => (
+                    <button
+                      key={lang}
+                      onClick={() => setGenerateLanguage(lang)}
+                      className={`px-3 py-1 text-xs font-medium transition-colors ${
+                        generateLanguage === lang
+                          ? 'bg-[#028a39] text-white'
+                          : 'bg-white text-gray-600 hover:bg-gray-50'
+                      }`}
+                    >
+                      {lang === 'ENG' ? '🇬🇧 English' : '🇻🇳 Tiếng Việt'}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
               {/* Select/deselect all */}
               <div className="flex gap-3 text-sm">
                 <button
@@ -827,6 +853,37 @@ export default function GeneratePage() {
                               />
                               <span className="text-xs text-gray-400">questions (default: 2)</span>
                             </div>
+                          </div>
+
+                          {/* Marks split */}
+                          <div className="space-y-1">
+                            <Label className="text-xs font-semibold">
+                              Each question generated will have{' '}
+                              <span className="text-gray-400 font-normal">(optional)</span>
+                            </Label>
+                            <div className="flex items-center gap-2">
+                              <Input
+                                type="number"
+                                min={0}
+                                max={sec.marksPerQuestion}
+                                step={0.5}
+                                value={cfg.calculationMarks}
+                                onChange={e => updateConfig(sec.id, { calculationMarks: Number(e.target.value) || 0 })}
+                                className="h-8 w-20 text-sm"
+                                placeholder="0"
+                              />
+                              <span className="text-xs text-gray-500">
+                                marks for Calculation
+                                {cfg.calculationMarks > 0 && sec.marksPerQuestion > 0 && (
+                                  <span className="ml-1 text-[#028a39]">
+                                    + {Math.max(0, sec.marksPerQuestion - cfg.calculationMarks)} marks Theory
+                                  </span>
+                                )}
+                              </span>
+                            </div>
+                            <p className="text-xs text-gray-400">
+                              Out of {sec.marksPerQuestion} marks per question. Leave 0 to let AI decide.
+                            </p>
                           </div>
 
                           {/* 2. Topics */}

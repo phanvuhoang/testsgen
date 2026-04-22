@@ -36,6 +36,9 @@ export type ExamGenerationConfig = {
   customInstructions?: string   // per-generation additional instructions
   documentContent?: string
 
+  language?: string            // 'ENG' | 'VIE'
+  calculationMarks?: number    // marks for calculation portion
+
   // ── Document context ──
   overallTopic?: string          // Session overall topic name
   syllabus?: string              // Syllabus document content
@@ -240,7 +243,18 @@ export function buildExamQuestionPrompt(config: ExamGenerationConfig): string {
     syllabusCodeSpec = `\nSYLLABUS CODE(S): ${config.syllabusCode} — generate questions that test these code areas specifically.`
   }
 
-  return `You are an expert professional exam question writer${config.overallTopic ? ` specialising in ${config.overallTopic}` : ''}.
+  // ── Language instruction ──
+  const languageInstruction = (config.language === 'VIE')
+    ? 'LANGUAGE: Write ALL question stems, options, and answers in Vietnamese. Use formal Vietnamese appropriate for professional exams.\n\n'
+    : ''
+
+  // ── Calculation marks instruction ──
+  const calcMarks = config.calculationMarks || 0
+  const calcMarksInstruction = (calcMarks > 0 && config.marksPerQuestion > 0)
+    ? `MARK ALLOCATION: Each question is worth ${config.marksPerQuestion} marks total:\n- ${calcMarks} marks for calculation/computation steps\n- ${config.marksPerQuestion - calcMarks} marks for theory/identification/written explanation\nDesign question parts accordingly.\n\n`
+    : ''
+
+  return `${languageInstruction}${calcMarksInstruction}You are an expert professional exam question writer${config.overallTopic ? ` specialising in ${config.overallTopic}` : ''}.
 
 ## GENERATION PARAMETERS
 SECTION: ${config.sectionName}
@@ -272,10 +286,22 @@ ${config.extraInstructions ? `Global instructions: ${config.extraInstructions}\n
 6. TYPE DISTRIBUTION: If multiple question types are specified and count doesn't divide evenly, AI assigns types randomly — but each type must appear at least once if count allows.
 7. Each question MUST include:
    - Full stem with all data needed to answer (no external lookup required)
-   - Detailed marking scheme (list each mark-worthy point)
-   - Complete model answer with full workings for calculation questions
-   - Explanation: why correct answer is right, why distractors are wrong
-   - Reference to the specific regulation/article/syllabus section
+   - Detailed marking scheme (one point per line, each line shows mark allocation)
+   - Complete model answer with calculations in table format if \u22653 rows
+   - Per-option explanations (for MCQ): correct option shows inline calculation; wrong options get ONE short sentence
+   - Reference at end: "Ref: Article X, Decree Y"
+   - Syllabus codes tested at end
+
+EXPLANATION STYLE (CRITICAL \u2014 follow examsgen format):
+- Correct option: show calculations inline like "Annual salary = 50mil \u00d7 9 months = 450mil (0.5mk)"
+- When \u22653 calculation rows: use markdown table format:
+  | Item | Calculation | Amount | Marks |
+  |------|-------------|--------|-------|
+  | Salary | 50 \u00d7 9 | 450 mil | 0.5mk |
+- Wrong options: ONE short sentence only, e.g. "Wrong rate: 20% used instead of 22%"
+- NEVER write verbose Step 1/Step 2 paragraphs
+- Reference at end: "Ref: Article X, Decree Y"
+- Syllabus codes: "Tested: C2d, C2n" at end
 
 ## OUTPUT FORMAT
 Return a JSON array only — no markdown fences, no preamble, no explanation.
@@ -284,10 +310,16 @@ Return a JSON array only — no markdown fences, no preamble, no explanation.
     "stem": "Full question text. For scenarios: embed all numerical data in the stem.",
     "options": ["Option A", "Option B", "Option C", "Option D"] or null for non-MCQ,
     "correctAnswer": "Exact correct answer (MCQ: exact option text; MULTIPLE: options joined by '||')",
-    "markingScheme": "Detailed marking scheme — one bullet per mark",
-    "modelAnswer": "Full model answer with complete workings and conclusions",
-    "explanation": "Why correct, why distractors wrong, calculation steps if applicable",
-    "reference": "e.g. 'Article 7, CIT Law 2008; Circular 78/2014 s.3'",
+    "optionExplanations": {
+      "A": "Wrong rate applied: used 20% instead of 22%",
+      "B": "Correct \u2014 salary = 50 \u00d7 9 = 450 mil (0.5mk); less insurance = 4.5 mil (0.5mk); net = 445.5 mil (1mk)",
+      "C": "Forgot to deduct compulsory insurance",
+      "D": "Applied annual threshold incorrectly"
+    },
+    "markingScheme": "concise marking scheme, one point per line, each line shows mark allocation",
+    "modelAnswer": "Full answer with calculations in table format if \u22653 rows",
+    "reference": "Article 9, Decree 320/2025/ND-CP; Circular 78/2014 s.3",
+    "syllabusCode": "C2d, C2n",
     "topic": "Specific topic/subtopic this question tests",
     "difficulty": "EASY" | "MEDIUM" | "HARD",
     "marks": ${config.marksPerQuestion}
