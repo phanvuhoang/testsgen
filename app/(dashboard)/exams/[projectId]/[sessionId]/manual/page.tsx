@@ -29,7 +29,7 @@ export default function ManualPage() {
 
   // Step 1
   const [selectedSectionId, setSelectedSectionId] = useState('')
-  const [selectedTopicId, setSelectedTopicId] = useState('')
+  const [selectedTopicId, setSelectedTopicId] = useState('__all__')
 
   // Step 2
   const [caseText, setCaseText] = useState('')
@@ -63,7 +63,7 @@ export default function ManualPage() {
 
   // Filter samples by selected topic
   const relevantSamples = sampleQuestions.filter(sq => {
-    if (!selectedTopicId) return true
+    if (!selectedTopicId || selectedTopicId === '__all__') return true
     return sq.topicId === selectedTopicId
   })
 
@@ -180,7 +180,7 @@ export default function ManualPage() {
               <Select value={selectedTopicId} onValueChange={setSelectedTopicId}>
                 <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Select topic..." /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="" className="text-xs">Any topic</SelectItem>
+                  <SelectItem value="__all__" className="text-xs">Any topic</SelectItem>
                   {topics.map(t => (
                     <SelectItem key={t.id} value={t.id} className="text-xs">
                       {t.parentId ? `↳ ${t.name}` : t.name}

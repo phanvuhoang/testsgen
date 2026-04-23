@@ -11,6 +11,7 @@ export default function GameshowRouterPage() {
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
+    const currentSearch = window.location.search
     fetch(`/api/gameshow/${shareCode}`)
       .then(r => r.json())
       .then(data => {
@@ -18,16 +19,16 @@ export default function GameshowRouterPage() {
           setError(data.error)
           return
         }
-        // Route to correct game type
+        // Route to correct game type, preserving ?room= and other query params
         switch (data.type) {
           case 'WWTBAM':
-            router.replace(`/gameshow/${shareCode}/wwtbam`)
+            router.replace(`/gameshow/${shareCode}/wwtbam${currentSearch}`)
             break
           case 'KAHOOT':
-            router.replace(`/gameshow/${shareCode}/kahoot`)
+            router.replace(`/gameshow/${shareCode}/kahoot${currentSearch}`)
             break
           case 'JEOPARDY':
-            router.replace(`/gameshow/${shareCode}/jeopardy`)
+            router.replace(`/gameshow/${shareCode}/jeopardy${currentSearch}`)
             break
           default:
             setError(`Unknown game type: ${data.type}`)

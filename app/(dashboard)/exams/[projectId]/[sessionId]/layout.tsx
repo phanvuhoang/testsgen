@@ -7,15 +7,15 @@ import { Button } from '@/components/ui/button'
 import { ArrowLeft } from 'lucide-react'
 
 const tabs = [
-  { label: 'Topics', href: 'topics' },
-  { label: 'Documents', href: 'documents' },
-  { label: 'Samples', href: 'samples' },
-  { label: 'Sections', href: 'sections' },
-  { label: 'Generate', href: 'generate' },
-  { label: 'Manual', href: 'manual' },
+  { label: 'Topics',        href: 'topics' },
+  { label: 'Sections',      href: 'sections' },
+  { label: 'Documents',     href: 'documents' },
+  { label: 'Samples',       href: 'samples' },
+  { label: 'Variables',     href: 'variables' },
+  { label: 'Generate',      href: 'generate' },
+  { label: 'Manual',        href: 'manual' },
   { label: 'Question Bank', href: 'questions' },
-  { label: 'Mock Exams', href: 'mock-exams' },
-  { label: 'Variables', href: 'variables' },
+  { label: 'Mock Exams',    href: 'mock-exams' },
 ]
 
 export default async function SessionLayout({

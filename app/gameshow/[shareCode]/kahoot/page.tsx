@@ -691,8 +691,8 @@ export default function KahootPage() {
           <h2 className="text-xl font-black mb-1">Room Code</h2>
           <div className="text-5xl font-black tracking-widest bg-white/20 rounded-2xl py-3 mb-3">{roomCode}</div>
           <p className="text-indigo-200 text-xs mb-1">Players scan to join:</p>
-          <p className="text-xs opacity-60 mb-2 break-all px-2">{joinUrl}</p>
-          <LobbyQR url={joinUrl}/>
+          {roomCode && <p className="text-xs opacity-60 mb-2 break-all px-2">{joinUrl}</p>}
+          {roomCode && <LobbyQR url={joinUrl}/>}
           <div className="bg-white/10 rounded-2xl p-3 mt-3 mb-3">
             <p className="text-sm text-indigo-200 mb-2">Players waiting ({onlineLobbyPlayers.length}/{config?.maxPlayers??8}):</p>
             {onlineLobbyPlayers.length===0

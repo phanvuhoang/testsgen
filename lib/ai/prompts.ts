@@ -418,15 +418,15 @@ ANSWER FORMAT RULES:
 
   FOR MCQ \u2014 format modelAnswer as an HTML table:
   <table>
-    <tr><th style="width:60px">Step</th><th>Working</th><th style="width:80px">Amount</th></tr>
-    <tr><td>1</td><td>Description of step</td><td>XXX million VND</td></tr>
-    <tr><td><b>Answer</b></td><td>Brief conclusion</td><td><b>XXX</b></td></tr>
+    <tr><th style="width:60px">Step</th><th>Working / Description</th><th style="width:100px">Amount (VND m)</th><th style="width:50px">Mark</th></tr>
+    <tr><td>1</td><td>Description of step</td><td>XXX</td><td>0.5</td></tr>
+    <tr><td><b>Answer</b></td><td>Brief conclusion</td><td><b>XXX</b></td><td><b>X</b></td></tr>
   </table>
   If pure theory (no calculation): write 2-4 sentences with regulation reference.
 
   FOR SCENARIO/ESSAY/CASE_STUDY \u2014 format as HTML with:
   - Each part (a)(b)(c) as <p><b>(a) Part title</b></p>
-  - Calculation steps as <table> (same format as above)
+  - Calculation steps as <table> with columns: Step | Working / Description | Amount (VND m) | Mark
   - Brief conclusion per part
 
   FOR SHORT_ANSWER \u2014 1-3 sentences, plain text or short HTML.

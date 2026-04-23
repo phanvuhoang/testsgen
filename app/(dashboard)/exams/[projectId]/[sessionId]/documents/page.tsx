@@ -242,9 +242,13 @@ export default function DocumentsPage() {
         }),
       })
       const data = await res.json()
-      if (!res.ok || (data.error && !data.parsed)) throw new Error(data.error || 'Parse failed')
+      if (!res.ok || (data.error && !data.count)) throw new Error(data.error || 'Parse failed')
       setParseCounts(prev => ({ ...prev, [parseDialogDocId]: data.count ?? 0 }))
-      toast({ title: `✅ Parsed ${data.count} questions`, description: data.count === 0 ? 'No questions found — try different settings' : 'View in Samples tab' })
+      if (data.count === 0) {
+        toast({ title: '0 questions found', description: data.error || `Strategy: ${data.debug?.strategy || 'unknown'}. Try: keyword="${data.debug?.keyword}", suffix="${data.debug?.suffix}", or switch to AI parse style.`, variant: 'destructive' })
+      } else {
+        toast({ title: `✅ Parsed ${data.count} questions via ${data.strategy || ''}` })
+      }
       setParseDialogDocId(null)
     } catch (e) {
       toast({ title: 'Parse failed', description: String(e), variant: 'destructive' })

@@ -36,31 +36,116 @@ async function extractText(filePath: string, isManualInput: boolean, content: st
   }
 }
 
-// Parse DOCX XML to get paragraphs with styles (proper ZIP extraction)
+// Helper: extract paragraphs from OOXML string
+function extractParagraphsFromXml(xmlContent: string): { style: string; text: string }[] {
+  const paragraphs: { style: string; text: string }[] = []
+  const paraRegex = /<w:p[ >][\s\S]*?<\/w:p>/g
+  let pm: RegExpExecArray | null
+  while ((pm = paraRegex.exec(xmlContent)) !== null) {
+    const paraXml = pm[0]
+    const pStyleMatch = paraXml.match(/<w:pStyle\s+w:val="([^"]+)"/)
+    const style = pStyleMatch ? pStyleMatch[1] : ''
+    const textMatches = Array.from(paraXml.matchAll(/<w:t(?:\s[^>]*)?>([^<]*)<\/w:t>/g))
+    const text = textMatches.map((m: RegExpMatchArray) => m[1]).join('').trim()
+    if (text) paragraphs.push({ style, text })
+  }
+  console.log(`[parseDocx] extractParagraphsFromXml: found ${paragraphs.length} paragraphs`)
+  return paragraphs
+}
+
+// Parse DOCX XML to get paragraphs with styles — multiple fallback strategies
 function parseDocxParagraphs(buffer: Buffer): { style: string; text: string }[] {
+  // Strategy 1: adm-zip proper ZIP extraction
   try {
     const AdmZip = require('adm-zip')
     const zip = new AdmZip(buffer)
-    const xmlEntry = zip.getEntry('word/document.xml')
-    if (!xmlEntry) return []
-    const xmlContent = xmlEntry.getData().toString('utf-8')
 
+    let xmlContent: string | null = null
+    const entry = zip.getEntry('word/document.xml')
+    if (entry) {
+      xmlContent = entry.getData().toString('utf-8')
+    } else {
+      const entries = zip.getEntries()
+      const docEntry = entries.find((e: any) =>
+        e.entryName.toLowerCase() === 'word/document.xml' ||
+        e.entryName.toLowerCase().endsWith('document.xml')
+      )
+      if (docEntry) xmlContent = docEntry.getData().toString('utf-8')
+    }
+
+    if (xmlContent && xmlContent.includes('<w:p')) {
+      return extractParagraphsFromXml(xmlContent)
+    }
+    console.warn('[parseDocx] adm-zip got entry but XML looks invalid, trying buffer strategy')
+  } catch (e) {
+    console.warn('[parseDocx] adm-zip failed:', String(e))
+  }
+
+  // Strategy 2: scan buffer for XML content by finding 'word/document.xml' marker
+  try {
+    const raw = buffer.toString('latin1')
+    const marker = 'word/document.xml'
+    const markerIdx = raw.indexOf(marker)
+    if (markerIdx > 0) {
+      const searchFrom = markerIdx + marker.length
+      const xmlStart = raw.indexOf('<?xml', searchFrom)
+      const wbodyStart = raw.indexOf('<w:body', searchFrom)
+      const startIdx = xmlStart > 0 && xmlStart < searchFrom + 200 ? xmlStart
+        : wbodyStart > 0 && wbodyStart < searchFrom + 500 ? wbodyStart : -1
+      if (startIdx > 0) {
+        const xmlSlice = buffer.slice(startIdx).toString('utf-8')
+        if (xmlSlice.includes('<w:p')) {
+          console.log('[parseDocx] Strategy 2 (buffer scan) succeeded')
+          return extractParagraphsFromXml(xmlSlice)
+        }
+      }
+    }
+  } catch (e) {
+    console.warn('[parseDocx] Strategy 2 failed:', String(e))
+  }
+
+  // Strategy 3: mammoth structural — get styled text via style map
+  try {
+    const mammoth = require('mammoth')
+    const result = mammoth.convertToHtmlSync({ buffer }, {
+      styleMap: [
+        "p[style-name='Heading 1'] => h1",
+        "p[style-name='Heading 2'] => h2",
+        "p[style-name='Heading 3'] => h3",
+      ]
+    })
+    const html: string = result.value
     const paragraphs: { style: string; text: string }[] = []
-    const paraRegex = /<w:p[ >][\s\S]*?<\/w:p>/g
-    let pm: RegExpExecArray | null
-    while ((pm = paraRegex.exec(xmlContent)) !== null) {
-      const paraXml = pm[0]
-      const pStyleMatch = paraXml.match(/<w:pStyle\s+w:val="([^"]+)"/)
-      const style = pStyleMatch ? pStyleMatch[1] : ''
-      const textMatches = Array.from(paraXml.matchAll(/<w:t(?:\s[^>]*)?>([^<]*)<\/w:t>/g))
-      const text = textMatches.map((m: RegExpMatchArray) => m[1]).join('').trim()
+    const tagPattern = /<(h1|h2|h3|p)[^>]*>([\s\S]*?)<\/\1>/g
+    let m: RegExpExecArray | null
+    while ((m = tagPattern.exec(html)) !== null) {
+      const tag = m[1]
+      const text = m[2].replace(/<[^>]+>/g, '').trim()
+      const style = tag === 'h1' ? 'Heading1' : tag === 'h2' ? 'Heading2' : tag === 'h3' ? 'Heading3' : ''
       if (text) paragraphs.push({ style, text })
     }
-    return paragraphs
+    if (paragraphs.length > 0) {
+      console.log(`[parseDocx] Strategy 3 (mammoth HTML) succeeded: ${paragraphs.length} paragraphs`)
+      return paragraphs
+    }
   } catch (e) {
-    console.error('[parseDocxParagraphs] error:', e)
-    return []
+    console.warn('[parseDocx] Strategy 3 (mammoth) failed:', String(e))
   }
+
+  console.warn('[parseDocx] All strategies failed, returning empty')
+  return []
+}
+
+// Extract text from a buffer (avoid re-reading file for AI fallback)
+async function extractTextFromBuffer(buffer: Buffer, filePath: string): Promise<string> {
+  if (filePath?.endsWith('.docx') || filePath?.endsWith('.doc')) {
+    try {
+      const mammoth = require('mammoth')
+      const result = await mammoth.extractRawText({ buffer })
+      return result.value ?? ''
+    } catch {}
+  }
+  return buffer.toString('utf-8')
 }
 
 // Pattern: split on Heading2 paragraphs matching "Example N:" (from examsgen)
@@ -212,60 +297,45 @@ function detectQuestionType(text: string): string {
   return 'SHORT_ANSWER'
 }
 
-// AI-based parse (fallback or explicit)
+// AI-based parse — always uses claudible for speed/reliability
 async function parseWithAI(text: string, sessionId: string, parseKeyword: string = 'Example', parseNumber: boolean = true): Promise<any[]> {
   try {
-    const patternNote = `Questions are separated by the keyword "${parseKeyword}${parseNumber ? ' <number>' : ''}:" (e.g. "${parseKeyword} 1:", "${parseKeyword} 2:").`
+    const patternNote = `Questions are separated by the pattern "${parseKeyword}${parseNumber ? ' <number>' : ''}:" e.g. "${parseKeyword} 1:", "${parseKeyword} 2:".`
 
-    // Build provider/model from env
-    let provider = process.env.AI_PROVIDER || 'deepseek'
-    let model = process.env.AI_MODEL_GENERATION || 'deepseek-reasoner'
+    const provider = 'claudible'
+    const model = process.env.CLAUDIBLE_MODEL || 'claude-haiku-4.5'
+    const apiKey = process.env.CLAUDIBLE_API_KEY || ''
+    const baseURL = process.env.CLAUDIBLE_BASE_URL || 'https://claudible.io/v1'
 
-    try {
-      const settings = await (db as any).systemSetting.findMany({
-        where: { key: { in: ['ai_provider', 'ai_model_generation'] } }
-      })
-      const map: Record<string, string> = {}
-      settings.forEach((s: any) => { map[s.key] = s.value })
-      if (map.ai_provider) provider = map.ai_provider
-      if (map.ai_model_generation) model = map.ai_model_generation
-    } catch {}
+    const prompt = `You are parsing a sample exam questions document.
+${patternNote}
+Extract ALL individual questions. For each return JSON:
+- title: string (e.g. "Example 1")
+- content: string (full question text, do NOT truncate)
+- answer: string | null (answer/solution if present)
+- questionType: "MCQ_SINGLE" | "MCQ_MULTIPLE" | "SHORT_ANSWER" | "SCENARIO" | "CASE_STUDY" | "OTHER"
+- difficulty: "EASY" | "MEDIUM" | "HARD"
 
-    const prompt = `You are parsing a sample exam questions document. ${patternNote}
-Extract ALL individual questions. For each, return:
-- title: e.g. "Example 1", "Question 3"
-- content: full question text (do NOT truncate)
-- answer: answer/explanation if present, else null
-- questionType: MCQ_SINGLE | MCQ_MULTIPLE | SHORT_ANSWER | SCENARIO | CASE_STUDY | OTHER
-- difficulty: EASY | MEDIUM | HARD
+Return ONLY a JSON array. No markdown. No explanation.
 
-Return ONLY a JSON array. No markdown.
-
-DOCUMENT:
-${text.slice(0, 50000)}`
+DOCUMENT TEXT:
+${text.slice(0, 60000)}`
 
     const OpenAI = (await import('openai')).default
-    let client: InstanceType<typeof OpenAI>
-    if (provider === 'deepseek') {
-      client = new OpenAI({ apiKey: process.env.DEEPSEEK_API_KEY || '', baseURL: 'https://api.deepseek.com/v1' })
-    } else if (provider === 'openrouter') {
-      client = new OpenAI({ apiKey: process.env.OPENROUTER_API_KEY || '', baseURL: 'https://openrouter.ai/api/v1' })
-    } else if (provider === 'claudible') {
-      client = new OpenAI({ apiKey: process.env.CLAUDIBLE_API_KEY || '', baseURL: process.env.CLAUDIBLE_BASE_URL || 'https://claudible.io/v1' })
-      model = process.env.CLAUDIBLE_MODEL || 'claude-haiku-4.5'
-    } else {
-      client = new OpenAI({ apiKey: process.env.OPENAI_API_KEY || '' })
-    }
-
+    const client = new OpenAI({ apiKey, baseURL })
     const response = await client.chat.completions.create({
       model,
       messages: [{ role: 'user', content: prompt }],
-      temperature: 0.2,
-      max_tokens: 8000,
+      temperature: 0.1,
+      max_tokens: 16000,
     })
     const raw = response.choices[0]?.message?.content || ''
+    console.log('[parseWithAI] response length:', raw.length)
     const jsonMatch = raw.match(/\[[\s\S]*\]/)
-    if (!jsonMatch) return []
+    if (!jsonMatch) {
+      console.warn('[parseWithAI] no JSON array found in response')
+      return []
+    }
     return JSON.parse(jsonMatch[0])
   } catch (e) {
     console.error('[parse AI]', e)
@@ -278,75 +348,94 @@ export async function POST(req: NextRequest, { params }: { params: { id: string;
     const body = await req.json().catch(() => ({}))
     const forceAI: boolean = body.forceAI === true || body.useAI === true
 
-    // Get document
     const doc = await (db as any).document.findUnique({ where: { id: params.docId } })
     if (!doc) return NextResponse.json({ error: 'Document not found' }, { status: 404 })
 
-    // Read parse config — body overrides doc config, doc config overrides defaults
-    const parseKeyword: string  = body.parseKeyword || (doc as any).parseKeyword || 'Example'
-    const parseStyle: string    = body.parseStyle   || (doc as any).parseStyle   || 'Heading2'
-    const parseNumber: boolean  = body.parseNumber  !== undefined ? body.parseNumber : ((doc as any).parseNumber !== false)
-    const parseSuffix: string   = body.parseSuffix  !== undefined ? body.parseSuffix : ((doc as any).parseSuffix ?? ':')
+    const parseKeyword: string = body.parseKeyword || (doc as any).parseKeyword || 'Example'
+    const parseStyle: string   = body.parseStyle   || (doc as any).parseStyle   || 'Heading2'
+    const parseNumber: boolean = body.parseNumber  !== undefined ? body.parseNumber : ((doc as any).parseNumber !== false)
+    const parseSuffix: string  = body.parseSuffix  !== undefined ? body.parseSuffix : ((doc as any).parseSuffix ?? ':')
     const escapedSuffix = parseSuffix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
     const keywordPattern = parseNumber
       ? new RegExp(`^${parseKeyword}\\s+\\d+\\s*${escapedSuffix}`, 'i')
       : new RegExp(`^${parseKeyword}\\s*${escapedSuffix}`, 'i')
 
+    console.log(`[parse] doc=${params.docId} keyword="${parseKeyword}" number=${parseNumber} suffix="${parseSuffix}" style="${parseStyle}" pattern=${keywordPattern}`)
+
     const headingStyles = parseStyle === 'Heading1' ? ['Heading1', 'heading1', '1', 'Heading 1']
       : parseStyle === 'Heading2' ? ['Heading2', 'heading2', '2', 'Heading 2', 'heading 2']
       : parseStyle === 'Heading3' ? ['Heading3', 'heading3', '3', 'Heading 3']
       : []
 
-    // Extract raw file bytes for DOCX paragraph parsing
     let docxBuffer: Buffer | null = null
-    if (!doc.isManualInput && (doc.filePath?.endsWith('.docx') || doc.filePath?.endsWith('.doc'))) {
+    if (!doc.isManualInput && doc.filePath && (doc.filePath.endsWith('.docx') || doc.filePath.endsWith('.doc'))) {
       try {
         docxBuffer = await readFile(join(process.cwd(), 'public', doc.filePath))
-      } catch {}
-    }
-
-    let rawQuestions: any[] = []
-
-    // Always try structural parse first if DOCX buffer available (unless ai style)
-    if (docxBuffer && parseStyle !== 'ai') {
-      const paragraphs = parseDocxParagraphs(docxBuffer)
-      if (parseStyle === 'numbered') {
-        rawQuestions = parseByNumberedList(paragraphs)
-      } else {
-        rawQuestions = parseByHeadingKeyword(paragraphs, headingStyles, keywordPattern, parseKeyword)
+        console.log(`[parse] loaded docx buffer: ${docxBuffer.length} bytes`)
+      } catch (e) {
+        console.warn('[parse] failed to read file:', String(e))
       }
     }
 
-    // For PDF/TXT: try text-based split if DOCX parse found nothing
+    let rawQuestions: any[] = []
+    let strategy = 'none'
+
+    // Structural parse (DOCX)
+    if (docxBuffer && parseStyle !== 'ai') {
+      const paragraphs = parseDocxParagraphs(docxBuffer)
+      console.log(`[parse] paragraphs extracted: ${paragraphs.length}`)
+      if (paragraphs.length > 0) {
+        console.log('[parse] sample paragraphs:', JSON.stringify(paragraphs.slice(0, 5)))
+      }
+      if (parseStyle === 'numbered') {
+        rawQuestions = parseByNumberedList(paragraphs)
+        strategy = 'numbered'
+      } else {
+        rawQuestions = parseByHeadingKeyword(paragraphs, headingStyles, keywordPattern, parseKeyword)
+        strategy = `heading(${parseStyle})+keyword(${keywordPattern})`
+      }
+      console.log(`[parse] structural result: ${rawQuestions.length} questions via ${strategy}`)
+    }
+
+    // Text-based fallback for PDF/TXT
     if (rawQuestions.length === 0 && !docxBuffer && parseStyle !== 'ai') {
       const text = await extractText(doc.filePath, doc.isManualInput, doc.content)
       if (text && text.trim().length >= 10) {
         rawQuestions = parseByTextSplit(text, keywordPattern)
+        strategy = 'text-split'
+        console.log(`[parse] text-split result: ${rawQuestions.length} questions`)
       }
     }
 
-    // If structural parse found nothing (or ai style or forceAI), use AI
+    // AI fallback — always if structural found 0, or forceAI/ai style
     if (rawQuestions.length === 0 || parseStyle === 'ai' || forceAI) {
-      const text = await extractText(doc.filePath, doc.isManualInput, doc.content)
+      console.log('[parse] falling back to AI parse...')
+      const text = docxBuffer
+        ? await extractTextFromBuffer(docxBuffer, doc.filePath)
+        : await extractText(doc.filePath, doc.isManualInput, doc.content)
       if (!text || text.trim().length < 10) {
-        return NextResponse.json({ error: 'No text content found in document', parsed: [], count: 0 })
+        return NextResponse.json({
+          error: 'Could not extract text from document. Is the file corrupted?',
+          parsed: [], count: 0, debug: { strategy, paragraphs: 0 }
+        })
       }
+      console.log(`[parse] AI parse on ${text.length} chars`)
       rawQuestions = await parseWithAI(text, params.id, parseKeyword, parseNumber)
+      strategy = 'AI'
+      console.log(`[parse] AI result: ${rawQuestions.length} questions`)
     }
 
     if (rawQuestions.length === 0) {
       return NextResponse.json({
-        error: 'No questions could be extracted. Try a different parse pattern in Project Settings.',
-        parsed: [],
-        count: 0,
+        error: `No questions found. Pattern tried: "${parseKeyword}${parseNumber ? ' <N>' : ''}${parseSuffix}". Try: (1) change keyword, (2) use style "None", (3) try AI parse mode.`,
+        parsed: [], count: 0,
+        debug: { strategy, keyword: parseKeyword, suffix: parseSuffix, number: parseNumber }
       })
     }
 
-    // Delete existing parsed questions for this document
+    // Delete existing + save new
     await (db as any).parsedQuestion.deleteMany({ where: { documentId: params.docId } })
-
-    // Save
     const saved: any[] = []
     for (let i = 0; i < rawQuestions.length; i++) {
       const q = rawQuestions[i]
@@ -374,7 +463,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string;
       }
     }
 
-    return NextResponse.json({ parsed: saved, count: saved.length })
+    return NextResponse.json({ parsed: saved, count: saved.length, strategy })
   } catch (e) {
     console.error('[parse questions]', e)
     return NextResponse.json({ error: String(e) }, { status: 500 })

@@ -44,6 +44,19 @@ type Question = {
   createdAt: string
 }
 
+function resolveModelLabel(generatedBy: string | null): string {
+  if (!generatedBy) return ''
+  const labelMap: Record<string, string> = {
+    'claudible:1': 'Claudible (default)',
+    'claudible:2': 'Claudible (model2)',
+    'anthropic:1': 'Anthropic (model1)',
+    'anthropic:2': 'Anthropic (model2)',
+    'deepseek:deepseek-reasoner': 'DeepSeek Reasoner',
+  }
+  if (labelMap[generatedBy]) return labelMap[generatedBy]
+  return generatedBy.split(':').pop() || generatedBy
+}
+
 function formatQuestionTime(dateStr: string): string {
   if (!dateStr) return ''
   const date = new Date(dateStr)
@@ -800,7 +813,7 @@ export default function ExamQuestionsPage() {
                       )}
                       {q.generatedBy && (
                         <span className="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded font-mono">
-                          {q.generatedBy.split(':').pop()}
+                          {resolveModelLabel(q.generatedBy)}
                         </span>
                       )}
                       <span className="text-xs text-gray-400">{formatQuestionTime(q.createdAt)}</span>
