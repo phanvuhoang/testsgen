@@ -183,6 +183,13 @@ export async function POST(_req: NextRequest, { params }: { params: { id: string
           return (relevantDocsByType[key] || []).join('\n\n---\n\n').slice(0, cap)
         }
 
+        const sourceDocuments = {
+          regulations: relevantDocs.filter((d: any) => d.fileType === 'TAX_REGULATIONS').map((d: any) => d.fileName),
+          syllabus:    relevantDocs.filter((d: any) => d.fileType === 'SYLLABUS').map((d: any) => d.fileName),
+          samples:     relevantDocs.filter((d: any) => d.fileType === 'SAMPLE_QUESTIONS').map((d: any) => d.fileName),
+          rates:       relevantDocs.filter((d: any) => d.fileType === 'RATES_TARIFF').map((d: any) => d.fileName),
+        }
+
         const generatorConfig = {
           sectionName: sec.name,
           questionType: sec.questionType,
@@ -213,6 +220,7 @@ export async function POST(_req: NextRequest, { params }: { params: { id: string
           questionTypes: sec.questionTypes || undefined,
           topicBreakdown: sec.topicBreakdown || undefined,
           referenceQuestionId: sectionConfig.referenceQuestionId,
+          sourceDocuments,
         }
 
         for await (const q of generateExamQuestions(generatorConfig, modelId)) {
@@ -241,7 +249,13 @@ export async function POST(_req: NextRequest, { params }: { params: { id: string
                 // New fields from examsgen-style output
                 optionExplanations: q.optionExplanations ? q.optionExplanations as any : undefined,
                 syllabusCode: q.syllabusCode ? String(q.syllabusCode) : undefined,
-                regulationRefs: q.reference ? String(q.reference) : (q.regulationRefs ? String(q.regulationRefs) : undefined),
+                regulationRefs: (() => {
+                  const refParts: string[] = []
+                  if (q.reference) refParts.push(String(q.reference))
+                  else if (q.regulationRefs) refParts.push(String(q.regulationRefs))
+                  if (q.sampleRef) refParts.push(`Sample ref: ${String(q.sampleRef)}`)
+                  return refParts.length > 0 ? refParts.join(' | ') : undefined
+                })(),
               },
             })
             progress++

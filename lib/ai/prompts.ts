@@ -47,6 +47,12 @@ export type ExamGenerationConfig = {
   sampleQuestions?: string       // Sample questions & answers for style reference
   ratesTariff?: string           // Rates & tariff tables
   otherContext?: string          // Other supporting documents
+  sourceDocuments?: {            // List of uploaded document names for citation
+    regulations: string[]
+    syllabus: string[]
+    samples: string[]
+    rates: string[]
+  }
 
   // ── Legacy breakdown (kept for backward compat) ──
   questionTypes?: string         // JSON: [{type, count, marksEach}]
@@ -182,29 +188,29 @@ export function buildExamQuestionPrompt(config: ExamGenerationConfig): string {
     if (config.syllabusCode) {
       syllabusNote += `\nFOCUS ONLY on syllabus code(s): ${config.syllabusCode}. Ignore other sections.`
     }
-    contextParts.push(`=== SYLLABUS ===\n${syllabusNote}\n${config.syllabus.slice(0, 15000)}`)
+    contextParts.push(`=== SYLLABUS ===\n${syllabusNote}\n${config.syllabus}`)
   }
 
   if (config.regulations) {
-    contextParts.push(`=== REGULATIONS / TAX LAW ===\nBase questions on these regulations. Use specific article numbers, percentages, thresholds, and rules.\nDO NOT hallucinate figures — only use numbers explicitly stated below.\n${config.regulations.slice(0, 20000)}`)
+    contextParts.push(`=== REGULATIONS / TAX LAW ===\nBase questions on these regulations. Use specific article numbers, percentages, thresholds, and rules.\nDO NOT hallucinate figures — only use numbers explicitly stated below.\n${config.regulations}`)
   }
 
   if (config.studyMaterial && config.studyMaterial !== config.regulations) {
-    contextParts.push(`=== STUDY MATERIAL ===\n${config.studyMaterial.slice(0, 10000)}`)
+    contextParts.push(`=== STUDY MATERIAL ===\n${config.studyMaterial}`)
   }
 
   if (config.ratesTariff) {
-    contextParts.push(`=== RATES & TARIFF TABLES ===\nFor calculation questions, use ONLY the rates and thresholds in this table.\n${config.ratesTariff.slice(0, 8000)}`)
+    contextParts.push(`=== RATES & TARIFF TABLES ===\nFor calculation questions, use ONLY the rates and thresholds in this table.\n${config.ratesTariff}`)
   }
 
   // Sample questions: prefer filtered (by selected topic) over full pool
   const sampleContent = config.sampleQuestionsFiltered || config.sampleQuestions
   if (sampleContent) {
-    contextParts.push(`=== SAMPLE QUESTIONS & ANSWERS (STYLE REFERENCE) ===\nUse these as style reference — same format, depth, language, and difficulty.\nDO NOT copy questions verbatim. Generate NEW questions in the same style.\n${sampleContent.slice(0, 12000)}`)
+    contextParts.push(`=== SAMPLE QUESTIONS & ANSWERS (STYLE REFERENCE) ===\nUse these as style reference — same format, depth, language, and difficulty.\nDO NOT copy questions verbatim. Generate NEW questions in the same style.\n${sampleContent}`)
   }
 
   if (config.otherContext) {
-    contextParts.push(`=== ADDITIONAL CONTEXT ===\n${config.otherContext.slice(0, 8000)}`)
+    contextParts.push(`=== ADDITIONAL CONTEXT ===\n${config.otherContext}`)
   }
 
   if (config.documentContent && contextParts.length === 0) {
@@ -212,6 +218,20 @@ export function buildExamQuestionPrompt(config: ExamGenerationConfig): string {
   }
 
   const hasDocuments = contextParts.length > 0
+
+  // ── Source document names block ───────────────────────────────────────────
+  let sourceDocumentsBlock = ''
+  if (config.sourceDocuments) {
+    const sd = config.sourceDocuments
+    const parts: string[] = []
+    if (sd.regulations?.length)  parts.push(`Regulations: ${sd.regulations.join(', ')}`)
+    if (sd.syllabus?.length)     parts.push(`Syllabus: ${sd.syllabus.join(', ')}`)
+    if (sd.samples?.length)      parts.push(`Sample questions: ${sd.samples.join(', ')}`)
+    if (sd.rates?.length)        parts.push(`Rates/Tariff: ${sd.rates.join(', ')}`)
+    if (parts.length > 0) {
+      sourceDocumentsBlock = `## UPLOADED DOCUMENTS FOR THIS EXAM SESSION\n${parts.join('\n')}\n(Use these document names when citing sources in your output)`
+    }
+  }
 
   // ── Build specification section ───────────────────────────────────────────
   // Question type spec
@@ -261,17 +281,31 @@ export function buildExamQuestionPrompt(config: ExamGenerationConfig): string {
 
   // ── Anti-hallucination block ──────────────────────────────────────────────
   const antiHallucinationRules = hasDocuments ? `
-## CRITICAL ANTI-HALLUCINATION RULES — READ FIRST
-1. ONLY cite regulations, laws, decrees, circulars, and articles that appear VERBATIM in the REGULATIONS / TAX LAW section provided below.
-2. If you need to reference a regulation but cannot find its exact name/number in the provided documents, write "See uploaded regulations" instead of inventing a name.
-3. NEVER invent law names, article numbers, decree numbers, or circular numbers. If the regulation content is present but the formal citation is unclear, use a descriptive reference like "per the tax regulations provided".
-4. ALL numerical rates, thresholds, percentages, and deadlines in your questions MUST come directly from the provided documents. Do NOT use your training data for these figures.
-5. If no regulations document is provided: do NOT write questions that require citing specific law articles. Write conceptual or calculation-based questions using the rates provided in the Rates & Tariff section only.
-6. SAMPLE QUESTIONS are for STYLE REFERENCE only. Study their format, question depth, option structure, and explanation style — but do NOT copy their content or extract regulation names from them.` : '';
+## CRITICAL DOCUMENT RULES — READ FIRST
+1. ALL questions MUST be based on the provided documents (Regulations, Syllabus, Sample Questions).
+   If documents are provided, DO NOT draw from general knowledge or training data.
+2. REGULATIONS: Use the specific article numbers, rates, thresholds, and rules that appear in
+   the REGULATIONS / TAX LAW section. When citing, name the document AND article, e.g.
+   "Article 9, Decree 320/2025/ND-CP" — extract the name from the document filename or header.
+3. SYLLABUS CODES: Tag every question with the exact syllabus code(s) from the SYLLABUS document,
+   e.g. "C2d", "A1.3". Do not invent codes not in the syllabus.
+4. SAMPLE QUESTIONS: Study the sample questions deeply — replicate their TOPIC COVERAGE,
+   SCENARIO STYLE, CALCULATION DEPTH, and OPTION STRUCTURE. The samples show exactly what
+   kind of questions are expected. Match their difficulty and approach closely.
+5. SOURCE CITATION in output: Every question must include:
+   - "syllabusCode": exact code(s) from syllabus document (e.g. "C2d, C2n")
+   - "reference": specific article + document name (e.g. "Article 9(1), Decree 320/2025/ND-CP")
+     If article not found: cite document name only, e.g. "Decree 320/2025/ND-CP"
+     NEVER write "See uploaded regulations" — always cite the document name at minimum.
+   - "sampleRef": name of the sample file whose style was referenced (e.g. "Sample_MCQ_CIT_2024.pdf")
+6. If NO documents are provided for a given type (no regulations, no samples), you may draw
+   from general knowledge — but state clearly in the reference field that no document was provided.` : '';
 
   return `${personaLine}
 
 ${antiHallucinationRules}
+
+${sourceDocumentsBlock}
 
 ${languageInstruction}${calcMarksInstruction}
 ## GENERATION PARAMETERS
@@ -334,8 +368,9 @@ Return a JSON array only — no markdown fences, no preamble, no explanation.
     },
     "markingScheme": "<table><tr><th>Item</th><th>Marks</th></tr><tr><td>Correct identification</td><td>1mk</td></tr></table>",
     "modelAnswer": "Full answer with HTML table for calculations if \u22653 rows",
-    "reference": "Only cite if regulation name appears verbatim in the provided documents. Otherwise: See uploaded regulations.",
-    "syllabusCode": "C2d, C2n",
+    "reference": "Article X(Y), Decree 320/2025/ND-CP — cite specific article and document name. NEVER write 'See uploaded regulations'.",
+    "syllabusCode": "C2d, C2n — exact codes from the provided syllabus document",
+    "sampleRef": "Sample_MCQ_CIT_2024.pdf — name of sample file whose style was followed",
     "topic": "Specific topic/subtopic this question tests",
     "difficulty": "EASY" | "MEDIUM" | "HARD",
     "marks": ${config.marksPerQuestion}

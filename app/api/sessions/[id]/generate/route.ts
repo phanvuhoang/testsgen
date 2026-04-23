@@ -84,6 +84,13 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     return (docsByType[key] || []).join('\n\n---\n\n').slice(0, cap)
   }
 
+  const sourceDocuments = {
+    regulations: docs.filter((d: any) => d.fileType === 'TAX_REGULATIONS').map((d: any) => d.fileName),
+    syllabus:    docs.filter((d: any) => d.fileType === 'SYLLABUS').map((d: any) => d.fileName),
+    samples:     docs.filter((d: any) => d.fileType === 'SAMPLE_QUESTIONS').map((d: any) => d.fileName),
+    rates:       docs.filter((d: any) => d.fileType === 'RATES_TARIFF').map((d: any) => d.fileName),
+  }
+
   // Get section details
   const sectionIds = sectionConfigs.map((s: { sectionId: string }) => s.sectionId)
   const sections = await db.examSection.findMany({ where: { id: { in: sectionIds } } })
@@ -120,6 +127,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
           // Flexible question types from section:
           questionTypes: (sec as any).questionTypes || undefined,
           topicBreakdown: (sec as any).topicBreakdown || undefined,
+          sourceDocuments,
         }
 
         for await (const q of generateExamQuestions(generatorConfig, modelId)) {
