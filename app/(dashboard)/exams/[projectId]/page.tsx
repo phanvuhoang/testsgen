@@ -9,7 +9,6 @@ import { Plus, ArrowLeft, Calendar, BookOpen, FileText } from 'lucide-react'
 import { formatDate } from '@/lib/utils'
 import { CopySessionButton } from '@/components/copy-session-dialog'
 import { SessionRenameButton, SessionDeleteButton } from '@/components/session-actions'
-import { ParsePatternSetting } from '@/components/parse-pattern-setting'
 
 export default async function ProjectPage({ params }: { params: { projectId: string } }) {
   const session = await auth()
@@ -57,10 +56,6 @@ export default async function ProjectPage({ params }: { params: { projectId: str
             New Session
           </Link>
         </Button>
-      </div>
-
-      <div className="mb-4 p-4 bg-gray-50 rounded-lg border">
-        <ParsePatternSetting projectId={project.id} initial={project.parsePattern || 'HEADING2_EXAMPLE'} />
       </div>
 
       {project.sessions.length === 0 ? (

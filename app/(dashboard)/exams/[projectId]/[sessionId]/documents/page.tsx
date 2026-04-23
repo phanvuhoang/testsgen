@@ -98,9 +98,13 @@ export default function DocumentsPage() {
   const [editTopicPopoverOpen, setEditTopicPopoverOpen] = useState(false)
   const [editSectionPopoverOpen, setEditSectionPopoverOpen] = useState(false)
 
-  // Parse state
-  const [parsingDocId, setParsingDocId] = useState<string | null>(null)
-  const [parsedResult, setParsedResult] = useState<{docId: string; count: number} | null>(null)
+  // Parse dialog state
+  const [parseDialogDocId, setParseDialogDocId] = useState<string | null>(null)
+  const [dialogParseKeyword, setDialogParseKeyword] = useState('Example')
+  const [dialogParseNumber, setDialogParseNumber] = useState(true)
+  const [dialogParseStyle, setDialogParseStyle] = useState('Heading2')
+  const [isParsing, setIsParsing] = useState(false)
+  const [parseCounts, setParseCounts] = useState<Record<string, number>>({})
 
   // Filter state
   const [filterType, setFilterType] = useState<string>('ALL')
@@ -202,28 +206,45 @@ export default function DocumentsPage() {
     finally { setIsSavingTag(false) }
   }
 
-  const handleParseDocument = async (docId: string) => {
-    setParsingDocId(docId)
+  const openParseDialog = (doc: Document) => {
+    setParseDialogDocId(doc.id)
+    setDialogParseKeyword(doc.parseKeyword || 'Example')
+    setDialogParseNumber(doc.parseNumber ?? true)
+    setDialogParseStyle(doc.parseStyle || 'Heading2')
+  }
+
+  const handleParseConfirm = async () => {
+    if (!parseDialogDocId) return
+    setIsParsing(true)
     try {
-      const doc = docs.find(d => d.id === docId)
-      const res = await fetch(`/api/sessions/${params.sessionId}/documents/${docId}/parse`, {
+      await fetch(`/api/sessions/${params.sessionId}/documents/${parseDialogDocId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          parseKeyword: dialogParseKeyword,
+          parseNumber: dialogParseNumber,
+          parseStyle: dialogParseStyle,
+        }),
+      })
+      const res = await fetch(`/api/sessions/${params.sessionId}/documents/${parseDialogDocId}/parse`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           useAI: true,
-          parseKeyword: doc?.parseKeyword || undefined,
-          parseStyle: doc?.parseStyle || undefined,
-          parseNumber: doc?.parseNumber ?? true,
+          parseKeyword: dialogParseKeyword,
+          parseNumber: dialogParseNumber,
+          parseStyle: dialogParseStyle,
         }),
       })
       const data = await res.json()
-      if (data.error && !data.parsed) throw new Error(data.error)
-      setParsedResult({ docId, count: data.count ?? 0 })
-      toast({ title: `Parsed ${data.count} questions`, description: 'View them in the Samples tab' })
+      if (!res.ok || (data.error && !data.parsed)) throw new Error(data.error || 'Parse failed')
+      setParseCounts(prev => ({ ...prev, [parseDialogDocId]: data.count ?? 0 }))
+      toast({ title: `✅ Parsed ${data.count} questions`, description: data.count === 0 ? 'No questions found — try different settings' : 'View in Samples tab' })
+      setParseDialogDocId(null)
     } catch (e) {
       toast({ title: 'Parse failed', description: String(e), variant: 'destructive' })
     } finally {
-      setParsingDocId(null)
+      setIsParsing(false)
     }
   }
 
@@ -386,6 +407,63 @@ export default function DocumentsPage() {
         </div>
       )}
 
+      {/* Parse Dialog */}
+      <Dialog open={!!parseDialogDocId} onOpenChange={v => !v && setParseDialogDocId(null)}>
+        <DialogContent className="max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Parse Document into Questions</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-3 py-2">
+            <div className="space-y-1">
+              <Label className="text-xs font-semibold">Question start keyword</Label>
+              <Input
+                value={dialogParseKeyword}
+                onChange={e => setDialogParseKeyword(e.target.value)}
+                placeholder="Example"
+                className="h-8 text-xs"
+              />
+              <p className="text-xs text-gray-400">e.g. "Example", "Question", "Exercise", "Câu"</p>
+            </div>
+            <div className="flex items-center gap-2">
+              <Checkbox
+                id="dialogParseNumber"
+                checked={dialogParseNumber}
+                onCheckedChange={v => setDialogParseNumber(!!v)}
+              />
+              <Label htmlFor="dialogParseNumber" className="text-xs cursor-pointer">
+                Followed by a number (e.g. "Example 1")
+              </Label>
+            </div>
+            <div className="space-y-1">
+              <Label className="text-xs font-semibold">DOCX heading style</Label>
+              <Select value={dialogParseStyle || 'none'} onValueChange={v => setDialogParseStyle(v === 'none' ? '' : v)}>
+                <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">None (keyword match only)</SelectItem>
+                  <SelectItem value="Heading1">Heading 1</SelectItem>
+                  <SelectItem value="Heading2">Heading 2</SelectItem>
+                  <SelectItem value="Heading3">Heading 3</SelectItem>
+                  <SelectItem value="numbered">Numbered list (1. 2. 3.)</SelectItem>
+                  <SelectItem value="ai">AI parse only (slowest, most accurate)</SelectItem>
+                </SelectContent>
+              </Select>
+              <p className="text-xs text-gray-400">For PDF/TXT, heading style is ignored — keyword matching is used.</p>
+            </div>
+            {(parseCounts[parseDialogDocId ?? ''] ?? 0) > 0 && (
+              <p className="text-xs text-amber-600 bg-amber-50 p-2 rounded border border-amber-200">
+                ⚠️ This will replace {parseCounts[parseDialogDocId ?? '']} previously parsed questions.
+              </p>
+            )}
+          </div>
+          <div className="flex gap-2 justify-end">
+            <Button variant="outline" size="sm" onClick={() => setParseDialogDocId(null)}>Cancel</Button>
+            <Button size="sm" className="bg-purple-600 hover:bg-purple-700 text-white" onClick={handleParseConfirm} disabled={isParsing}>
+              {isParsing ? <><Loader2 className="h-3 w-3 animate-spin mr-1" />Parsing...</> : 'Parse Now'}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
       {isLoading ? (
         <div className="space-y-3">
           {Array.from({ length: 3 }).map((_, i) => <Skeleton key={i} className="h-16 w-full" />)}
@@ -439,18 +517,22 @@ export default function DocumentsPage() {
                   </div>
                   <div className="flex gap-1 shrink-0">
                     {doc.fileType === 'SAMPLE_QUESTIONS' && (
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8 text-purple-500 hover:text-purple-700"
-                        title="Parse into individual questions"
-                        onClick={() => handleParseDocument(doc.id)}
-                      >
-                        {parsingDocId === doc.id
-                          ? <Loader2 className="h-4 w-4 animate-spin text-purple-500" />
-                          : <Puzzle className="h-4 w-4" />
-                        }
-                      </Button>
+                      <div className="relative">
+                        <Button
+                          variant="ghost"
+                          size="icon"
+                          className="h-8 w-8 text-gray-400 hover:text-purple-600"
+                          title={parseCounts[doc.id] ? `Re-parse (${parseCounts[doc.id]} parsed)` : 'Parse into questions'}
+                          onClick={() => openParseDialog(doc)}
+                        >
+                          <Puzzle className="h-4 w-4" />
+                        </Button>
+                        {parseCounts[doc.id] > 0 && (
+                          <span className="absolute -top-1 -right-1 bg-purple-500 text-white text-[9px] rounded-full w-4 h-4 flex items-center justify-center pointer-events-none">
+                            {parseCounts[doc.id] > 99 ? '99+' : parseCounts[doc.id]}
+                          </span>
+                        )}
+                      </div>
                     )}
                     <Button
                       variant="ghost"

@@ -142,6 +142,10 @@ export default function QuizQuestionsPage() {
   // Import from Excel state
   const [isImporting, setIsImporting] = useState(false)
 
+  // Bulk select state
+  const [bulkSelectedIds, setBulkSelectedIds] = useState<Set<string>>(new Set())
+  const [isBulkDeleting, setIsBulkDeleting] = useState(false)
+
   // Import from Quiz state
   type QuizSetSummary = { id: string; title: string; questionCount: number }
   type QuizQuestionSummary = { id: string; stem: string; questionType: string; difficulty: string; points: number }
@@ -231,6 +235,43 @@ export default function QuizQuestionsPage() {
       toast({ title: 'Question deleted' })
     } catch {
       toast({ title: 'Failed to delete', variant: 'destructive' })
+    }
+  }
+
+  const toggleBulkSelect = (id: string) => {
+    setBulkSelectedIds(prev => {
+      const next = new Set(prev)
+      next.has(id) ? next.delete(id) : next.add(id)
+      return next
+    })
+  }
+
+  const toggleBulkSelectAll = () => {
+    if (bulkSelectedIds.size === filtered.length) {
+      setBulkSelectedIds(new Set())
+    } else {
+      setBulkSelectedIds(new Set(filtered.map(q => q.id)))
+    }
+  }
+
+  const handleBulkDelete = async () => {
+    if (bulkSelectedIds.size === 0) return
+    if (!confirm(`Delete ${bulkSelectedIds.size} questions?`)) return
+    setIsBulkDeleting(true)
+    try {
+      await Promise.all(
+        Array.from(bulkSelectedIds).map(id =>
+          fetch(`/api/quiz-sets/${params.quizId}/questions/${id}`, { method: 'DELETE' })
+        )
+      )
+      const count = bulkSelectedIds.size
+      setQuestions(prev => prev.filter(q => !bulkSelectedIds.has(q.id)))
+      setBulkSelectedIds(new Set())
+      toast({ title: `Deleted ${count} questions` })
+    } catch {
+      toast({ title: 'Delete failed', variant: 'destructive' })
+    } finally {
+      setIsBulkDeleting(false)
     }
   }
 
@@ -1532,6 +1573,29 @@ export default function QuizQuestionsPage() {
         </div>
       ) : (
         <div className="space-y-2">
+          {/* Bulk action bar */}
+          <div className="flex items-center gap-3 py-2">
+            <Checkbox
+              checked={filtered.length > 0 && bulkSelectedIds.size === filtered.length}
+              onCheckedChange={toggleBulkSelectAll}
+            />
+            <span className="text-xs text-gray-500">
+              {bulkSelectedIds.size > 0 ? `${bulkSelectedIds.size} selected` : 'Select all'}
+            </span>
+            {bulkSelectedIds.size > 0 && (
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7 text-xs text-red-600 border-red-200 hover:bg-red-50"
+                onClick={handleBulkDelete}
+                disabled={isBulkDeleting}
+              >
+                {isBulkDeleting ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <Trash2 className="h-3 w-3 mr-1" />}
+                Delete {bulkSelectedIds.size}
+              </Button>
+            )}
+          </div>
+
           {filtered.map((q, index) => {
             // Find the original index (sort order number)
             const questionNumber = (q.sortOrder ?? 0) + 1
@@ -1543,6 +1607,13 @@ export default function QuizQuestionsPage() {
                   onClick={() => setExpandedId(expandedId === q.id ? null : q.id)}
                 >
                   <div className="flex items-start gap-3 flex-1 min-w-0">
+                    {/* Bulk select checkbox */}
+                    <Checkbox
+                      checked={bulkSelectedIds.has(q.id)}
+                      onCheckedChange={() => toggleBulkSelect(q.id)}
+                      onClick={e => e.stopPropagation()}
+                      className="shrink-0 mt-0.5"
+                    />
                     {/* Question number badge */}
                     <span className="shrink-0 mt-0.5 bg-gray-100 text-gray-700 text-xs font-bold rounded px-1.5 py-0.5 min-w-[2rem] text-center">
                       #{questionNumber}

@@ -54,7 +54,7 @@ export function getAvailableModels(): AIModelChoice[] {
     },
     {
       id: 'claudible:claude-haiku-4.5',
-      label: 'Claudible Haiku 4.5',
+      label: `Claudible (${process.env.CLAUDIBLE_MODEL || 'claude-haiku-4.5'})`,
       provider: 'claudible',
       model: process.env.CLAUDIBLE_MODEL || 'claude-haiku-4.5',
     },
@@ -65,7 +65,12 @@ export function getAvailableModels(): AIModelChoice[] {
 export function parseModelId(modelId: string): { provider: string; model: string } {
   const idx = modelId.indexOf(':')
   if (idx === -1) return { provider: 'deepseek', model: modelId }
-  return { provider: modelId.slice(0, idx), model: modelId.slice(idx + 1) }
+  const provider = modelId.slice(0, idx)
+  const modelFromId = modelId.slice(idx + 1)
+  if (provider === 'claudible') {
+    return { provider: 'claudible', model: process.env.CLAUDIBLE_MODEL || modelFromId }
+  }
+  return { provider, model: modelFromId }
 }
 
 // ─── Settings (fallback from DB / env) ────────────────────────────────────────

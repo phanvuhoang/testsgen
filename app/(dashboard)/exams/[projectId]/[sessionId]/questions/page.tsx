@@ -572,12 +572,14 @@ export default function ExamQuestionsPage() {
           </div>
         )}
 
-        {/* Model Answer */}
+        {/* Worked Solution */}
         {q.modelAnswer && (
-          <div className="p-3 bg-gray-50 border border-gray-200 rounded">
-            <p className="text-xs font-semibold mb-2 text-gray-700">Model Answer</p>
+          <div className="p-3 bg-amber-50 border border-amber-100 rounded">
+            <p className="text-xs font-semibold mb-2 text-amber-900 flex items-center gap-1">
+              <BookOpen className="h-3 w-3" />Worked Solution
+            </p>
             <div
-              className="text-xs [&_table]:border-collapse [&_table]:w-full [&_th]:border [&_th]:border-gray-300 [&_th]:bg-gray-100 [&_th]:px-2 [&_th]:py-1 [&_td]:border [&_td]:border-gray-200 [&_td]:px-2 [&_td]:py-1"
+              className="text-amber-900 text-xs [&_table]:border-collapse [&_table]:w-full [&_th]:border [&_th]:border-amber-200 [&_th]:bg-amber-100 [&_th]:px-2 [&_th]:py-1 [&_td]:border [&_td]:border-amber-100 [&_td]:px-2 [&_td]:py-1"
               dangerouslySetInnerHTML={{ __html: renderAnswerContent(q.modelAnswer) }}
             />
           </div>
@@ -786,7 +788,9 @@ export default function ExamQuestionsPage() {
                   >
                     <div className="flex items-start gap-2">
                       <span className="text-xs text-gray-400 shrink-0 mt-0.5">Q{qIdx + 1}</span>
-                      <p className="text-sm font-medium line-clamp-2">{q.stem}</p>
+                      <p className="text-sm font-medium line-clamp-2">
+                        {q.stem.replace(/^Case:[\s\S]*?Question:\s*/i, '').trim() || q.stem}
+                      </p>
                     </div>
                     <div className="flex gap-2 mt-1 flex-wrap pl-5">
                       <span className="text-xs text-gray-400">{q.section?.name}</span>
@@ -852,7 +856,29 @@ export default function ExamQuestionsPage() {
                   ) : (
                     <div className="space-y-3 text-sm">
                       {/* Full stem */}
-                      <p className="text-sm whitespace-pre-wrap">{q.stem}</p>
+                      <div className="text-sm whitespace-pre-line">
+                        {q.stem.split('\n').map((line, i) => {
+                          const caseMatch = line.match(/^(Case:\s*)(.*)/i)
+                          const questionMatch = line.match(/^(Question:\s*)(.*)/i)
+                          if (caseMatch) {
+                            return (
+                              <p key={i} className="mb-2">
+                                <span className="font-semibold text-gray-500 text-xs uppercase tracking-wide">Case: </span>
+                                <span>{caseMatch[2]}</span>
+                              </p>
+                            )
+                          }
+                          if (questionMatch) {
+                            return (
+                              <p key={i} className="mt-2 font-semibold">
+                                <span className="text-[#028a39] font-bold">Question: </span>
+                                <span className="font-bold">{questionMatch[2]}</span>
+                              </p>
+                            )
+                          }
+                          return <p key={i}>{line || ' '}</p>
+                        })}
+                      </div>
 
                       {/* Show Answer toggle */}
                       <button

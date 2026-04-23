@@ -315,6 +315,14 @@ ${config.vndUnit === 'million' || !config.vndUnit
     : `You are a Senior Professional Examiner with 30+ years of experience setting professional-level exam questions.`
 
   // ── Anti-hallucination block ──────────────────────────────────────────────
+  const vndEnforcementRule = (config.vndUnit && config.vndUnit !== 'vnd')
+    ? `\n## CRITICAL: CURRENCY FORMAT\nALL monetary amounts in VND MUST be expressed in ${vndUnitLabel}.\nNEVER write raw VND figures like "1,000,000,000 VND" or "VND 500,000,000".\n${
+        config.vndUnit === 'million'
+          ? 'CORRECT: "500 million VND" or "VND 500m" or just "500" (context clear). WRONG: "500,000,000 VND".'
+          : 'CORRECT: "500,000 (thousand VND)". WRONG: "500,000,000 VND".'
+      }\n`
+    : ''
+
   const antiHallucinationRules = hasDocuments ? `
 ## CRITICAL DOCUMENT RULES — READ FIRST
 1. ALL questions MUST be based on the provided documents (Regulations, Syllabus, Sample Questions).
@@ -339,7 +347,7 @@ ${config.vndUnit === 'million' || !config.vndUnit
   return `${personaLine}
 
 ${antiHallucinationRules}
-
+${vndEnforcementRule}
 ${sourceDocumentsBlock}
 
 ${languageInstruction}${dateInstruction}${vndUnitInstruction}${markAllocationRule}${calcMarksInstruction}
@@ -374,7 +382,11 @@ ${config.extraInstructions ? `Global instructions: ${config.extraInstructions}\n
 7. Each question MUST include:
    - Full stem with all data needed to answer (no external lookup required)
    - optionExplanations (MCQ only): correct option shows brief calc + regulation ref; wrong options ONE sentence each
-   - modelAnswer (non-MCQ only): brief step-by-step, HTML table only if \u22653 calc rows; null for MCQ
+   - modelAnswer: REQUIRED for ALL question types (including MCQ).
+     MCQ: show worked solution for correct answer (e.g. "Tax = 500m \u00d7 20% = 100m per Art.10, Decree 320/2025"). Keep concise \u2014 3-6 lines.
+     SCENARIO/ESSAY: full multi-part solution with calc tables where needed.
+     SHORT_ANSWER: concise 1-3 sentence answer.
+     Format: plain text or HTML \u2014 use <table> only if \u22653 calculation rows. NEVER null.
    - syllabusCode: exact codes from the syllabus document
    - reference: specific article + document name
    - DO NOT include a markingScheme field \u2014 it is not required
@@ -397,7 +409,7 @@ ANSWER FORMAT RULES:
 - optionExplanations correct option: brief inline calc + reg ref, e.g. "Tax = 500m \u00d7 20% = 100m (Art. 10, Decree 320/2025)"
 - optionExplanations wrong options: ONE sentence explaining WHY wrong, e.g. "Incorrect rate: 22% applies to enterprises with revenue > 20 billion VND"
 - NEVER use Step 1/Step 2 numbering \u2014 write inline
-- modelAnswer (non-MCQ): concise 2-4 lines, HTML table only if \u22653 calculation rows
+- modelAnswer: REQUIRED for ALL question types (including MCQ). MCQ: show worked solution for correct answer. SCENARIO/ESSAY: full multi-part solution. SHORT_ANSWER: concise 1-3 sentence answer. Format: plain text or HTML \u2014 use <table> only if \u22653 calculation rows. NEVER null.
 - markingScheme: OMIT this field entirely
 
 ## OUTPUT FORMAT
@@ -413,7 +425,7 @@ Return a JSON array only — no markdown fences, no preamble, no explanation.
       "C": "Forgot to deduct compulsory insurance",
       "D": "Applied annual threshold incorrectly"
     },
-    "modelAnswer": null,
+    "modelAnswer": "Worked solution: [Tax base] = Revenue - Deductible expenses = 10,000m - 7,500m = 2,500m. Tax = 2,500m × 20% = 500m (per Art.10(1), Decree 320/2025/ND-CP)",
     "reference": "Article X(Y), Decree 320/2025/ND-CP — cite specific article and document name. NEVER write 'See uploaded regulations'.",
     "syllabusCode": "C2d, C2n — exact codes from the provided syllabus document",
     "sampleRef": "Sample_MCQ_CIT_2024.pdf — name of sample file whose style was followed",

@@ -21,28 +21,17 @@ async function extractText(filePath: string, isManualInput: boolean, content: st
       }
     }
     if (ext.endsWith('.docx') || ext.endsWith('.doc')) {
-      return extractDocxText(buffer)
+      try {
+        const mammoth = require('mammoth')
+        const result = await mammoth.extractRawText({ buffer })
+        return result.value ?? ''
+      } catch {
+        return buffer.toString('utf-8').replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
+      }
     }
     return buffer.toString('utf-8')
   } catch (e) {
     console.error('[parse] extractText error', e)
-    return ''
-  }
-}
-
-// Extract text from DOCX by parsing XML directly (no mammoth needed)
-function extractDocxText(buffer: Buffer): string {
-  try {
-    // DOCX is a zip — use a simple regex to strip XML tags
-    const content = buffer.toString('utf-8')
-    // Find word/document.xml content by regex
-    const xmlMatch = content.match(/word\/document\.xml/)
-    if (!xmlMatch) {
-      // Fallback: strip all XML tags
-      return content.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
-    }
-    return content.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim()
-  } catch {
     return ''
   }
 }
@@ -225,21 +214,9 @@ function detectQuestionType(text: string): string {
 }
 
 // AI-based parse (fallback or explicit)
-async function parseWithAI(text: string, sessionId: string): Promise<any[]> {
-  // Get project parsePattern setting for context
+async function parseWithAI(text: string, sessionId: string, parseKeyword: string = 'Example', parseNumber: boolean = true): Promise<any[]> {
   try {
-    const session = await (db as any).session.findUnique({
-      where: { id: sessionId },
-      include: { project: { select: { parsePattern: true } } }
-    })
-    const patternHint = session?.project?.parsePattern || 'HEADING2_EXAMPLE'
-
-    let patternNote = ''
-    if (patternHint === 'HEADING2_EXAMPLE') {
-      patternNote = 'Questions are separated by headings like "Example 1:", "Example 2:".'
-    } else if (patternHint === 'NUMBERED_LIST') {
-      patternNote = 'Questions are in a numbered list format (1., 2., 3. etc.).'
-    }
+    const patternNote = `Questions are separated by the keyword "${parseKeyword}${parseNumber ? ' <number>' : ''}:" (e.g. "${parseKeyword} 1:", "${parseKeyword} 2:").`
 
     // Build provider/model from env
     let provider = process.env.AI_PROVIDER || 'deepseek'
@@ -330,8 +307,8 @@ export async function POST(req: NextRequest, { params }: { params: { id: string;
 
     let rawQuestions: any[] = []
 
-    // Try structural (fast) parse first unless forceAI or ai style
-    if (!forceAI && docxBuffer && parseStyle !== 'ai') {
+    // Always try structural parse first if DOCX buffer available (unless ai style)
+    if (docxBuffer && parseStyle !== 'ai') {
       const paragraphs = parseDocxParagraphs(docxBuffer)
       if (parseStyle === 'numbered') {
         rawQuestions = parseByNumberedList(paragraphs)
@@ -349,12 +326,12 @@ export async function POST(req: NextRequest, { params }: { params: { id: string;
     }
 
     // If structural parse found nothing (or ai style or forceAI), use AI
-    if (rawQuestions.length === 0) {
+    if (rawQuestions.length === 0 || parseStyle === 'ai' || forceAI) {
       const text = await extractText(doc.filePath, doc.isManualInput, doc.content)
       if (!text || text.trim().length < 10) {
         return NextResponse.json({ error: 'No text content found in document', parsed: [], count: 0 })
       }
-      rawQuestions = await parseWithAI(text, params.id)
+      rawQuestions = await parseWithAI(text, params.id, parseKeyword, parseNumber)
     }
 
     if (rawQuestions.length === 0) {
