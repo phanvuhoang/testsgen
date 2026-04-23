@@ -120,6 +120,65 @@ function HtmlEditor({
   )
 }
 
+// ─── Smart answer renderer: markdown/plain → HTML ────────────────────────────
+function renderAnswerContent(text: string): string {
+  if (!text) return ''
+
+  if (/<[a-z][\s\S]*>/i.test(text)) return text
+
+  const lines = text.split('\n').map(l => l.trimEnd())
+
+  const tableLines = lines.filter(l => l.startsWith('|'))
+  if (tableLines.length >= 3) {
+    let html = '<table class="calc-table w-full border-collapse text-xs my-2">'
+    let isFirstRow = true
+    for (const line of tableLines) {
+      if (/^\|[-| :]+\|$/.test(line)) { isFirstRow = false; continue }
+      const cells = line.replace(/^\||\|$/g, '').split('|').map(c => c.trim())
+      if (isFirstRow) {
+        html += '<thead><tr>' + cells.map(c => `<th class="border border-gray-300 bg-gray-100 px-2 py-1 text-left">${c}</th>`).join('') + '</tr></thead>'
+        isFirstRow = false
+      } else {
+        html += '<tr>' + cells.map(c => `<td class="border border-gray-200 px-2 py-1">${c}</td>`).join('') + '</tr>'
+      }
+    }
+    html += '</table>'
+    const nonTableLines = lines.filter(l => !l.startsWith('|') && l.trim())
+    if (nonTableLines.length > 0) {
+      html += '<p class="text-xs mt-1">' + nonTableLines.join('<br>') + '</p>'
+    }
+    return html
+  }
+
+  const calcPattern = /^.{2,80}=.+\([\d.]+\s*(mk|mark|marks)\)/i
+  const calcLines = lines.filter(l => calcPattern.test(l))
+  if (calcLines.length >= 2) {
+    let html = '<table class="calc-table w-full border-collapse text-xs my-2"><tbody>'
+    for (const line of lines.filter(l => l.trim())) {
+      const m3 = line.match(/^(.*?)\s*=\s*(.*?)\s*=\s*([^(=]+)\s*\(([\d.]+\s*(?:mk|marks?))\)/i)
+      if (m3) {
+        html += `<tr><td class="border border-gray-200 px-2 py-1">${m3[1]}</td><td class="border border-gray-200 px-2 py-1 font-mono">${m3[2]}</td><td class="border border-gray-200 px-2 py-1 font-semibold">${m3[3].trim()}</td><td class="border border-gray-200 px-2 py-1 text-right text-blue-700 font-medium">${m3[4]}</td></tr>`
+        continue
+      }
+      const m2 = line.match(/^(.*?)\s*=\s*([^(]+)\s*\(([\d.]+\s*(?:mk|marks?))\)/i)
+      if (m2) {
+        html += `<tr><td class="border border-gray-200 px-2 py-1">${m2[1]}</td><td class="border border-gray-200 px-2 py-1"></td><td class="border border-gray-200 px-2 py-1 font-semibold">${m2[2].trim()}</td><td class="border border-gray-200 px-2 py-1 text-right text-blue-700 font-medium">${m2[3]}</td></tr>`
+        continue
+      }
+      html += `<tr><td class="border border-gray-200 px-2 py-1" colspan="4">${line}</td></tr>`
+    }
+    html += '</tbody></table>'
+    return html
+  }
+
+  const result = text
+    .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
+    .replace(/\*(.*?)\*/g, '<em>$1</em>')
+    .replace(/\n/g, '<br>')
+
+  return `<div class="text-xs">${result}</div>`
+}
+
 // ─── Option letter badge ──────────────────────────────────────────────────────
 function OptionBadge({ letter, isCorrect }: { letter: string; isCorrect: boolean }) {
   return (
@@ -493,9 +552,10 @@ export default function ExamQuestionsPage() {
                         {isCorrect && <CheckCircle2 className="inline h-4 w-4 ml-1 text-green-600" />}
                       </p>
                       {explanation && (
-                        <div className={`mt-1 text-xs ${isCorrect ? 'text-green-700' : 'text-gray-500'}`}>
-                          <HtmlContent html={explanation} />
-                        </div>
+                        <div
+                          className={`mt-1 text-xs ${isCorrect ? 'text-green-700' : 'text-gray-500'} [&_table]:border-collapse [&_table]:w-full [&_th]:border [&_th]:border-gray-300 [&_th]:bg-gray-100 [&_th]:px-2 [&_th]:py-1 [&_td]:border [&_td]:border-gray-200 [&_td]:px-2 [&_td]:py-1`}
+                          dangerouslySetInnerHTML={{ __html: renderAnswerContent(explanation) }}
+                        />
                       )}
                     </div>
                   </div>
@@ -518,9 +578,10 @@ export default function ExamQuestionsPage() {
             <p className="text-xs font-semibold mb-2 flex items-center gap-1 text-blue-900">
               <BookOpen className="h-3 w-3" />Marking Scheme
             </p>
-            <div className="text-blue-900">
-              <HtmlContent html={q.markingScheme} />
-            </div>
+            <div
+              className="text-blue-900 text-xs [&_table]:border-collapse [&_table]:w-full [&_th]:border [&_th]:border-gray-300 [&_th]:bg-gray-100 [&_th]:px-2 [&_th]:py-1 [&_td]:border [&_td]:border-gray-200 [&_td]:px-2 [&_td]:py-1"
+              dangerouslySetInnerHTML={{ __html: renderAnswerContent(q.markingScheme) }}
+            />
           </div>
         )}
 
@@ -528,21 +589,31 @@ export default function ExamQuestionsPage() {
         {q.modelAnswer && (
           <div className="p-3 bg-gray-50 border border-gray-200 rounded">
             <p className="text-xs font-semibold mb-2 text-gray-700">Model Answer</p>
-            <HtmlContent html={q.modelAnswer} />
+            <div
+              className="text-xs [&_table]:border-collapse [&_table]:w-full [&_th]:border [&_th]:border-gray-300 [&_th]:bg-gray-100 [&_th]:px-2 [&_th]:py-1 [&_td]:border [&_td]:border-gray-200 [&_td]:px-2 [&_td]:py-1"
+              dangerouslySetInnerHTML={{ __html: renderAnswerContent(q.modelAnswer) }}
+            />
           </div>
         )}
 
         {/* Syllabus codes + refs */}
-        <div className="flex flex-wrap gap-2 items-center">
-          {q.syllabusCode && q.syllabusCode.split(/[,;]/).map(code => code.trim()).filter(Boolean).map(code => (
-            <span key={code} className="px-2 py-0.5 bg-purple-100 text-purple-700 text-xs rounded font-mono border border-purple-200">
-              [{code}]
-            </span>
-          ))}
-          {q.regulationRefs && (
-            <span className="text-xs text-gray-400 italic">{q.regulationRefs}</span>
-          )}
-        </div>
+        {(q.syllabusCode || q.regulationRefs) && (
+          <div className="mt-3 pt-3 border-t border-gray-200 flex flex-wrap gap-2 items-center">
+            {q.syllabusCode && (
+              <div className="flex items-center gap-1 flex-wrap">
+                <span className="text-xs text-gray-500 font-semibold uppercase tracking-wide">Syllabus tested:</span>
+                {q.syllabusCode.split(/[,;]/).map(code => code.trim()).filter(Boolean).map(code => (
+                  <span key={code} className="inline-block bg-green-50 text-green-800 border border-green-300 rounded px-2 py-0.5 text-xs font-semibold">
+                    {code}
+                  </span>
+                ))}
+              </div>
+            )}
+            {q.regulationRefs && (
+              <span className="text-xs text-gray-400 italic">📋 {q.regulationRefs}</span>
+            )}
+          </div>
+        )}
       </div>
     )
   }
@@ -723,7 +794,9 @@ export default function ExamQuestionsPage() {
                       <span className="text-xs text-gray-400">{q.section?.name}</span>
                       <Badge variant="outline" className="text-xs py-0">{q.questionType.replace(/_/g, ' ')}</Badge>
                       <span className={`text-xs px-2 py-0.5 rounded-full ${difficultyColor[q.difficulty]}`}>{q.difficulty}</span>
-                      <span className="text-xs text-gray-500">{q.marks}m</span>
+                      <span className="text-xs bg-blue-50 text-blue-700 border border-blue-100 px-1.5 py-0.5 rounded font-medium">
+                        {q.marks} mk
+                      </span>
                       {q.topic && <span className="text-xs bg-gray-100 px-2 py-0.5 rounded">{q.topic}</span>}
                       {q.syllabusCode && (
                         <span className="text-xs bg-purple-50 text-purple-600 px-2 py-0.5 rounded font-mono border border-purple-100">

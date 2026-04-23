@@ -4,22 +4,34 @@ import { generateExamQuestions } from '@/lib/ai'
 import { readFile } from 'fs/promises'
 import { join } from 'path'
 
+// ── Context budget constants ──────────────────────────────────────────────────
+const MAX_PER_FILE_CHARS = 150_000
+
+const JOIN_CAPS: Record<string, number> = {
+  TAX_REGULATIONS:  100_000,
+  SAMPLE_QUESTIONS:  40_000,
+  SYLLABUS:          30_000,
+  RATES_TARIFF:      15_000,
+  STUDY_MATERIAL:    15_000,
+  OTHER:             10_000,
+}
+
 async function extractDocumentText(filePath: string): Promise<string> {
   try {
     const fullPath = join(process.cwd(), 'public', filePath)
     const buffer = await readFile(fullPath)
 
     if (filePath.endsWith('.txt')) {
-      return buffer.toString('utf-8').slice(0, 50000)
+      return buffer.toString('utf-8').slice(0, MAX_PER_FILE_CHARS)
     }
 
     if (filePath.endsWith('.pdf')) {
       const pdfParse = require('pdf-parse')
       const data = await pdfParse(buffer)
-      return data.text.slice(0, 50000)
+      return data.text.slice(0, MAX_PER_FILE_CHARS)
     }
 
-    return buffer.toString('utf-8').slice(0, 50000)
+    return buffer.toString('utf-8').slice(0, MAX_PER_FILE_CHARS)
   } catch {
     return ''
   }
@@ -30,12 +42,23 @@ function getRelevantDocs(allDocs: any[], sectionConfig: any, sec: any): any[] {
   const selectedTopicIds: string[] = sectionConfig.selectedTopicIds || []
   const selectedSectionId: string = sectionConfig.sectionId
 
+  const parseDocSectionIds = (d: any): string[] => {
+    if (d.sectionIds) {
+      try { return JSON.parse(d.sectionIds) } catch {}
+    }
+    return d.sectionId ? [d.sectionId] : []
+  }
+
+  const matchesSection = (d: any): boolean => {
+    const docSectionIds = parseDocSectionIds(d)
+    if (docSectionIds.length === 0) return true
+    return docSectionIds.includes(selectedSectionId)
+  }
+
   if (selectedTopicIds.length === 0) {
     return allDocs.filter((d: any) => {
       const hasTopicTag = d.topicId || (d.topicIds && d.topicIds !== '[]')
-      const hasSectionTag = d.sectionId === selectedSectionId ||
-        (d.sectionIds && (() => { try { return JSON.parse(d.sectionIds || '[]').includes(selectedSectionId) } catch { return false } })())
-      return !hasTopicTag || hasSectionTag
+      return !hasTopicTag || matchesSection(d)
     })
   }
 
@@ -44,11 +67,11 @@ function getRelevantDocs(allDocs: any[], sectionConfig: any, sec: any): any[] {
       ? (() => { try { return JSON.parse(d.topicIds) } catch { return d.topicId ? [d.topicId] : [] } })()
       : (d.topicId ? [d.topicId] : [])
 
-    // Untagged docs (no topic) are always included as general context
     if (docTopicIds.length === 0) return true
 
-    // Include if at least one selected topic matches
-    return docTopicIds.some((id: string) => selectedTopicIds.includes(id))
+    if (!docTopicIds.some((id: string) => selectedTopicIds.includes(id))) return false
+
+    return matchesSection(d)
   })
 }
 
@@ -155,7 +178,10 @@ export async function POST(_req: NextRequest, { params }: { params: { id: string
           if (!relevantDocsByType[key]) relevantDocsByType[key] = []
           relevantDocsByType[key].push(`[${doc.fileName}]\n${text}`)
         }
-        const joinScopedContent = (key: string) => (relevantDocsByType[key] || []).join('\n\n---\n\n').slice(0, 20000)
+        const joinScopedContent = (key: string) => {
+          const cap = JOIN_CAPS[key] ?? 10_000
+          return (relevantDocsByType[key] || []).join('\n\n---\n\n').slice(0, cap)
+        }
 
         const generatorConfig = {
           sectionName: sec.name,

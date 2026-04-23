@@ -5,25 +5,35 @@ import { generateExamQuestions } from '@/lib/ai'
 import { readFile } from 'fs/promises'
 import { join } from 'path'
 
+// ── Context budget constants ──────────────────────────────────────────────────
+const MAX_PER_FILE_CHARS = 150_000
+
+const JOIN_CAPS_SYNC: Record<string, number> = {
+  TAX_REGULATIONS:  100_000,
+  SAMPLE_QUESTIONS:  40_000,
+  SYLLABUS:          30_000,
+  RATES_TARIFF:      15_000,
+  STUDY_MATERIAL:    15_000,
+  OTHER:             10_000,
+}
+
 // Extract text from uploaded document
 async function extractDocumentText(filePath: string): Promise<string> {
   try {
     const fullPath = join(process.cwd(), 'public', filePath)
     const buffer = await readFile(fullPath)
-    
+
     if (filePath.endsWith('.txt')) {
-      return buffer.toString('utf-8').slice(0, 50000)
+      return buffer.toString('utf-8').slice(0, MAX_PER_FILE_CHARS)
     }
-    
-    // For PDF: use pdf-parse
+
     if (filePath.endsWith('.pdf')) {
       const pdfParse = require('pdf-parse')
       const data = await pdfParse(buffer)
-      return data.text.slice(0, 50000)
+      return data.text.slice(0, MAX_PER_FILE_CHARS)
     }
-    
-    // For other files, return raw text
-    return buffer.toString('utf-8').slice(0, 50000)
+
+    return buffer.toString('utf-8').slice(0, MAX_PER_FILE_CHARS)
   } catch {
     return ''
   }
@@ -69,7 +79,10 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     docsByType[key].push(`[${doc.fileName}]\n${text}`)
   }
 
-  const joinContent = (key: string) => (docsByType[key] || []).join('\n\n---\n\n').slice(0, 20000)
+  const joinContent = (key: string) => {
+    const cap = JOIN_CAPS_SYNC[key] ?? 10_000
+    return (docsByType[key] || []).join('\n\n---\n\n').slice(0, cap)
+  }
 
   // Get section details
   const sectionIds = sectionConfigs.map((s: { sectionId: string }) => s.sectionId)

@@ -123,7 +123,7 @@ async function generateWithOpenAICompat(
     temperature: 0.7,
   }
   if (provider === 'claudible') {
-    createParams.max_tokens = 8000
+    createParams.max_tokens = 16000
   }
   const response = await client.chat.completions.create(createParams)
   return response.choices[0]?.message?.content || ''
