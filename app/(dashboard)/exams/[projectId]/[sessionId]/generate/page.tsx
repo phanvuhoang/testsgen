@@ -8,7 +8,6 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Card, CardContent } from '@/components/ui/card'
 import { Checkbox } from '@/components/ui/checkbox'
-import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Progress } from '@/components/ui/progress'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
@@ -20,12 +19,8 @@ import {
   CheckCircle2,
   ChevronDown,
   ChevronUp,
-  RefreshCw,
-  Pencil,
-  Trash2,
   X,
   BookOpen,
-  Plus,
   ListChecks,
 } from 'lucide-react'
 
@@ -84,22 +79,6 @@ type SectionGenConfig = {
   calculationMarks: number
 }
 
-type GeneratedQuestion = {
-  id: string
-  stem: string
-  questionType: string
-  options: string[] | null
-  correctAnswer: string | null
-  markingScheme: string | null
-  modelAnswer: string | null
-  topic: string | null
-  difficulty: string
-  marks: number
-  status: string
-  sectionId: string | null
-  section?: { id: string; name: string } | null
-}
-
 // ─── Constants ───────────────────────────────────────────────────────────────
 
 const QUESTION_TYPES = [
@@ -129,12 +108,6 @@ const docTypeLabels: Record<string, string> = {
   OTHER: 'Other',
 }
 
-const difficultyColors: Record<string, string> = {
-  EASY:   'bg-green-100 text-green-700',
-  MEDIUM: 'bg-yellow-100 text-yellow-700',
-  HARD:   'bg-red-100 text-red-700',
-}
-
 // ─── Component ───────────────────────────────────────────────────────────────
 
 export default function GeneratePage() {
@@ -158,25 +131,16 @@ export default function GeneratePage() {
   const [extraInstructions, setExtraInstructions] = useState('')
   const [selectedModel, setSelectedModel] = useState('deepseek:deepseek-reasoner')
   const [generateLanguage, setGenerateLanguage] = useState<'ENG' | 'VIE'>('ENG')
+  const [assumedDate, setAssumedDate] = useState('')
 
   // Job / generation
   const [isGenerating, setIsGenerating] = useState(false)
   const [activeJobId, setActiveJobId] = useState<string | null>(null)
-  const [jobCreatedAt, setJobCreatedAt] = useState<string | null>(null) // ISO string
   const [jobStatus, setJobStatus] = useState<string>('')
   const [progress, setProgress] = useState(0)
   const [totalToGen, setTotalToGen] = useState(0)
   const [isDone, setIsDone] = useState(false)
-  const [jobFromResumed, setJobFromResumed] = useState(false) // true = found on mount (tab was closed)
   const pollRef = useRef<NodeJS.Timeout | null>(null)
-
-  // Results
-  const [generated, setGenerated] = useState<GeneratedQuestion[]>([])
-  const [expandedQId, setExpandedQId] = useState<string | null>(null)
-  const [editingQ, setEditingQ] = useState<Record<string, Partial<GeneratedQuestion>>>({})
-  const [savingQId, setSavingQId] = useState<string | null>(null)
-  const [regenQId, setRegenQId] = useState<string | null>(null)
-  const [deletingQId, setDeletingQId] = useState<string | null>(null)
 
   // ─── Init ────────────────────────────────────────────────────────────────
 
@@ -272,31 +236,15 @@ export default function GeneratePage() {
         setJobStatus(job.status)
         if (job.status === 'RUNNING' || job.status === 'PENDING') {
           setIsGenerating(true)
-          setJobCreatedAt(job.createdAt || null)
-          setJobFromResumed(true)
           pollJobStatus(job.id)
         } else if (job.status === 'DONE') {
-          // Tab was closed and re-opened — job already done. Don't flood display with old questions.
-          // Just show a banner linking to question bank.
           setIsDone(true)
-          setJobFromResumed(true)
           setProgress(job.progress || 0)
         }
       }
     } catch {}
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId])
-
-  // Only fetch questions created since the job started (so we don't show old questions)
-  const fetchRecentQuestions = async (since?: string) => {
-    try {
-      const url = since
-        ? `/api/sessions/${sessionId}/questions?limit=200&since=${encodeURIComponent(since)}`
-        : `/api/sessions/${sessionId}/questions?limit=200`
-      const res = await fetch(url)
-      if (res.ok) setGenerated(await res.json())
-    } catch {}
-  }
 
   const pollJobStatus = useCallback(
     (jobId: string) => {
@@ -311,8 +259,6 @@ export default function GeneratePage() {
           if (job.status === 'DONE') {
             setIsDone(true)
             setIsGenerating(false)
-            // Only fetch questions created since this job started
-            await fetchRecentQuestions(jobCreatedAt || undefined)
             toast({ title: `✓ ${job.progress} questions generated`, description: 'Saved to question bank.' })
           } else if (job.status === 'FAILED') {
             setIsGenerating(false)
@@ -341,11 +287,9 @@ export default function GeneratePage() {
 
     if (pollRef.current) clearTimeout(pollRef.current)
     setIsGenerating(true)
-    setGenerated([])
     setIsDone(false)
     setProgress(0)
     setActiveJobId(null)
-    setJobFromResumed(false)
 
     const sectionConfigsPayload = enabledConfigs.map((c) => {
       const topicObjs = flatTopics.filter((t) => c.selectedTopicIds.includes(t.id))
@@ -378,12 +322,12 @@ export default function GeneratePage() {
           modelId: selectedModel,
           total,
           language: generateLanguage,
+          assumedDate: assumedDate || undefined,
         }),
       })
       if (!jobRes.ok) throw new Error('Failed to create generation job')
       const job = await jobRes.json()
       setActiveJobId(job.id)
-      setJobCreatedAt(job.createdAt || new Date().toISOString())
       setTotalToGen(job.total || total)
       fetch(`/api/sessions/${sessionId}/generate-jobs/${job.id}/run`, { method: 'POST' }).catch(() => {})
       pollJobStatus(job.id)
@@ -406,74 +350,6 @@ export default function GeneratePage() {
     setIsGenerating(false)
     setJobStatus('FAILED')
     toast({ title: 'Generation cancelled' })
-    await fetchRecentQuestions()
-  }
-
-  // ─── Edit helpers ─────────────────────────────────────────────────────────
-
-  const getEditState = (q: GeneratedQuestion): GeneratedQuestion => ({ ...q, ...(editingQ[q.id] || {}) })
-  const updateEdit = (qId: string, updates: Partial<GeneratedQuestion>) => {
-    setEditingQ((prev) => ({ ...prev, [qId]: { ...(prev[qId] || {}), ...updates } }))
-  }
-
-  const handleSaveQuestion = async (q: GeneratedQuestion) => {
-    const edits = editingQ[q.id]
-    if (!edits || Object.keys(edits).length === 0) { setExpandedQId(null); return }
-    setSavingQId(q.id)
-    try {
-      const res = await fetch(`/api/sessions/${sessionId}/questions/${q.id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(edits),
-      })
-      if (!res.ok) throw new Error('Save failed')
-      const updated = await res.json()
-      setGenerated((prev) => prev.map((item) => (item.id === q.id ? { ...item, ...updated } : item)))
-      setEditingQ((prev) => { const n = { ...prev }; delete n[q.id]; return n })
-      setExpandedQId(null)
-      toast({ title: 'Question saved' })
-    } catch (e) {
-      toast({ title: 'Save failed', description: String(e), variant: 'destructive' })
-    } finally {
-      setSavingQId(null)
-    }
-  }
-
-  const handleRegenQuestion = async (q: GeneratedQuestion) => {
-    setRegenQId(q.id)
-    try {
-      const res = await fetch(`/api/sessions/${sessionId}/questions/${q.id}/regenerate`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ modelId: selectedModel }),
-      })
-      if (!res.ok) throw new Error('Regen failed')
-      const updated = await res.json()
-      setGenerated((prev) => prev.map((item) => (item.id === q.id ? { ...item, ...updated } : item)))
-      setEditingQ((prev) => { const n = { ...prev }; delete n[q.id]; return n })
-      if (expandedQId === q.id) setExpandedQId(null)
-      toast({ title: 'Question regenerated' })
-    } catch (e) {
-      toast({ title: 'Regeneration failed', description: String(e), variant: 'destructive' })
-    } finally {
-      setRegenQId(null)
-    }
-  }
-
-  const handleDeleteQuestion = async (q: GeneratedQuestion) => {
-    if (!confirm('Delete this question? This cannot be undone.')) return
-    setDeletingQId(q.id)
-    try {
-      const res = await fetch(`/api/sessions/${sessionId}/questions/${q.id}`, { method: 'DELETE' })
-      if (!res.ok) throw new Error('Delete failed')
-      setGenerated((prev) => prev.filter((item) => item.id !== q.id))
-      if (expandedQId === q.id) setExpandedQId(null)
-      toast({ title: 'Question deleted' })
-    } catch (e) {
-      toast({ title: 'Delete failed', description: String(e), variant: 'destructive' })
-    } finally {
-      setDeletingQId(null)
-    }
   }
 
   // ─── Config helpers ───────────────────────────────────────────────────────
@@ -1032,6 +908,19 @@ export default function GeneratePage() {
                 )
               })}
 
+              {/* Assumed date */}
+              <div className="space-y-1">
+                <Label className="text-xs font-semibold">
+                  Assumed exam date <span className="text-gray-400 font-normal">(optional — AI uses this as "today" for date-sensitive rules)</span>
+                </Label>
+                <Input
+                  type="date"
+                  value={assumedDate}
+                  onChange={(e) => setAssumedDate(e.target.value)}
+                  className="h-8 text-xs w-48"
+                />
+              </div>
+
               {/* Global instructions */}
               <div className="space-y-1">
                 <Label className="text-xs font-semibold">Global additional instructions</Label>
@@ -1131,222 +1020,24 @@ export default function GeneratePage() {
             </Card>
           )}
 
-          {/* Generated questions */}
-          {generated.length > 0 && (
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <h3 className="text-sm font-semibold">Generated ({generated.length})</h3>
+          {/* Completion card */}
+          {isDone && (
+            <Card>
+              <CardContent className="p-4 flex flex-col items-center gap-3 text-center">
+                <CheckCircle2 className="h-8 w-8 text-[#028a39]" />
+                <p className="text-sm font-medium">{progress} questions saved to Question Bank</p>
                 <a
                   href={questionsUrl}
-                  className="text-xs text-[#028a39] hover:underline flex items-center gap-1"
+                  className="flex items-center gap-1 text-sm text-[#028a39] hover:underline font-medium"
                 >
-                  <BookOpen className="h-3 w-3" /> View all in Bank
+                  <BookOpen className="h-4 w-4" /> View Question Bank →
                 </a>
-              </div>
-
-              <div className="space-y-2 max-h-[70vh] overflow-y-auto pr-1">
-                {generated.map((q, idx) => {
-                  const editing = getEditState(q)
-                  const isExpanded = expandedQId === q.id
-                  const isEditing = !!editingQ[q.id]
-                  const isRegenning = regenQId === q.id
-                  const isDeleting = deletingQId === q.id
-                  const isSaving = savingQId === q.id
-                  const options = Array.isArray(q.options) ? q.options : []
-
-                  return (
-                    <Card key={q.id} className={`text-xs transition-all ${isExpanded ? 'ring-1 ring-[#028a39]' : ''}`}>
-                      <CardContent className="p-3">
-                        {/* Card header */}
-                        <div className="flex items-start gap-2">
-                          <div className="flex-1 min-w-0">
-                            <div className="flex items-center gap-1.5 flex-wrap mb-1">
-                              <span className="font-mono text-gray-400">Q{idx + 1}</span>
-                              <Badge variant="outline" className="text-xs py-0 px-1">
-                                {q.questionType?.replace(/_/g, ' ') ?? 'Q'}
-                              </Badge>
-                              {q.difficulty && (
-                                <span className={`text-xs px-1.5 py-0 rounded ${difficultyColors[q.difficulty] ?? 'bg-gray-100 text-gray-600'}`}>
-                                  {q.difficulty}
-                                </span>
-                              )}
-                              {q.topic && (
-                                <span className="text-xs text-gray-400 truncate max-w-[100px]">{q.topic}</span>
-                              )}
-                            </div>
-                            <p
-                              className={`text-xs text-gray-700 cursor-pointer hover:text-gray-900 ${!isExpanded ? 'line-clamp-2' : ''}`}
-                              onClick={() => setExpandedQId(isExpanded ? null : q.id)}
-                            >
-                              {q.stem}
-                            </p>
-                          </div>
-                          {/* Action buttons */}
-                          <div className="flex gap-0.5 shrink-0">
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-6 w-6 text-gray-400 hover:text-[#028a39]"
-                              title="Edit"
-                              onClick={() => {
-                                setExpandedQId(q.id)
-                                if (!editingQ[q.id]) {
-                                  setEditingQ((prev) => ({ ...prev, [q.id]: { ...q } }))
-                                }
-                              }}
-                            >
-                              <Pencil className="h-3.5 w-3.5" />
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-6 w-6 text-gray-400 hover:text-yellow-600"
-                              title="Regenerate"
-                              disabled={isRegenning}
-                              onClick={() => handleRegenQuestion(q)}
-                            >
-                              {isRegenning ? (
-                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                              ) : (
-                                <RefreshCw className="h-3.5 w-3.5" />
-                              )}
-                            </Button>
-                            <Button
-                              variant="ghost"
-                              size="icon"
-                              className="h-6 w-6 text-gray-400 hover:text-red-500"
-                              title="Delete"
-                              disabled={isDeleting}
-                              onClick={() => handleDeleteQuestion(q)}
-                            >
-                              {isDeleting ? (
-                                <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                              ) : (
-                                <Trash2 className="h-3.5 w-3.5" />
-                              )}
-                            </Button>
-                          </div>
-                        </div>
-
-                        {/* Expanded edit form */}
-                        {isExpanded && (
-                          <div className="mt-3 pt-3 border-t space-y-2">
-                            {/* Stem */}
-                            <div>
-                              <Label className="text-xs text-gray-500 mb-1">Question stem</Label>
-                              <Textarea
-                                value={editing.stem ?? ''}
-                                onChange={(e) => updateEdit(q.id, { stem: e.target.value })}
-                                className="text-xs min-h-[70px]"
-                              />
-                            </div>
-
-                            {/* MCQ options */}
-                            {(q.questionType === 'MCQ_SINGLE' || q.questionType === 'MCQ_MULTIPLE') && (
-                              <div className="space-y-1">
-                                <Label className="text-xs text-gray-500">Options</Label>
-                                {(Array.isArray(editing.options) ? editing.options : options).map((opt, oi) => (
-                                  <div key={oi} className="flex items-center gap-1">
-                                    <span className="text-xs text-gray-400 w-5 shrink-0">
-                                      {String.fromCharCode(65 + oi)}.
-                                    </span>
-                                    <Input
-                                      value={opt}
-                                      onChange={(e) => {
-                                        const opts = [...(Array.isArray(editing.options) ? editing.options : options)]
-                                        opts[oi] = e.target.value
-                                        updateEdit(q.id, { options: opts })
-                                      }}
-                                      className="h-7 text-xs"
-                                    />
-                                  </div>
-                                ))}
-                              </div>
-                            )}
-
-                            {/* Correct answer */}
-                            <div>
-                              <Label className="text-xs text-gray-500 mb-1">Correct answer</Label>
-                              <Input
-                                value={editing.correctAnswer ?? ''}
-                                onChange={(e) => updateEdit(q.id, { correctAnswer: e.target.value })}
-                                className="h-7 text-xs"
-                              />
-                            </div>
-
-                            {/* Marking scheme */}
-                            <div>
-                              <Label className="text-xs text-gray-500 mb-1">Marking scheme</Label>
-                              <Textarea
-                                value={editing.markingScheme ?? ''}
-                                onChange={(e) => updateEdit(q.id, { markingScheme: e.target.value })}
-                                className="text-xs min-h-[60px]"
-                              />
-                            </div>
-
-                            {/* Topic + difficulty */}
-                            <div className="flex gap-2">
-                              <div className="flex-1">
-                                <Label className="text-xs text-gray-500 mb-1">Topic</Label>
-                                <Input
-                                  value={editing.topic ?? ''}
-                                  onChange={(e) => updateEdit(q.id, { topic: e.target.value })}
-                                  className="h-7 text-xs"
-                                />
-                              </div>
-                              <div className="w-32">
-                                <Label className="text-xs text-gray-500 mb-1">Difficulty</Label>
-                                <Select
-                                  value={editing.difficulty ?? 'MEDIUM'}
-                                  onValueChange={(v) => updateEdit(q.id, { difficulty: v })}
-                                >
-                                  <SelectTrigger className="h-7 text-xs">
-                                    <SelectValue />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    {['EASY', 'MEDIUM', 'HARD'].map((d) => (
-                                      <SelectItem key={d} value={d} className="text-xs">{d}</SelectItem>
-                                    ))}
-                                  </SelectContent>
-                                </Select>
-                              </div>
-                            </div>
-
-                            {/* Save / Cancel */}
-                            <div className="flex gap-2 pt-1">
-                              <Button
-                                size="sm"
-                                className="h-7 text-xs bg-[#028a39] hover:bg-[#027030] text-white"
-                                onClick={() => handleSaveQuestion(q)}
-                                disabled={isSaving}
-                              >
-                                {isSaving ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : null}
-                                Save
-                              </Button>
-                              <Button
-                                size="sm"
-                                variant="ghost"
-                                className="h-7 text-xs"
-                                onClick={() => {
-                                  setExpandedQId(null)
-                                  setEditingQ((prev) => { const n = { ...prev }; delete n[q.id]; return n })
-                                }}
-                              >
-                                Cancel
-                              </Button>
-                            </div>
-                          </div>
-                        )}
-                      </CardContent>
-                    </Card>
-                  )
-                })}
-              </div>
-            </div>
+              </CardContent>
+            </Card>
           )}
 
           {/* Empty state when no job yet */}
-          {!isGenerating && generated.length === 0 && !isDone && (
+          {!isGenerating && !isDone && (
             <div className="text-center py-10 text-gray-400">
               <ListChecks className="h-8 w-8 mx-auto mb-2 opacity-30" />
               <p className="text-sm">Configure sections and generate</p>

@@ -150,14 +150,15 @@ model Project {
 }
 
 model Session {
-  id        String        @id @default(cuid())
-  projectId String
-  name      String
-  status    SessionStatus @default(DRAFT)
-  startDate DateTime?
-  endDate   DateTime?
-  createdAt DateTime      @default(now())
-  updatedAt DateTime      @updatedAt
+  id               String        @id @default(cuid())
+  projectId        String
+  name             String
+  status           SessionStatus @default(DRAFT)
+  startDate        DateTime?
+  endDate          DateTime?
+  minMarkPerPoint  Float         @default(0.5)
+  createdAt        DateTime      @default(now())
+  updatedAt        DateTime      @updatedAt
 
   // Relations
   project          Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
@@ -192,6 +193,10 @@ model Document {
   topicNames   String?  // JSON array of topic names ["CIT","PIT"]
   sectionIds   String?  // JSON array of section IDs
   sectionNames String?  // JSON array of section names
+  // Per-document parse config (for SAMPLE_QUESTIONS type)
+  parseKeyword String?  // e.g. "Example", "Question", "Exercise"
+  parseStyle   String?  // "Heading1" | "Heading2" | "Heading3" | "numbered" | "ai"
+  parseNumber  Boolean  @default(true)  // whether keyword is followed by a number
 
   // Relations
   session Session @relation(fields: [sessionId], references: [id], onDelete: Cascade)
@@ -311,6 +316,7 @@ model Question {
   optionExplanations Json?          // {A: "...", B: "...", C: "...", D: "..."}
   syllabusCode       String?        // e.g. "C2d, C2n"
   regulationRefs     String?        // e.g. "Article 9, Decree 320/2025/ND-CP"
+  generatedBy        String?        // AI model used, e.g. "deepseek:deepseek-reasoner"
   createdAt          DateTime       @default(now())
 
   // Relations

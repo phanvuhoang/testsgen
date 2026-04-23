@@ -140,6 +140,83 @@ function parseByNumberedList(paragraphs: { style: string; text: string }[]): any
   }).filter(Boolean)
 }
 
+// Generic heading-keyword parser (replaces parseByHeading2Example)
+function parseByHeadingKeyword(
+  paragraphs: { style: string; text: string }[],
+  headingStyles: string[],
+  keywordPattern: RegExp,
+  parseKeyword: string
+): any[] {
+  const styleSet = new Set(headingStyles)
+
+  let splitIndices: number[] = paragraphs
+    .map((p, i) => (styleSet.size === 0 || styleSet.has(p.style)) && keywordPattern.test(p.text) ? i : -1)
+    .filter(i => i !== -1)
+
+  if (splitIndices.length === 0) {
+    splitIndices = paragraphs
+      .map((p, i) => keywordPattern.test(p.text) ? i : -1)
+      .filter(i => i !== -1)
+  }
+
+  if (splitIndices.length === 0) return []
+
+  return splitIndices.map((hi, idx) => {
+    const headingText = paragraphs[hi].text
+    const numMatch = headingText.match(/\d+/)
+    const exNum = numMatch ? parseInt(numMatch[0]) : idx + 1
+    const nextHi = idx + 1 < splitIndices.length ? splitIndices[idx + 1] : paragraphs.length
+    const content = paragraphs.slice(hi, nextHi).map(p => p.text).join('\n').trim()
+    if (content.length < 30) return null
+
+    const answerSplit = content.match(/(?:^|\n)(Answer|Ans|Solution|Marking Scheme|ANSWER)[\s:]/im)
+    const questionContent = answerSplit
+      ? content.slice(0, content.indexOf(answerSplit[0])).trim()
+      : content
+    const answer = answerSplit
+      ? content.slice(content.indexOf(answerSplit[0]) + answerSplit[0].length).trim()
+      : null
+
+    return {
+      title: `${parseKeyword} ${exNum}`,
+      content: questionContent,
+      answer,
+      questionType: detectQuestionType(questionContent),
+      difficulty: 'MEDIUM',
+    }
+  }).filter(Boolean)
+}
+
+// Text-based split for PDF/TXT files
+function parseByTextSplit(text: string, keywordPattern: RegExp): any[] {
+  const lines = text.split('\n')
+  const splitIndices = lines
+    .map((l, i) => keywordPattern.test(l.trim()) ? i : -1)
+    .filter(i => i !== -1)
+
+  if (splitIndices.length === 0) return []
+
+  return splitIndices.map((si, idx) => {
+    const nextSi = idx + 1 < splitIndices.length ? splitIndices[idx + 1] : lines.length
+    const content = lines.slice(si, nextSi).join('\n').trim()
+    if (content.length < 30) return null
+    const numMatch = lines[si].match(/\d+/)
+    const exNum = numMatch ? parseInt(numMatch[0]) : idx + 1
+
+    const answerSplit = content.match(/(?:^|\n)(Answer|Ans|Solution|Marking Scheme|ANSWER)[\s:]/im)
+    const questionContent = answerSplit ? content.slice(0, content.indexOf(answerSplit[0])).trim() : content
+    const answer = answerSplit ? content.slice(content.indexOf(answerSplit[0]) + answerSplit[0].length).trim() : null
+
+    return {
+      title: lines[si].trim(),
+      content: questionContent,
+      answer,
+      questionType: detectQuestionType(questionContent),
+      difficulty: 'MEDIUM',
+    }
+  }).filter(Boolean)
+}
+
 function detectQuestionType(text: string): string {
   if (/[A-D]\.\s|[A-D]\)\s/.test(text)) return 'MCQ_SINGLE'
   if (text.length > 500 || /scenario|calculate|required/i.test(text)) return 'SCENARIO'
@@ -229,12 +306,19 @@ export async function POST(req: NextRequest, { params }: { params: { id: string;
     const doc = await (db as any).document.findUnique({ where: { id: params.docId } })
     if (!doc) return NextResponse.json({ error: 'Document not found' }, { status: 404 })
 
-    // Get project parse pattern
-    const session = await (db as any).session.findUnique({
-      where: { id: params.id },
-      include: { project: { select: { parsePattern: true } } }
-    })
-    const parsePattern: string = session?.project?.parsePattern || 'HEADING2_EXAMPLE'
+    // Read per-document parse config (with fallbacks)
+    const parseKeyword: string  = (doc as any).parseKeyword || 'Example'
+    const parseStyle: string    = (doc as any).parseStyle   || 'Heading2'
+    const parseNumber: boolean  = (doc as any).parseNumber  !== false
+
+    const keywordPattern = parseNumber
+      ? new RegExp(`^${parseKeyword}\\s+\\d+\\s*:`, 'i')
+      : new RegExp(`^${parseKeyword}\\s*:`, 'i')
+
+    const headingStyles = parseStyle === 'Heading1' ? ['Heading1', 'heading1', '1', 'Heading 1']
+      : parseStyle === 'Heading2' ? ['Heading2', 'heading2', '2', 'Heading 2', 'heading 2']
+      : parseStyle === 'Heading3' ? ['Heading3', 'heading3', '3', 'Heading 3']
+      : []
 
     // Extract raw file bytes for DOCX paragraph parsing
     let docxBuffer: Buffer | null = null
@@ -246,17 +330,25 @@ export async function POST(req: NextRequest, { params }: { params: { id: string;
 
     let rawQuestions: any[] = []
 
-    // Try structural (fast) parse first unless forceAI
-    if (!forceAI && docxBuffer) {
+    // Try structural (fast) parse first unless forceAI or ai style
+    if (!forceAI && docxBuffer && parseStyle !== 'ai') {
       const paragraphs = parseDocxParagraphs(docxBuffer)
-      if (parsePattern === 'HEADING2_EXAMPLE') {
-        rawQuestions = parseByHeading2Example(paragraphs)
-      } else if (parsePattern === 'NUMBERED_LIST') {
+      if (parseStyle === 'numbered') {
         rawQuestions = parseByNumberedList(paragraphs)
+      } else {
+        rawQuestions = parseByHeadingKeyword(paragraphs, headingStyles, keywordPattern, parseKeyword)
       }
     }
 
-    // If structural parse found nothing (or AI_ONLY or forceAI), use AI
+    // For PDF/TXT: try text-based split if DOCX parse found nothing
+    if (rawQuestions.length === 0 && !docxBuffer && parseStyle !== 'ai') {
+      const text = await extractText(doc.filePath, doc.isManualInput, doc.content)
+      if (text && text.trim().length >= 10) {
+        rawQuestions = parseByTextSplit(text, keywordPattern)
+      }
+    }
+
+    // If structural parse found nothing (or ai style or forceAI), use AI
     if (rawQuestions.length === 0) {
       const text = await extractText(doc.filePath, doc.isManualInput, doc.content)
       if (!text || text.trim().length < 10) {

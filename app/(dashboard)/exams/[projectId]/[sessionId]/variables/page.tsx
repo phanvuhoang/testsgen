@@ -8,7 +8,7 @@ import { Label } from '@/components/ui/label'
 import { Card, CardContent } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useToast } from '@/components/ui/use-toast'
-import { Plus, Pencil, Trash2, Save, X, Variable } from 'lucide-react'
+import { Plus, Pencil, Trash2, Save, X, Variable, Loader2 } from 'lucide-react'
 
 type SessionVar = { id: string; varKey: string; varLabel: string; varValue: string; varUnit: string | null; description: string | null }
 
@@ -21,14 +21,42 @@ export default function VariablesPage() {
   const [editForm, setEditForm] = useState<Partial<SessionVar>>({})
   const [isAdding, setIsAdding] = useState(false)
   const [addForm, setAddForm] = useState({ varKey: '', varLabel: '', varValue: '', varUnit: '', description: '' })
+  // Session settings
+  const [minMarkPerPoint, setMinMarkPerPoint] = useState('0.5')
+  const [isSavingSettings, setIsSavingSettings] = useState(false)
 
-  useEffect(() => { fetchVars() }, [])
+  useEffect(() => { fetchVars(); fetchSession() }, [])
 
   const fetchVars = async () => {
     setIsLoading(true)
     const res = await fetch(`/api/sessions/${params.sessionId}/variables`)
     if (res.ok) setVars(await res.json())
     setIsLoading(false)
+  }
+
+  const fetchSession = async () => {
+    const res = await fetch(`/api/sessions/${params.sessionId}`)
+    if (res.ok) {
+      const data = await res.json()
+      setMinMarkPerPoint(String(data.minMarkPerPoint ?? 0.5))
+    }
+  }
+
+  const handleSaveSettings = async () => {
+    setIsSavingSettings(true)
+    try {
+      const res = await fetch(`/api/sessions/${params.sessionId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ minMarkPerPoint: Number(minMarkPerPoint) }),
+      })
+      if (!res.ok) throw new Error()
+      toast({ title: 'Session settings saved' })
+    } catch {
+      toast({ title: 'Failed to save settings', variant: 'destructive' })
+    } finally {
+      setIsSavingSettings(false)
+    }
   }
 
   const handleSaveEdit = async (id: string) => {
@@ -64,6 +92,42 @@ export default function VariablesPage() {
 
   return (
     <div className="p-6 max-w-3xl mx-auto">
+      {/* Session Settings */}
+      <div className="mb-6">
+        <h2 className="text-lg font-semibold mb-3">Session Settings</h2>
+        <Card>
+          <CardContent className="p-4 space-y-3">
+            <div className="flex items-end gap-4">
+              <div className="space-y-1">
+                <Label className="text-xs font-semibold">Min marks per marking point</Label>
+                <p className="text-xs text-gray-400">Controls question granularity — e.g. 0.5 allows half-mark points, 1.0 requires whole marks</p>
+                <div className="flex items-center gap-2">
+                  <Input
+                    type="number"
+                    step={0.5}
+                    min={0.25}
+                    max={5}
+                    value={minMarkPerPoint}
+                    onChange={e => setMinMarkPerPoint(e.target.value)}
+                    className="h-8 w-24 text-sm"
+                  />
+                  <span className="text-xs text-gray-500">marks / point</span>
+                </div>
+              </div>
+              <Button
+                size="sm"
+                onClick={handleSaveSettings}
+                disabled={isSavingSettings}
+                className="shrink-0"
+              >
+                {isSavingSettings ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <Save className="h-3 w-3 mr-1" />}
+                Save
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+      </div>
+
       <div className="flex items-center justify-between mb-4">
         <div>
           <h2 className="text-lg font-semibold">Session Variables</h2>

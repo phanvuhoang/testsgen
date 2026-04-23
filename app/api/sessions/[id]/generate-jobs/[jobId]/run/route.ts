@@ -76,7 +76,12 @@ function getRelevantDocs(allDocs: any[], sectionConfig: any, sec: any): any[] {
 }
 
 export async function POST(_req: NextRequest, { params }: { params: { id: string; jobId: string } }) {
-  const job = await (db as any).generateJob.findUnique({ where: { id: params.jobId } })
+  let job = null
+  for (let attempt = 0; attempt < 5; attempt++) {
+    job = await (db as any).generateJob.findUnique({ where: { id: params.jobId } })
+    if (job) break
+    await new Promise(resolve => setTimeout(resolve, 200))
+  }
   if (!job || (job.status !== 'PENDING' && job.status !== 'RUNNING')) {
     return NextResponse.json({ error: 'Job not found or already processed' }, { status: 400 })
   }
@@ -86,7 +91,7 @@ export async function POST(_req: NextRequest, { params }: { params: { id: string
 
   // Parse config
   const config = JSON.parse(job.config)
-  const { sectionConfigs, extraInstructions, modelId, language } = config
+  const { sectionConfigs, extraInstructions, modelId, language, assumedDate } = config
 
   const sessionId = params.id
   const jobId = params.jobId
@@ -100,6 +105,7 @@ export async function POST(_req: NextRequest, { params }: { params: { id: string
         include: { topics: { where: { isOverall: true } } },
       })
       const overallTopic = sessionData?.topics?.[0]?.name || undefined
+      const minMarkPerPoint: number = (sessionData as any)?.minMarkPerPoint ?? 0.5
 
       // Get session variables
       let sessionVarsText = ''
@@ -221,6 +227,8 @@ export async function POST(_req: NextRequest, { params }: { params: { id: string
           topicBreakdown: sec.topicBreakdown || undefined,
           referenceQuestionId: sectionConfig.referenceQuestionId,
           sourceDocuments,
+          minMarkPerPoint,
+          assumedDate: assumedDate || undefined,
         }
 
         for await (const q of generateExamQuestions(generatorConfig, modelId)) {
@@ -256,6 +264,7 @@ export async function POST(_req: NextRequest, { params }: { params: { id: string
                   if (q.sampleRef) refParts.push(`Sample ref: ${String(q.sampleRef)}`)
                   return refParts.length > 0 ? refParts.join(' | ') : undefined
                 })(),
+                generatedBy: modelId || 'deepseek:deepseek-reasoner',
               },
             })
             progress++

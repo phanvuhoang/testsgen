@@ -40,6 +40,20 @@ type Question = {
   optionExplanations: OptionExplanations | null
   syllabusCode: string | null
   regulationRefs: string | null
+  generatedBy: string | null
+  createdAt: string
+}
+
+function formatRelativeTime(dateStr: string): string {
+  const date = new Date(dateStr)
+  const now = new Date()
+  const diffMs = now.getTime() - date.getTime()
+  const diffH = Math.floor(diffMs / 3600000)
+  const diffD = Math.floor(diffMs / 86400000)
+  if (diffH < 1) return 'just now'
+  if (diffH < 24) return `${diffH}h ago`
+  if (diffD < 7) return `${diffD}d ago`
+  return date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
 }
 
 const difficultyColor: Record<string, string> = {
@@ -341,6 +355,8 @@ export default function ExamQuestionsPage() {
   const [showAnswerId, setShowAnswerId] = useState<string | null>(null)
   const [editingId, setEditingId] = useState<string | null>(null)
   const [editForm, setEditForm] = useState<Partial<Question>>({})
+  const [allTopics, setAllTopics] = useState<{id: string; name: string; parentId: string | null}[]>([])
+  const [topicFilter, setTopicFilter] = useState('all')
   // Regenerate state
   const [regenId, setRegenId] = useState<string | null>(null)
   const [regenInstructions, setRegenInstructions] = useState('')
@@ -356,8 +372,15 @@ export default function ExamQuestionsPage() {
   const fetchQuestions = async () => {
     setIsLoading(true)
     try {
-      const res = await fetch(`/api/sessions/${params.sessionId}/questions`)
-      if (res.ok) setQuestions(await res.json())
+      const [qRes, topicRes] = await Promise.all([
+        fetch(`/api/sessions/${params.sessionId}/questions`),
+        fetch(`/api/sessions/${params.sessionId}/topics`),
+      ])
+      if (qRes.ok) setQuestions(await qRes.json())
+      if (topicRes.ok) {
+        const data = await topicRes.json()
+        setAllTopics(data.filter((t: any) => !t.isOverall).map((t: any) => ({ id: t.id, name: t.name, parentId: t.parentId ?? null })))
+      }
     } finally {
       setIsLoading(false)
     }
@@ -513,6 +536,10 @@ export default function ExamQuestionsPage() {
     if (sectionFilter !== 'all' && q.section?.id !== sectionFilter) return false
     if (difficultyFilter !== 'all' && q.difficulty !== difficultyFilter) return false
     if (statusFilter !== 'all' && q.status !== statusFilter) return false
+    if (topicFilter !== 'all') {
+      const topicName = allTopics.find(t => t.id === topicFilter)?.name
+      if (!topicName || q.topic !== topicName) return false
+    }
     return true
   })
 
@@ -569,19 +596,6 @@ export default function ExamQuestionsPage() {
         {!q.options && q.correctAnswer && (
           <div className="p-2 bg-green-50 border border-green-200 rounded text-green-800 text-xs">
             <strong>Correct Answer:</strong> {q.correctAnswer}
-          </div>
-        )}
-
-        {/* Marking Scheme */}
-        {q.markingScheme && (
-          <div className="p-3 bg-blue-50 border border-blue-100 rounded">
-            <p className="text-xs font-semibold mb-2 flex items-center gap-1 text-blue-900">
-              <BookOpen className="h-3 w-3" />Marking Scheme
-            </p>
-            <div
-              className="text-blue-900 text-xs [&_table]:border-collapse [&_table]:w-full [&_th]:border [&_th]:border-gray-300 [&_th]:bg-gray-100 [&_th]:px-2 [&_th]:py-1 [&_td]:border [&_td]:border-gray-200 [&_td]:px-2 [&_td]:py-1"
-              dangerouslySetInnerHTML={{ __html: renderAnswerContent(q.markingScheme) }}
-            />
           </div>
         )}
 
@@ -733,6 +747,17 @@ export default function ExamQuestionsPage() {
             <SelectItem value="REJECTED">Rejected</SelectItem>
           </SelectContent>
         </Select>
+        {allTopics.length > 0 && (
+          <Select value={topicFilter} onValueChange={setTopicFilter}>
+            <SelectTrigger className="w-44"><SelectValue placeholder="Topic" /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All topics</SelectItem>
+              {allTopics.filter(t => !t.parentId).map(root => (
+                <SelectItem key={root.id} value={root.id}>{root.name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        )}
       </div>
 
       {isLoading ? (
@@ -803,6 +828,12 @@ export default function ExamQuestionsPage() {
                           {q.syllabusCode.split(/[,;]/)[0].trim()}
                         </span>
                       )}
+                      {q.generatedBy && (
+                        <span className="text-xs bg-gray-100 text-gray-500 px-2 py-0.5 rounded font-mono">
+                          {q.generatedBy.split(':').pop()}
+                        </span>
+                      )}
+                      <span className="text-xs text-gray-400">{formatRelativeTime(q.createdAt)}</span>
                     </div>
                   </div>
                 </div>

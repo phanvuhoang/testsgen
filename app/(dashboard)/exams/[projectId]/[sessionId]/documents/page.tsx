@@ -36,6 +36,10 @@ type Document = {
   topicNames?: string | null // JSON string
   sectionIds?: string | null
   sectionNames?: string | null
+  // Parse config (SAMPLE_QUESTIONS only)
+  parseKeyword?: string | null
+  parseStyle?: string | null
+  parseNumber?: boolean
 }
 
 const fileTypes = ['SYLLABUS', 'TAX_REGULATIONS', 'SAMPLE_QUESTIONS', 'STUDY_MATERIAL', 'RATES_TARIFF', 'OTHER']
@@ -85,6 +89,10 @@ export default function DocumentsPage() {
   const [editTagSections, setEditTagSections] = useState<string[]>([])
   const [editTagDesc, setEditTagDesc] = useState<string>('')
   const [isSavingTag, setIsSavingTag] = useState(false)
+  // Parse config state (for SAMPLE_QUESTIONS tag editor)
+  const [editParseKeyword, setEditParseKeyword] = useState('')
+  const [editParseNumber, setEditParseNumber] = useState(true)
+  const [editParseStyle, setEditParseStyle] = useState('')
 
   // Edit tag popover state
   const [editTopicPopoverOpen, setEditTopicPopoverOpen] = useState(false)
@@ -163,6 +171,12 @@ export default function DocumentsPage() {
     try {
       const topicObjs = topics.filter(t => editTagTopics.includes(t.id))
       const sectionObjs = sections.filter(s => editTagSections.includes(s.id))
+      const doc = docs.find(d => d.id === docId)
+      const parsePayload = doc?.fileType === 'SAMPLE_QUESTIONS' ? {
+        parseKeyword: editParseKeyword || null,
+        parseNumber: editParseNumber,
+        parseStyle: editParseStyle || null,
+      } : {}
       const res = await fetch(`/api/sessions/${params.sessionId}/documents/${docId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
@@ -176,6 +190,7 @@ export default function DocumentsPage() {
           sectionIds: JSON.stringify(editTagSections),
           sectionNames: JSON.stringify(sectionObjs.map(s => s.name)),
           description: editTagDesc || null,
+          ...parsePayload,
         }),
       })
       if (!res.ok) throw new Error()
@@ -445,6 +460,9 @@ export default function DocumentsPage() {
                           ? parseJsonArr(doc.sectionIds)
                           : (doc.sectionId ? [doc.sectionId] : []))
                         setEditTagDesc(doc.description ?? '')
+                        setEditParseKeyword(doc.parseKeyword ?? '')
+                        setEditParseNumber(doc.parseNumber ?? true)
+                        setEditParseStyle(doc.parseStyle ?? '')
                         setEditTopicPopoverOpen(false)
                         setEditSectionPopoverOpen(false)
                       }}
@@ -539,6 +557,44 @@ export default function DocumentsPage() {
                           className="h-8 text-xs"
                           placeholder="Describe this document..."
                         />
+                      </div>
+                    )}
+                    {doc.fileType === 'SAMPLE_QUESTIONS' && (
+                      <div className="pt-2 border-t space-y-2">
+                        <p className="text-xs font-semibold text-gray-500">Parse Configuration</p>
+                        <div className="space-y-1">
+                          <Label className="text-xs">Question start keyword (e.g. "Question", "Câu")</Label>
+                          <Input
+                            value={editParseKeyword}
+                            onChange={e => setEditParseKeyword(e.target.value)}
+                            className="h-8 text-xs"
+                            placeholder="Question"
+                          />
+                        </div>
+                        <div className="flex items-center gap-2">
+                          <Checkbox
+                            id={`parseNumber-${doc.id}`}
+                            checked={editParseNumber}
+                            onCheckedChange={v => setEditParseNumber(!!v)}
+                          />
+                          <Label htmlFor={`parseNumber-${doc.id}`} className="text-xs cursor-pointer">
+                            Followed by a number (e.g. "Question 1")
+                          </Label>
+                        </div>
+                        <div className="space-y-1">
+                          <Label className="text-xs">DOCX heading style (optional)</Label>
+                          <Select value={editParseStyle || 'none'} onValueChange={v => setEditParseStyle(v === 'none' ? '' : v)}>
+                            <SelectTrigger className="h-8 text-xs">
+                              <SelectValue placeholder="None (use keyword only)" />
+                            </SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="none">None (keyword only)</SelectItem>
+                              <SelectItem value="Heading1">Heading 1</SelectItem>
+                              <SelectItem value="Heading2">Heading 2</SelectItem>
+                              <SelectItem value="Heading3">Heading 3</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
                       </div>
                     )}
                     <div className="flex gap-2 justify-end">

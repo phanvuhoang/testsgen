@@ -4,7 +4,7 @@ import { db } from '@/lib/db'
 const DEFAULT_VARS = [
   { varKey: 'exchange_rate_usd_vnd', varLabel: 'USD/VND Exchange Rate', varValue: '25450', varUnit: 'VND', description: 'Used in foreign currency calculations' },
   { varKey: 'min_salary_si', varLabel: 'Min Salary (Social Insurance)', varValue: '4960000', varUnit: 'VND/month', description: 'Minimum salary for SI/HI calculation base' },
-  { varKey: 'assumed_date', varLabel: 'Assumed Exam Date', varValue: '01/06/2026', varUnit: '', description: 'Tax year / effective date for the exam session' },
+  { varKey: 'base_year', varLabel: 'Base Year', varValue: new Date().getFullYear().toString(), varUnit: '', description: 'All exam dates fall within this calendar year (1 Jan to 31 Dec)' },
 ]
 
 export async function GET(_req: NextRequest, { params }: { params: { id: string } }) {

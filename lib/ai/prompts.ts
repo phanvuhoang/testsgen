@@ -53,6 +53,8 @@ export type ExamGenerationConfig = {
     samples: string[]
     rates: string[]
   }
+  minMarkPerPoint?: number       // Minimum marks per marking point (default 0.5)
+  assumedDate?: string           // e.g. "31 December 2025"
 
   // ── Legacy breakdown (kept for backward compat) ──
   questionTypes?: string         // JSON: [{type, count, marksEach}]
@@ -268,6 +270,22 @@ export function buildExamQuestionPrompt(config: ExamGenerationConfig): string {
     ? 'LANGUAGE: Write ALL question stems, options, and answers in Vietnamese. Use formal Vietnamese appropriate for professional exams.\n\n'
     : ''
 
+  // ── Assumed date instruction ──
+  const dateInstruction = config.assumedDate
+    ? `ASSUMED DATE: All questions in this set assume today's date is ${config.assumedDate}. Use this for deadline calculations, tax periods, and filing dates.\n\n`
+    : ''
+
+  // ── Min mark / max points instruction ──
+  const minMark = config.minMarkPerPoint ?? 0.5
+  const maxPoints = config.marksPerQuestion > 0 ? Math.floor(config.marksPerQuestion / minMark) : 0
+  const markAllocationRule = config.marksPerQuestion > 0
+    ? `MARK ALLOCATION RULES:
+- Minimum ${minMark} mark(s) per marking point
+- A ${config.marksPerQuestion}-mark question can have at most ${maxPoints} marking points
+- Each marking point must be worth at least ${minMark} mark(s)
+- Distribute marks in multiples of ${minMark}\n\n`
+    : ''
+
   // ── Calculation marks instruction ──
   const calcMarks = config.calculationMarks || 0
   const calcMarksInstruction = (calcMarks > 0 && config.marksPerQuestion > 0)
@@ -307,7 +325,7 @@ ${antiHallucinationRules}
 
 ${sourceDocumentsBlock}
 
-${languageInstruction}${calcMarksInstruction}
+${languageInstruction}${dateInstruction}${markAllocationRule}${calcMarksInstruction}
 ## GENERATION PARAMETERS
 SECTION: ${config.sectionName}
 TOTAL QUESTIONS TO GENERATE: ${config.count}
@@ -338,20 +356,18 @@ ${config.extraInstructions ? `Global instructions: ${config.extraInstructions}\n
 6. TYPE DISTRIBUTION: If multiple question types are specified and count doesn't divide evenly, AI assigns types randomly — but each type must appear at least once if count allows.
 7. Each question MUST include:
    - Full stem with all data needed to answer (no external lookup required)
-   - Detailed marking scheme (one point per line, each line shows mark allocation)
-   - Complete model answer with calculations in table format if \u22653 rows
-   - Per-option explanations (for MCQ): correct option shows inline calculation; wrong options get ONE short sentence
-   - regulationRefs: ONLY cite regulations whose names appear verbatim in the provided REGULATIONS section. If unsure, write "See uploaded regulations".
-   - syllabusCode: syllabus codes tested (e.g. "C2d, C2n")
+   - optionExplanations (MCQ only): correct option shows brief calc + regulation ref; wrong options ONE sentence each
+   - modelAnswer (non-MCQ only): brief step-by-step, HTML table only if \u22653 calc rows; null for MCQ
+   - syllabusCode: exact codes from the syllabus document
+   - reference: specific article + document name
+   - DO NOT include a markingScheme field \u2014 it is not required
 
-EXPLANATION STYLE (CRITICAL \u2014 follow examsgen format):
-- Correct option: show calculations inline like "Annual salary = 50mil \u00d7 9 months = 450mil (0.5mk)"
-- When \u22653 calculation rows: use HTML table format:
-  <table><tr><th>Item</th><th>Calculation</th><th>Amount</th><th>Marks</th></tr><tr><td>Salary</td><td>50 \u00d7 9</td><td>450 mil</td><td>0.5mk</td></tr></table>
-- Wrong options: ONE short sentence only, e.g. "Wrong rate: 20% used instead of 22%"
-- NEVER write verbose Step 1/Step 2 paragraphs
-- modelAnswer: use HTML tables for calculations (\u22653 rows), use <strong> for key figures
-- markingScheme: use HTML table format: <table><tr><th>Item</th><th>Marks</th></tr>...
+ANSWER FORMAT RULES:
+- optionExplanations correct option: brief inline calc + reg ref, e.g. "Tax = 500m \u00d7 20% = 100m (Art. 10, Decree 320/2025)"
+- optionExplanations wrong options: ONE sentence explaining WHY wrong, e.g. "Incorrect rate: 22% applies to enterprises with revenue > 20 billion VND"
+- NEVER use Step 1/Step 2 numbering \u2014 write inline
+- modelAnswer (non-MCQ): concise 2-4 lines, HTML table only if \u22653 calculation rows
+- markingScheme: OMIT this field entirely
 
 ## OUTPUT FORMAT
 Return a JSON array only — no markdown fences, no preamble, no explanation.
@@ -362,12 +378,11 @@ Return a JSON array only — no markdown fences, no preamble, no explanation.
     "correctAnswer": "Exact correct answer (MCQ: exact option text; MULTIPLE: options joined by '||')",
     "optionExplanations": {
       "A": "Wrong rate applied: used 20% instead of 22%",
-      "B": "Correct \u2014 salary = 50 \u00d7 9 = 450 mil (0.5mk); less insurance = 4.5 mil (0.5mk); net = 445.5 mil (1mk)",
+      "B": "CORRECT \u2014 500m \u00d7 20% = 100m (Art. 10, Decree 320/2025)",
       "C": "Forgot to deduct compulsory insurance",
       "D": "Applied annual threshold incorrectly"
     },
-    "markingScheme": "<table><tr><th>Item</th><th>Marks</th></tr><tr><td>Correct identification</td><td>1mk</td></tr></table>",
-    "modelAnswer": "Full answer with HTML table for calculations if \u22653 rows",
+    "modelAnswer": null,
     "reference": "Article X(Y), Decree 320/2025/ND-CP — cite specific article and document name. NEVER write 'See uploaded regulations'.",
     "syllabusCode": "C2d, C2n — exact codes from the provided syllabus document",
     "sampleRef": "Sample_MCQ_CIT_2024.pdf — name of sample file whose style was followed",

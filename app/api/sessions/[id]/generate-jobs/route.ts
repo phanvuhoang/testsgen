@@ -15,13 +15,13 @@ export async function GET(req: NextRequest, { params }: { params: { id: string }
 
 export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
   const body = await req.json()
-  const { sectionConfigs, extraInstructions, modelId } = body
-  const total = sectionConfigs.reduce((s: number, c: any) => s + (c.count || 20), 0)
+  const { sectionConfigs, extraInstructions, modelId, language, assumedDate, total: bodyTotal } = body
+  const total = bodyTotal || sectionConfigs.reduce((s: number, c: any) => s + (c.count || 2), 0)
   const job = await (db as any).generateJob.create({
     data: {
       sessionId: params.id,
       status: 'PENDING',
-      config: JSON.stringify({ sectionConfigs, extraInstructions, modelId }),
+      config: JSON.stringify({ sectionConfigs, extraInstructions, modelId, language, assumedDate }),
       progress: 0,
       total,
     },
