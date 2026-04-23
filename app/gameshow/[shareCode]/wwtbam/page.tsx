@@ -106,6 +106,7 @@ export default function WwtbamPage() {
 
   const timerRef = useRef<NodeJS.Timeout | null>(null)
   const timeCountPlayedRef = useRef(false)
+  const answeredRef = useRef(false)
   const currentQuestion = questions[currentIdx]
   const currentPlayer = players[currentPlayerIdx]
 
@@ -151,6 +152,8 @@ export default function WwtbamPage() {
   }, [phase])
 
   const handleTimeout = () => {
+    if (answeredRef.current) return
+    answeredRef.current = true
     setIsCorrect(false)
     setPhase('reveal')
     audio.stopAll()
@@ -192,6 +195,7 @@ export default function WwtbamPage() {
     setTimeLeft(config?.timeLimitSeconds ?? 30)
     setQuestionStartTime(Date.now())
     timeCountPlayedRef.current = false
+    answeredRef.current = false
     setPhase('question')
 
     // Audio: if clickStartToCount, play wait music; else play game music
@@ -213,8 +217,9 @@ export default function WwtbamPage() {
   }
 
   const handleAnswer = (answer: string) => {
-    if (selectedAnswer || phase !== 'question') return
+    if (answeredRef.current || selectedAnswer || phase !== 'question') return
     if (config?.clickStartToCount && !timerRunning) return // must click Start first
+    answeredRef.current = true
     clearInterval(timerRef.current!)
     audio.stopAll()
     audio.stopTimeCount()
@@ -298,10 +303,14 @@ export default function WwtbamPage() {
     }
   }
 
-  // Free Choice: navigate to select phase
+  // Free Choice: navigate to select phase (or gameover if all answered)
   const goToSelect = () => {
     setTimerRunning(false)
     audio.stopAll()
+    if (answeredQuestions.size >= questions.length) {
+      setPhase('gameover')
+      return
+    }
     audio.playBg('selecting', 0.5)
     setPhase('select')
   }
@@ -702,17 +711,20 @@ export default function WwtbamPage() {
           )}
 
           <div className="flex gap-3">
-            {isFreeChoice && (
-              <Button onClick={goToSelect} variant="outline"
-                className="flex-1 border-blue-500/30 text-blue-300 hover:bg-blue-900/20">
-                Back to Board
+            {isFreeChoice ? (
+              <Button onClick={goToSelect}
+                className="w-full bg-yellow-400 hover:bg-yellow-300 text-black font-bold text-lg py-6">
+                {answeredQuestions.size >= questions.length
+                  ? <><Trophy className="h-5 w-5 mr-2" />Final Results</>
+                  : <>Back to Board <ChevronRight className="h-5 w-5 ml-1" /></>}
+              </Button>
+            ) : (
+              <Button onClick={handleNext}
+                className="w-full bg-yellow-400 hover:bg-yellow-300 text-black font-bold text-lg py-6">
+                {currentIdx >= questions.length - 1 ? 'See Final Results' : 'Next Question'}
+                <ChevronRight className="h-5 w-5 ml-1" />
               </Button>
             )}
-            <Button onClick={handleNext}
-              className={`${isFreeChoice ? 'flex-1' : 'w-full'} bg-yellow-400 hover:bg-yellow-300 text-black font-bold text-lg py-6`}>
-              {isFreeChoice ? 'Next' : (currentIdx >= questions.length - 1 ? 'See Final Results' : 'Next Question')}
-              <ChevronRight className="h-5 w-5 ml-1" />
-            </Button>
           </div>
         </div>
       </div>

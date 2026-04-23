@@ -128,7 +128,7 @@ export default function QuizQuestionsPage() {
   // AI generate state
   const [showAIPanel, setShowAIPanel] = useState(false)
   const [aiModels, setAIModels] = useState<AIModel[]>([])
-  const [selectedModel, setSelectedModel] = useState<string>('claudible:claude-haiku-4.5')
+  const [selectedModel, setSelectedModel] = useState<string>('claudible:1')
   const [aiLanguage, setAiLanguage] = useState<'ENG' | 'VIE'>('ENG')
   const [aiTopic, setAITopic] = useState('')
   const [aiCount, setAICount] = useState(10)

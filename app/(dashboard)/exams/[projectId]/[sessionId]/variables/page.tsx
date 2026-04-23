@@ -8,7 +8,7 @@ import { Label } from '@/components/ui/label'
 import { Card, CardContent } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useToast } from '@/components/ui/use-toast'
-import { Plus, Pencil, Trash2, Save, X, Variable, Loader2 } from 'lucide-react'
+import { Plus, Pencil, Trash2, Save, X, Variable, Loader2, ChevronDown } from 'lucide-react'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 
 type SessionVar = { id: string; varKey: string; varLabel: string; varValue: string; varUnit: string | null; description: string | null }
@@ -26,6 +26,10 @@ export default function VariablesPage() {
   const [minMarkPerPoint, setMinMarkPerPoint] = useState('0.5')
   const [vndUnit, setVndUnit] = useState('million')
   const [isSavingSettings, setIsSavingSettings] = useState(false)
+  // Excluding issues
+  const [excludingIssues, setExcludingIssues] = useState<string[]>([])
+  const [newExcluding, setNewExcluding] = useState('')
+  const [showExcluding, setShowExcluding] = useState(false)
 
   useEffect(() => { fetchVars(); fetchSession() }, [])
 
@@ -42,6 +46,8 @@ export default function VariablesPage() {
       const data = await res.json()
       setMinMarkPerPoint(String(data.minMarkPerPoint ?? 0.5))
       setVndUnit(data.vndUnit ?? 'million')
+      const excl = data.sessionExcludingIssues
+      setExcludingIssues(excl ? JSON.parse(excl) : [])
     }
   }
 
@@ -51,7 +57,7 @@ export default function VariablesPage() {
       const res = await fetch(`/api/sessions/${params.sessionId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ minMarkPerPoint: Number(minMarkPerPoint), vndUnit }),
+        body: JSON.stringify({ minMarkPerPoint: Number(minMarkPerPoint), vndUnit, sessionExcludingIssues: JSON.stringify(excludingIssues) }),
       })
       if (!res.ok) throw new Error()
       toast({ title: 'Session settings saved' })
@@ -140,6 +146,50 @@ export default function VariablesPage() {
                 {isSavingSettings ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <Save className="h-3 w-3 mr-1" />}
                 Save
               </Button>
+            </div>
+            <div className="border rounded-lg overflow-hidden mt-2">
+              <button
+                className="w-full flex items-center justify-between p-3 bg-gray-50 hover:bg-gray-100 text-sm font-semibold"
+                onClick={() => setShowExcluding(!showExcluding)}
+              >
+                <span>🚫 Excluding Issues (session-wide)</span>
+                <ChevronDown className={`h-4 w-4 transition-transform ${showExcluding ? 'rotate-180' : ''}`} />
+              </button>
+              {showExcluding && (
+                <div className="p-3 space-y-2">
+                  <p className="text-xs text-gray-500">
+                    Topics/issues that will NEVER appear in any question in this session, even if present in regulations.
+                  </p>
+                  <div className="flex gap-2">
+                    <Input
+                      value={newExcluding}
+                      onChange={e => setNewExcluding(e.target.value)}
+                      onKeyDown={e => {
+                        if (e.key === 'Enter' && newExcluding.trim()) {
+                          setExcludingIssues(prev => [...prev, newExcluding.trim()])
+                          setNewExcluding('')
+                        }
+                      }}
+                      placeholder="e.g. charitable donation, pillar 2 UTPR"
+                      className="h-8 text-xs flex-1"
+                    />
+                    <Button size="sm" onClick={() => {
+                      if (newExcluding.trim()) {
+                        setExcludingIssues(prev => [...prev, newExcluding.trim()])
+                        setNewExcluding('')
+                      }
+                    }}>Add</Button>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5 mt-1">
+                    {excludingIssues.map((issue, i) => (
+                      <span key={i} className="inline-flex items-center gap-1 bg-red-50 text-red-700 border border-red-200 rounded-full px-2 py-0.5 text-xs">
+                        {issue}
+                        <button onClick={() => setExcludingIssues(prev => prev.filter((_, idx) => idx !== i))} className="hover:text-red-900">×</button>
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           </CardContent>
         </Card>

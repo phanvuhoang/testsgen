@@ -538,7 +538,7 @@ export default function ExamQuestionsPage() {
 
         {/* MCQ Options with explanations */}
         {q.options && q.options.length > 0 && (
-          <div className="space-y-2">
+          <div className="space-y-1.5">
             {q.options.map((opt, i) => {
               const letter = letters[i]
               const isCorrect = opt === q.correctAnswer
@@ -546,23 +546,16 @@ export default function ExamQuestionsPage() {
               return (
                 <div
                   key={i}
-                  className={`rounded-lg px-3 py-2 ${isCorrect
-                    ? 'bg-green-50 border border-green-200'
-                    : 'bg-white border border-gray-100'
-                  }`}
+                  className={`p-2 rounded text-xs border ${isCorrect ? 'bg-green-50 border-green-200' : 'bg-gray-50 border-gray-200'}`}
                 >
                   <div className="flex items-start gap-2">
-                    <OptionBadge letter={letter} isCorrect={isCorrect} />
-                    <div className="flex-1 min-w-0">
-                      <p className={`text-sm ${isCorrect ? 'font-medium text-green-800' : 'text-gray-700'}`}>
-                        {opt}
-                        {isCorrect && <CheckCircle2 className="inline h-4 w-4 ml-1 text-green-600" />}
-                      </p>
+                    <span className={`font-bold shrink-0 ${isCorrect ? 'text-green-700' : 'text-gray-500'}`}>
+                      {isCorrect ? '✓' : '✗'} {letter}.
+                    </span>
+                    <div>
+                      <span className={`font-medium ${isCorrect ? 'text-green-800' : 'text-gray-700'}`}>{opt}</span>
                       {explanation && (
-                        <div
-                          className={`mt-1 text-xs ${isCorrect ? 'text-green-700' : 'text-gray-500'} [&_table]:border-collapse [&_table]:w-full [&_th]:border [&_th]:border-gray-300 [&_th]:bg-gray-100 [&_th]:px-2 [&_th]:py-1 [&_td]:border [&_td]:border-gray-200 [&_td]:px-2 [&_td]:py-1`}
-                          dangerouslySetInnerHTML={{ __html: renderAnswerContent(explanation) }}
-                        />
+                        <p className={`mt-0.5 ${isCorrect ? 'text-green-700' : 'text-gray-500'}`}>{explanation}</p>
                       )}
                     </div>
                   </div>

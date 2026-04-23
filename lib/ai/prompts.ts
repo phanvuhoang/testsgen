@@ -57,6 +57,7 @@ export type ExamGenerationConfig = {
   minMarkPerPoint?: number       // Minimum marks per marking point (default 0.5)
   assumedDate?: string           // e.g. "31 December 2025"
   vndUnit?: string               // 'vnd' | 'thousand' | 'million'
+  excludingIssues?: string[]     // issues explicitly excluded from this question set
 
   // ── Legacy breakdown (kept for backward compat) ──
   questionTypes?: string         // JSON: [{type, count, marksEach}]
@@ -264,6 +265,12 @@ export function buildExamQuestionPrompt(config: ExamGenerationConfig): string {
     issuesSpec = `\nSPECIFIC ISSUES TO TEST (focus questions on these):\n${config.issues.map(i => `  - ${i}`).join('\n')}`
   }
 
+  // Excluding issues spec
+  let excludingIssuesSpec = ''
+  if (config.excludingIssues && config.excludingIssues.length > 0) {
+    excludingIssuesSpec = `\n\n## CRITICAL: EXCLUDED TOPICS — DO NOT TEST THESE\nThe following issues MUST NOT appear in any question, option, or explanation:\n${config.excludingIssues.map(i => `  ❌ ${i}`).join('\n')}\nEven if these issues appear in the uploaded regulations or syllabus, EXCLUDE them completely.`
+  }
+
   // Syllabus code spec (if no syllabus doc, still use as hint)
   let syllabusCodeSpec = ''
   if (config.syllabusCode && !config.syllabus) {
@@ -355,7 +362,7 @@ ${languageInstruction}${dateInstruction}${vndUnitInstruction}${markAllocationRul
 SECTION: ${config.sectionName}
 TOTAL QUESTIONS TO GENERATE: ${config.count}
 MARKS PER QUESTION: ${config.marksPerQuestion}
-${qtypeSpec}${topicSpec}${issuesSpec}${syllabusCodeSpec}
+${qtypeSpec}${topicSpec}${issuesSpec}${excludingIssuesSpec}${syllabusCodeSpec}
 
 DIFFICULTY: ${difficultyInstruction}
 
@@ -406,11 +413,29 @@ ${config.extraInstructions ? `Global instructions: ${config.extraInstructions}\n
      These types use modelAnswer for the full worked solution.
 
 ANSWER FORMAT RULES:
-- optionExplanations correct option: brief inline calc + reg ref, e.g. "Tax = 500m \u00d7 20% = 100m (Art. 10, Decree 320/2025)"
-- optionExplanations wrong options: ONE sentence explaining WHY wrong, e.g. "Incorrect rate: 22% applies to enterprises with revenue > 20 billion VND"
-- NEVER use Step 1/Step 2 numbering \u2014 write inline
-- modelAnswer: REQUIRED for ALL question types (including MCQ). MCQ: show worked solution for correct answer. SCENARIO/ESSAY: full multi-part solution. SHORT_ANSWER: concise 1-3 sentence answer. Format: plain text or HTML \u2014 use <table> only if \u22653 calculation rows. NEVER null.
-- markingScheme: OMIT this field entirely
+- markingScheme: do NOT include
+- modelAnswer: REQUIRED for ALL question types including MCQ.
+
+  FOR MCQ \u2014 format modelAnswer as an HTML table:
+  <table>
+    <tr><th style="width:60px">Step</th><th>Working</th><th style="width:80px">Amount</th></tr>
+    <tr><td>1</td><td>Description of step</td><td>XXX million VND</td></tr>
+    <tr><td><b>Answer</b></td><td>Brief conclusion</td><td><b>XXX</b></td></tr>
+  </table>
+  If pure theory (no calculation): write 2-4 sentences with regulation reference.
+
+  FOR SCENARIO/ESSAY/CASE_STUDY \u2014 format as HTML with:
+  - Each part (a)(b)(c) as <p><b>(a) Part title</b></p>
+  - Calculation steps as <table> (same format as above)
+  - Brief conclusion per part
+
+  FOR SHORT_ANSWER \u2014 1-3 sentences, plain text or short HTML.
+
+- optionExplanations (MCQ only):
+  - Correct option: "\u2713 CORRECT \u2014 [one-line explanation or key calc, e.g. '500m \u00d7 20% = 100m (Art.10, Decree 320)']"
+  - Wrong options: EACH includes brief working if calculation: "\u2717 [Why wrong]. [Working if applicable]"
+  - Format: plain text per option (NOT HTML in optionExplanations)
+  - NEVER say "See uploaded regulations" \u2014 always explain specifically
 
 ## OUTPUT FORMAT
 Return a JSON array only — no markdown fences, no preamble, no explanation.

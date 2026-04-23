@@ -71,6 +71,8 @@ type SectionGenConfig = {
   selectedSampleIds: string[]
   // 6. Issues (comma-separated → parsed to array on send)
   issues: string
+  // 6b. Excluding issues (comma-separated → DO NOT test these)
+  excludingIssues: string
   // 7. Difficulty level
   difficultyLevel: 'STANDARD' | 'EASY' | 'HARD' | 'MIXED'
   // 8. Additional instructions
@@ -129,7 +131,7 @@ export default function GeneratePage() {
   const [sectionConfigs, setSectionConfigs] = useState<Record<string, SectionGenConfig>>({})
   const [expandedSec, setExpandedSec] = useState<Set<string>>(new Set())
   const [extraInstructions, setExtraInstructions] = useState('')
-  const [selectedModel, setSelectedModel] = useState('claudible:claude-haiku-4.5')
+  const [selectedModel, setSelectedModel] = useState('claudible:1')
   const [generateLanguage, setGenerateLanguage] = useState<'ENG' | 'VIE'>('ENG')
   const [assumedDate, setAssumedDate] = useState('')
 
@@ -175,6 +177,7 @@ export default function GeneratePage() {
             syllabusCode: '',
             selectedSampleIds: [],
             issues: '',
+            excludingIssues: '',
             difficultyLevel: 'STANDARD',
             customInstructions: '',
             calculationMarks: 0,
@@ -304,6 +307,9 @@ export default function GeneratePage() {
         issues: c.issues
           ? c.issues.split(',').map((s) => s.trim()).filter(Boolean)
           : [],
+        excludingIssues: c.excludingIssues
+          ? c.excludingIssues.split(',').map((s: string) => s.trim()).filter(Boolean)
+          : undefined,
         difficultyLevel: c.difficultyLevel,
         customInstructions: c.customInstructions || undefined,
         calculationMarks: c.calculationMarks || 0,
@@ -866,6 +872,23 @@ export default function GeneratePage() {
                             />
                             <p className="text-xs text-gray-400">
                               Focus questions on these specific issues within the selected topics
+                            </p>
+                          </div>
+
+                          {/* 6b. Excluding issues */}
+                          <div className="space-y-1">
+                            <Label className="text-xs text-gray-500">
+                              Excluding issue(s){' '}
+                              <span className="font-normal text-gray-400">(comma-separated — DO NOT test these)</span>
+                            </Label>
+                            <Input
+                              className="h-7 text-xs"
+                              value={cfg.excludingIssues}
+                              onChange={(e) => updateConfig(sec.id, { excludingIssues: e.target.value })}
+                              placeholder="e.g. charitable donation, related party threshold"
+                            />
+                            <p className="text-xs text-gray-400">
+                              These issues will be excluded even if present in regulations or syllabus
                             </p>
                           </div>
 

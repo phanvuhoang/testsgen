@@ -36,30 +36,29 @@ async function extractText(filePath: string, isManualInput: boolean, content: st
   }
 }
 
-// Parse DOCX XML to get paragraphs with styles (for pattern-based parsing)
+// Parse DOCX XML to get paragraphs with styles (proper ZIP extraction)
 function parseDocxParagraphs(buffer: Buffer): { style: string; text: string }[] {
   try {
-    // DOCX is ZIP — try to read word/document.xml via string search
-    const raw = buffer.toString('binary')
-    // Find start of word/document.xml content
-    const xmlStart = raw.indexOf('<?xml')
-    const xmlContent = xmlStart >= 0 ? raw.slice(xmlStart) : raw
+    const AdmZip = require('adm-zip')
+    const zip = new AdmZip(buffer)
+    const xmlEntry = zip.getEntry('word/document.xml')
+    if (!xmlEntry) return []
+    const xmlContent = xmlEntry.getData().toString('utf-8')
 
     const paragraphs: { style: string; text: string }[] = []
-    // Match <w:p ...>...</w:p> blocks
     const paraRegex = /<w:p[ >][\s\S]*?<\/w:p>/g
     let pm: RegExpExecArray | null
     while ((pm = paraRegex.exec(xmlContent)) !== null) {
       const paraXml = pm[0]
-      // Better: search for pStyle specifically
-      const pStyleMatch = paraXml.match(/<w:pStyle w:val="([^"]+)"/)
+      const pStyleMatch = paraXml.match(/<w:pStyle\s+w:val="([^"]+)"/)
       const style = pStyleMatch ? pStyleMatch[1] : ''
-      const textMatches = Array.from(paraXml.matchAll(/<w:t[^>]*>([^<]*)<\/w:t>/g))
-      const text = textMatches.map(m => m[1]).join('').trim()
+      const textMatches = Array.from(paraXml.matchAll(/<w:t(?:\s[^>]*)?>([^<]*)<\/w:t>/g))
+      const text = textMatches.map((m: RegExpMatchArray) => m[1]).join('').trim()
       if (text) paragraphs.push({ style, text })
     }
     return paragraphs
-  } catch {
+  } catch (e) {
+    console.error('[parseDocxParagraphs] error:', e)
     return []
   }
 }
@@ -287,10 +286,12 @@ export async function POST(req: NextRequest, { params }: { params: { id: string;
     const parseKeyword: string  = body.parseKeyword || (doc as any).parseKeyword || 'Example'
     const parseStyle: string    = body.parseStyle   || (doc as any).parseStyle   || 'Heading2'
     const parseNumber: boolean  = body.parseNumber  !== undefined ? body.parseNumber : ((doc as any).parseNumber !== false)
+    const parseSuffix: string   = body.parseSuffix  !== undefined ? body.parseSuffix : ((doc as any).parseSuffix ?? ':')
+    const escapedSuffix = parseSuffix.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
 
     const keywordPattern = parseNumber
-      ? new RegExp(`^${parseKeyword}\\s+\\d+\\s*:`, 'i')
-      : new RegExp(`^${parseKeyword}\\s*:`, 'i')
+      ? new RegExp(`^${parseKeyword}\\s+\\d+\\s*${escapedSuffix}`, 'i')
+      : new RegExp(`^${parseKeyword}\\s*${escapedSuffix}`, 'i')
 
     const headingStyles = parseStyle === 'Heading1' ? ['Heading1', 'heading1', '1', 'Heading 1']
       : parseStyle === 'Heading2' ? ['Heading2', 'heading2', '2', 'Heading 2', 'heading 2']

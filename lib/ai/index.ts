@@ -20,14 +20,36 @@ export type AIModelChoice = {
 export function getAvailableModels(): AIModelChoice[] {
   const openrouterModel1 = process.env.OPENROUTER_MODEL1 || 'xiaomi/mimo-v2-pro'
   const openrouterModel2 = process.env.OPENROUTER_MODEL2 || 'qwen/qwen3-plus'
+  const claudibleModel1  = process.env.CLAUDIBLE_MODEL  || 'claude-haiku-4.5'
+  const claudibleModel2  = process.env.CLAUDIBLE_MODEL2 || ''
+  const anthropicModel1  = process.env.ANTHROPIC_MODEL1 || ''
+  const anthropicModel2  = process.env.ANTHROPIC_MODEL2 || ''
 
-  return [
+  const models: AIModelChoice[] = [
     {
-      id: 'deepseek:deepseek-reasoner',
-      label: 'DeepSeek Reasoner (Default)',
-      provider: 'deepseek',
-      model: 'deepseek-reasoner',
+      id: 'claudible:1',
+      label: `Claudible — ${claudibleModel1} (Default)`,
+      provider: 'claudible',
+      model: claudibleModel1,
     },
+    ...(claudibleModel2 ? [{
+      id: 'claudible:2',
+      label: `Claudible — ${claudibleModel2}`,
+      provider: 'claudible',
+      model: claudibleModel2,
+    }] : []),
+    ...(anthropicModel1 ? [{
+      id: 'anthropic:1',
+      label: `Anthropic — ${anthropicModel1}`,
+      provider: 'anthropic',
+      model: anthropicModel1,
+    }] : []),
+    ...(anthropicModel2 ? [{
+      id: 'anthropic:2',
+      label: `Anthropic — ${anthropicModel2}`,
+      provider: 'anthropic',
+      model: anthropicModel2,
+    }] : []),
     {
       id: `openrouter:${openrouterModel1}`,
       label: `OpenRouter — ${openrouterModel1}`,
@@ -41,24 +63,14 @@ export function getAvailableModels(): AIModelChoice[] {
       model: openrouterModel2,
     },
     {
-      id: 'anthropic:claude-haiku-4-5',
-      label: 'Anthropic — Claude Haiku 4.5',
-      provider: 'anthropic',
-      model: 'claude-haiku-4-5',
-    },
-    {
-      id: 'anthropic:claude-sonnet-4-5',
-      label: 'Anthropic — Claude Sonnet 4.5',
-      provider: 'anthropic',
-      model: 'claude-sonnet-4-5',
-    },
-    {
-      id: 'claudible:claude-haiku-4.5',
-      label: `Claudible (${process.env.CLAUDIBLE_MODEL || 'claude-haiku-4.5'})`,
-      provider: 'claudible',
-      model: process.env.CLAUDIBLE_MODEL || 'claude-haiku-4.5',
+      id: 'deepseek:deepseek-reasoner',
+      label: 'DeepSeek Reasoner',
+      provider: 'deepseek',
+      model: 'deepseek-reasoner',
     },
   ]
+
+  return models
 }
 
 /** Parse a model choice id like "deepseek:deepseek-reasoner" → { provider, model } */
@@ -66,11 +78,21 @@ export function parseModelId(modelId: string): { provider: string; model: string
   const idx = modelId.indexOf(':')
   if (idx === -1) return { provider: 'deepseek', model: modelId }
   const provider = modelId.slice(0, idx)
-  const modelFromId = modelId.slice(idx + 1)
+  const modelPart = modelId.slice(idx + 1)
+
   if (provider === 'claudible') {
-    return { provider: 'claudible', model: process.env.CLAUDIBLE_MODEL || modelFromId }
+    if (modelPart === '1') return { provider: 'claudible', model: process.env.CLAUDIBLE_MODEL || 'claude-haiku-4.5' }
+    if (modelPart === '2') return { provider: 'claudible', model: process.env.CLAUDIBLE_MODEL2 || process.env.CLAUDIBLE_MODEL || 'claude-haiku-4.5' }
+    return { provider: 'claudible', model: process.env.CLAUDIBLE_MODEL || modelPart }
   }
-  return { provider, model: modelFromId }
+
+  if (provider === 'anthropic') {
+    if (modelPart === '1') return { provider: 'anthropic', model: process.env.ANTHROPIC_MODEL1 || 'claude-haiku-4-5' }
+    if (modelPart === '2') return { provider: 'anthropic', model: process.env.ANTHROPIC_MODEL2 || 'claude-sonnet-4-5' }
+    return { provider: 'anthropic', model: modelPart }
+  }
+
+  return { provider, model: modelPart }
 }
 
 // ─── Settings (fallback from DB / env) ────────────────────────────────────────
@@ -145,7 +167,7 @@ async function generateWithAnthropic(model: string, prompt: string): Promise<str
   return block.type === 'text' ? block.text : ''
 }
 
-async function callAI(provider: string, model: string, prompt: string): Promise<string> {
+export async function callAI(provider: string, model: string, prompt: string): Promise<string> {
   if (provider === 'anthropic') {
     return generateWithAnthropic(model, prompt)
   }
@@ -153,7 +175,7 @@ async function callAI(provider: string, model: string, prompt: string): Promise<
 }
 
 // ─── JSON Parser ───────────────────────────────────────────────────────────────
-function parseJSONFromResponse(text: string): unknown[] {
+export function parseJSONFromResponse(text: string): unknown[] {
   try {
     const parsed = JSON.parse(text)
     return Array.isArray(parsed) ? parsed : [parsed]

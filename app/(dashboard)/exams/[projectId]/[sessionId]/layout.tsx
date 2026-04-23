@@ -12,6 +12,7 @@ const tabs = [
   { label: 'Samples', href: 'samples' },
   { label: 'Sections', href: 'sections' },
   { label: 'Generate', href: 'generate' },
+  { label: 'Manual', href: 'manual' },
   { label: 'Question Bank', href: 'questions' },
   { label: 'Mock Exams', href: 'mock-exams' },
   { label: 'Variables', href: 'variables' },

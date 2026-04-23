@@ -107,6 +107,8 @@ export async function POST(_req: NextRequest, { params }: { params: { id: string
       const overallTopic = sessionData?.topics?.[0]?.name || undefined
       const minMarkPerPoint: number = (sessionData as any)?.minMarkPerPoint ?? 0.5
       const vndUnit: string = (sessionData as any)?.vndUnit ?? 'million'
+      const sessionExcludingRaw = (sessionData as any)?.sessionExcludingIssues
+      const sessionExcludingIssues: string[] = sessionExcludingRaw ? JSON.parse(sessionExcludingRaw) : []
 
       // Get session variables
       let sessionVarsText = ''
@@ -231,6 +233,10 @@ export async function POST(_req: NextRequest, { params }: { params: { id: string
           minMarkPerPoint,
           assumedDate: assumedDate || undefined,
           vndUnit,
+          excludingIssues: (() => {
+            const merged = [...sessionExcludingIssues, ...(sectionConfig.excludingIssues || [])]
+            return merged.length > 0 ? merged : undefined
+          })(),
         }
 
         for await (const q of generateExamQuestions(generatorConfig, modelId)) {

@@ -40,6 +40,7 @@ type Document = {
   parseKeyword?: string | null
   parseStyle?: string | null
   parseNumber?: boolean
+  parseSuffix?: string | null
 }
 
 const fileTypes = ['SYLLABUS', 'TAX_REGULATIONS', 'SAMPLE_QUESTIONS', 'STUDY_MATERIAL', 'RATES_TARIFF', 'OTHER']
@@ -103,6 +104,7 @@ export default function DocumentsPage() {
   const [dialogParseKeyword, setDialogParseKeyword] = useState('Example')
   const [dialogParseNumber, setDialogParseNumber] = useState(true)
   const [dialogParseStyle, setDialogParseStyle] = useState('Heading2')
+  const [dialogParseSuffix, setDialogParseSuffix] = useState(':')
   const [isParsing, setIsParsing] = useState(false)
   const [parseCounts, setParseCounts] = useState<Record<string, number>>({})
 
@@ -211,6 +213,7 @@ export default function DocumentsPage() {
     setDialogParseKeyword(doc.parseKeyword || 'Example')
     setDialogParseNumber(doc.parseNumber ?? true)
     setDialogParseStyle(doc.parseStyle || 'Heading2')
+    setDialogParseSuffix(doc.parseSuffix ?? ':')
   }
 
   const handleParseConfirm = async () => {
@@ -224,6 +227,7 @@ export default function DocumentsPage() {
           parseKeyword: dialogParseKeyword,
           parseNumber: dialogParseNumber,
           parseStyle: dialogParseStyle,
+          parseSuffix: dialogParseSuffix,
         }),
       })
       const res = await fetch(`/api/sessions/${params.sessionId}/documents/${parseDialogDocId}/parse`, {
@@ -234,6 +238,7 @@ export default function DocumentsPage() {
           parseKeyword: dialogParseKeyword,
           parseNumber: dialogParseNumber,
           parseStyle: dialogParseStyle,
+          parseSuffix: dialogParseSuffix,
         }),
       })
       const data = await res.json()
@@ -434,6 +439,24 @@ export default function DocumentsPage() {
                 Followed by a number (e.g. "Example 1")
               </Label>
             </div>
+            <div className="flex items-center gap-2">
+              <Checkbox
+                id="dialogParseSuffix"
+                checked={dialogParseSuffix !== ''}
+                onCheckedChange={v => setDialogParseSuffix(v ? ':' : '')}
+              />
+              <Label htmlFor="dialogParseSuffix" className="text-xs cursor-pointer">And</Label>
+              <Input
+                value={dialogParseSuffix}
+                onChange={e => setDialogParseSuffix(e.target.value)}
+                className="h-7 w-16 text-xs"
+                placeholder=":"
+              />
+              <span className="text-xs text-gray-400">suffix (e.g. ":")</span>
+            </div>
+            <p className="text-xs text-gray-400">
+              Pattern: &quot;{dialogParseKeyword}{dialogParseNumber ? ' <N>' : ''}{dialogParseSuffix}&quot;
+            </p>
             <div className="space-y-1">
               <Label className="text-xs font-semibold">DOCX heading style</Label>
               <Select value={dialogParseStyle || 'none'} onValueChange={v => setDialogParseStyle(v === 'none' ? '' : v)}>

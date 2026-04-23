@@ -157,9 +157,10 @@ model Session {
   startDate        DateTime?
   endDate          DateTime?
   minMarkPerPoint  Float         @default(0.5)
-  vndUnit          String        @default("million")
-  createdAt        DateTime      @default(now())
-  updatedAt        DateTime      @updatedAt
+  vndUnit                  String        @default("million")
+  sessionExcludingIssues   String?       // JSON array of excluded issue strings
+  createdAt                DateTime      @default(now())
+  updatedAt                DateTime      @updatedAt
 
   // Relations
   project          Project           @relation(fields: [projectId], references: [id], onDelete: Cascade)
@@ -198,6 +199,7 @@ model Document {
   parseKeyword String?  // e.g. "Example", "Question", "Exercise"
   parseStyle   String?  // "Heading1" | "Heading2" | "Heading3" | "numbered" | "ai"
   parseNumber  Boolean  @default(true)  // whether keyword is followed by a number
+  parseSuffix  String?  @default(":")   // e.g. ":" → "Example 1:"
 
   // Relations
   session Session @relation(fields: [sessionId], references: [id], onDelete: Cascade)
