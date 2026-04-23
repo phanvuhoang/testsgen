@@ -129,7 +129,7 @@ export default function GeneratePage() {
   const [sectionConfigs, setSectionConfigs] = useState<Record<string, SectionGenConfig>>({})
   const [expandedSec, setExpandedSec] = useState<Set<string>>(new Set())
   const [extraInstructions, setExtraInstructions] = useState('')
-  const [selectedModel, setSelectedModel] = useState('deepseek:deepseek-reasoner')
+  const [selectedModel, setSelectedModel] = useState('claudible:claude-haiku-4.5')
   const [generateLanguage, setGenerateLanguage] = useState<'ENG' | 'VIE'>('ENG')
   const [assumedDate, setAssumedDate] = useState('')
 

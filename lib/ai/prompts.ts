@@ -11,6 +11,7 @@ export type GenerationConfig = {
   questionTypes: string[]
   aiInstructions?: string
   title: string
+  language?: string   // 'ENG' | 'VIE'
 }
 
 export type ExamGenerationConfig = {
@@ -55,6 +56,7 @@ export type ExamGenerationConfig = {
   }
   minMarkPerPoint?: number       // Minimum marks per marking point (default 0.5)
   assumedDate?: string           // e.g. "31 December 2025"
+  vndUnit?: string               // 'vnd' | 'thousand' | 'million'
 
   // ── Legacy breakdown (kept for backward compat) ──
   questionTypes?: string         // JSON: [{type, count, marksEach}]
@@ -71,10 +73,13 @@ export type GradingConfig = {
 
 export function buildQuizGenerationPrompt(config: GenerationConfig): string {
   const typesList = config.questionTypes.length > 0 ? config.questionTypes.join(', ') : 'MCQ'
+  const languageInstruction = config.language === 'VIE'
+    ? 'LANGUAGE: Write ALL question stems, options, and answers in Vietnamese. Use formal Vietnamese appropriate for professional exams.\n\n'
+    : ''
 
   return `You are an expert exam question creator. Generate exactly ${config.totalQuestions} quiz questions based on the provided content.
 
-CONTENT:
+${languageInstruction}CONTENT:
 ${config.documentContent || 'No specific document provided — generate general knowledge questions about the topic: ' + config.title}
 
 QUESTION SPECIFICATIONS:
@@ -275,6 +280,18 @@ export function buildExamQuestionPrompt(config: ExamGenerationConfig): string {
     ? `ASSUMED DATE: All questions in this set assume today's date is ${config.assumedDate}. Use this for deadline calculations, tax periods, and filing dates.\n\n`
     : ''
 
+  // ── VND currency unit instruction ──
+  const vndUnitLabel = config.vndUnit === 'thousand' ? 'VND 000 (thousands)'
+    : config.vndUnit === 'vnd' ? 'VND (absolute amounts)'
+    : 'VND million'
+  const vndUnitInstruction = `CURRENCY UNIT: Express all VND monetary amounts in ${vndUnitLabel}.
+${config.vndUnit === 'million' || !config.vndUnit
+  ? 'Example: write "500" to mean 500 million VND. For decimals: "round to the nearest million VND" or "to one decimal place (e.g. 1.5 million VND)".'
+  : config.vndUnit === 'thousand'
+  ? 'Example: write "500,000" to mean 500 million VND. Round to nearest thousand VND.'
+  : 'Write full VND amounts (e.g. 500,000,000 VND).'
+}\n\n`
+
   // ── Min mark / max points instruction ──
   const minMark = config.minMarkPerPoint ?? 0.5
   const maxPoints = config.marksPerQuestion > 0 ? Math.floor(config.marksPerQuestion / minMark) : 0
@@ -325,7 +342,7 @@ ${antiHallucinationRules}
 
 ${sourceDocumentsBlock}
 
-${languageInstruction}${dateInstruction}${markAllocationRule}${calcMarksInstruction}
+${languageInstruction}${dateInstruction}${vndUnitInstruction}${markAllocationRule}${calcMarksInstruction}
 ## GENERATION PARAMETERS
 SECTION: ${config.sectionName}
 TOTAL QUESTIONS TO GENERATE: ${config.count}
@@ -361,6 +378,20 @@ ${config.extraInstructions ? `Global instructions: ${config.extraInstructions}\n
    - syllabusCode: exact codes from the syllabus document
    - reference: specific article + document name
    - DO NOT include a markingScheme field \u2014 it is not required
+8. SCENARIO/CASE STUDY FORMATTING: When the question has a scenario/case description followed
+   by a question prompt, format the stem as:
+   "Case: [scenario text here]\\n\\nQuestion: [actual question prompt here]"
+   Use "Case:" label for the scenario and "Question:" label for the question prompt.
+   This applies to: SCENARIO, CASE_STUDY, ESSAY question types.
+   For MCQ with a short lead-in: use "Case: [brief context]\\n\\nQuestion: [question]"
+   For pure MCQ without scenario context: no labels needed, just the question text.
+9. correctAnswer field rules by question type:
+   - MCQ_SINGLE: exact text of correct option
+   - MCQ_MULTIPLE: correct options joined by "||"
+   - FILL_BLANK: acceptable answers joined by "||"
+   - TRUE_FALSE: "True" or "False"
+   - SCENARIO / ESSAY / CASE_STUDY / SHORT_ANSWER: set correctAnswer = null
+     These types use modelAnswer for the full worked solution.
 
 ANSWER FORMAT RULES:
 - optionExplanations correct option: brief inline calc + reg ref, e.g. "Tax = 500m \u00d7 20% = 100m (Art. 10, Decree 320/2025)"
@@ -375,7 +406,7 @@ Return a JSON array only — no markdown fences, no preamble, no explanation.
   {
     "stem": "Full question text. For scenarios: embed all numerical data in the stem.",
     "options": ["Option A", "Option B", "Option C", "Option D"] or null for non-MCQ,
-    "correctAnswer": "Exact correct answer (MCQ: exact option text; MULTIPLE: options joined by '||')",
+    "correctAnswer": "MCQ: exact option text; MULTIPLE: options joined by '||'; SCENARIO/ESSAY/CASE_STUDY/SHORT_ANSWER: null",
     "optionExplanations": {
       "A": "Wrong rate applied: used 20% instead of 22%",
       "B": "CORRECT \u2014 500m \u00d7 20% = 100m (Art. 10, Decree 320/2025)",

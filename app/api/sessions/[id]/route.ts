@@ -23,6 +23,7 @@ export async function PATCH(req: NextRequest, { params }: { params: { id: string
         startDate: body.startDate !== undefined ? (body.startDate ? new Date(body.startDate) : null) : undefined,
         endDate: body.endDate !== undefined ? (body.endDate ? new Date(body.endDate) : null) : undefined,
         minMarkPerPoint: body.minMarkPerPoint !== undefined ? Number(body.minMarkPerPoint) : undefined,
+        vndUnit: body.vndUnit !== undefined ? String(body.vndUnit) : undefined,
       }
     })
     return NextResponse.json(session)

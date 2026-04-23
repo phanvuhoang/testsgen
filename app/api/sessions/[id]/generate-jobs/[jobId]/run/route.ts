@@ -106,6 +106,7 @@ export async function POST(_req: NextRequest, { params }: { params: { id: string
       })
       const overallTopic = sessionData?.topics?.[0]?.name || undefined
       const minMarkPerPoint: number = (sessionData as any)?.minMarkPerPoint ?? 0.5
+      const vndUnit: string = (sessionData as any)?.vndUnit ?? 'million'
 
       // Get session variables
       let sessionVarsText = ''
@@ -229,6 +230,7 @@ export async function POST(_req: NextRequest, { params }: { params: { id: string
           sourceDocuments,
           minMarkPerPoint,
           assumedDate: assumedDate || undefined,
+          vndUnit,
         }
 
         for await (const q of generateExamQuestions(generatorConfig, modelId)) {
@@ -243,7 +245,9 @@ export async function POST(_req: NextRequest, { params }: { params: { id: string
                 sectionId: sectionConfig.sectionId,
                 stem: String(q.stem || ''),
                 options: q.options as any,
-                correctAnswer: String(q.correctAnswer || ''),
+                correctAnswer: (sec.questionType === 'SCENARIO' || sec.questionType === 'ESSAY' || sec.questionType === 'CASE_STUDY')
+                  ? null
+                  : (String(q.correctAnswer || '') || null),
                 markingScheme: String(q.markingScheme || ''),
                 modelAnswer: [
                   q.modelAnswer,

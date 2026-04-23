@@ -44,16 +44,13 @@ type Question = {
   createdAt: string
 }
 
-function formatRelativeTime(dateStr: string): string {
+function formatQuestionTime(dateStr: string): string {
+  if (!dateStr) return ''
   const date = new Date(dateStr)
-  const now = new Date()
-  const diffMs = now.getTime() - date.getTime()
-  const diffH = Math.floor(diffMs / 3600000)
-  const diffD = Math.floor(diffMs / 86400000)
-  if (diffH < 1) return 'just now'
-  if (diffH < 24) return `${diffH}h ago`
-  if (diffD < 7) return `${diffD}d ago`
-  return date.toLocaleDateString('en-GB', { day: 'numeric', month: 'short' })
+  return date.toLocaleString('en-GB', {
+    day: '2-digit', month: 'short', year: 'numeric',
+    hour: '2-digit', minute: '2-digit', hour12: false,
+  })
 }
 
 const difficultyColor: Record<string, string> = {
@@ -266,23 +263,6 @@ async function exportToWord(questions: Question[], filename = 'questions') {
             new TextRun({ text: q.correctAnswer, size: 20 }),
           ],
           spacing: { before: 100, after: 100 },
-        })
-      )
-    }
-
-    // Marking scheme
-    if (q.markingScheme) {
-      children.push(
-        new Paragraph({
-          children: [new TextRun({ text: 'Marking Scheme:', bold: true, size: 20 })],
-          spacing: { before: 150, after: 60 },
-        })
-      )
-      children.push(
-        new Paragraph({
-          children: [new TextRun({ text: stripHtml(q.markingScheme), size: 18, color: '1e40af' })],
-          spacing: { after: 60 },
-          indent: { left: 400 },
         })
       )
     }
@@ -592,13 +572,6 @@ export default function ExamQuestionsPage() {
           </div>
         )}
 
-        {/* Correct answer for non-MCQ */}
-        {!q.options && q.correctAnswer && (
-          <div className="p-2 bg-green-50 border border-green-200 rounded text-green-800 text-xs">
-            <strong>Correct Answer:</strong> {q.correctAnswer}
-          </div>
-        )}
-
         {/* Model Answer */}
         {q.modelAnswer && (
           <div className="p-3 bg-gray-50 border border-gray-200 rounded">
@@ -833,7 +806,7 @@ export default function ExamQuestionsPage() {
                           {q.generatedBy.split(':').pop()}
                         </span>
                       )}
-                      <span className="text-xs text-gray-400">{formatRelativeTime(q.createdAt)}</span>
+                      <span className="text-xs text-gray-400">{formatQuestionTime(q.createdAt)}</span>
                     </div>
                   </div>
                 </div>

@@ -14,18 +14,18 @@ async function extractDocumentText(filePath: string, fileType: string): Promise<
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const pdfParse = require('pdf-parse')
     const data = await pdfParse(buffer)
-    return data.text ?? ''
+    return (data.text ?? '').slice(0, 150_000)
   }
 
   if (fileType === 'docx' || fileType === 'doc') {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const mammoth = require('mammoth')
     const result = await mammoth.extractRawText({ buffer })
-    return result.value ?? ''
+    return (result.value ?? '').slice(0, 150_000)
   }
 
   // TXT or other text files
-  return buffer.toString('utf-8')
+  return buffer.toString('utf-8').slice(0, 150_000)
 }
 
 // POST /api/quiz-sets/[id]/generate — AI question generation via SSE
@@ -74,6 +74,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     questionTypes = ['MCQ'],
     aiInstructions,
     modelId,
+    language = 'ENG',
   } = body
 
   // ── Build document content ────────────────────────────────────────────────
@@ -124,7 +125,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     }
   }
 
-  const documentContent = contentParts.join('\n\n---\n\n').slice(0, 60000) // max 60k chars
+  const documentContent = contentParts.join('\n\n---\n\n').slice(0, 150_000) // max 150k chars
 
   if (!documentContent.trim()) {
     return NextResponse.json(
@@ -167,6 +168,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
           hardPoints,
           questionTypes,
           aiInstructions,
+          language,
         },
         modelId
       )

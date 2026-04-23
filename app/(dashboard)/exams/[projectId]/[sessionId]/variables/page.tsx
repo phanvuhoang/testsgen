@@ -9,6 +9,7 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useToast } from '@/components/ui/use-toast'
 import { Plus, Pencil, Trash2, Save, X, Variable, Loader2 } from 'lucide-react'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 
 type SessionVar = { id: string; varKey: string; varLabel: string; varValue: string; varUnit: string | null; description: string | null }
 
@@ -23,6 +24,7 @@ export default function VariablesPage() {
   const [addForm, setAddForm] = useState({ varKey: '', varLabel: '', varValue: '', varUnit: '', description: '' })
   // Session settings
   const [minMarkPerPoint, setMinMarkPerPoint] = useState('0.5')
+  const [vndUnit, setVndUnit] = useState('million')
   const [isSavingSettings, setIsSavingSettings] = useState(false)
 
   useEffect(() => { fetchVars(); fetchSession() }, [])
@@ -39,6 +41,7 @@ export default function VariablesPage() {
     if (res.ok) {
       const data = await res.json()
       setMinMarkPerPoint(String(data.minMarkPerPoint ?? 0.5))
+      setVndUnit(data.vndUnit ?? 'million')
     }
   }
 
@@ -48,7 +51,7 @@ export default function VariablesPage() {
       const res = await fetch(`/api/sessions/${params.sessionId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ minMarkPerPoint: Number(minMarkPerPoint) }),
+        body: JSON.stringify({ minMarkPerPoint: Number(minMarkPerPoint), vndUnit }),
       })
       if (!res.ok) throw new Error()
       toast({ title: 'Session settings saved' })
@@ -96,8 +99,8 @@ export default function VariablesPage() {
       <div className="mb-6">
         <h2 className="text-lg font-semibold mb-3">Session Settings</h2>
         <Card>
-          <CardContent className="p-4 space-y-3">
-            <div className="flex items-end gap-4">
+          <CardContent className="p-4 space-y-4">
+            <div className="flex items-end gap-4 flex-wrap">
               <div className="space-y-1">
                 <Label className="text-xs font-semibold">Min marks per marking point</Label>
                 <p className="text-xs text-gray-400">Controls question granularity — e.g. 0.5 allows half-mark points, 1.0 requires whole marks</p>
@@ -113,6 +116,20 @@ export default function VariablesPage() {
                   />
                   <span className="text-xs text-gray-500">marks / point</span>
                 </div>
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs font-semibold">Currency unit for VND amounts</Label>
+                <p className="text-xs text-gray-400">Sets how monetary amounts appear in questions</p>
+                <Select value={vndUnit} onValueChange={setVndUnit}>
+                  <SelectTrigger className="h-8 w-48 text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="million">VND million (default)</SelectItem>
+                    <SelectItem value="thousand">VND 000 (thousands)</SelectItem>
+                    <SelectItem value="vnd">VND (absolute)</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
               <Button
                 size="sm"

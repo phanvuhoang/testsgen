@@ -128,7 +128,8 @@ export default function QuizQuestionsPage() {
   // AI generate state
   const [showAIPanel, setShowAIPanel] = useState(false)
   const [aiModels, setAIModels] = useState<AIModel[]>([])
-  const [selectedModel, setSelectedModel] = useState<string>('deepseek:deepseek-reasoner')
+  const [selectedModel, setSelectedModel] = useState<string>('claudible:claude-haiku-4.5')
+  const [aiLanguage, setAiLanguage] = useState<'ENG' | 'VIE'>('ENG')
   const [aiTopic, setAITopic] = useState('')
   const [aiCount, setAICount] = useState(10)
   const [aiTypes, setAITypes] = useState<string[]>(['MCQ'])
@@ -363,6 +364,7 @@ export default function QuizQuestionsPage() {
           questionTypes: aiTypes,
           aiInstructions: aiInstructions || undefined,
           modelId: selectedModel,
+          language: aiLanguage,
         }),
       })
 
@@ -1012,8 +1014,9 @@ export default function QuizQuestionsPage() {
             </div>
           </CardHeader>
           <CardContent className="space-y-4">
-            {/* Model Selector */}
-            <div className="space-y-1.5">
+            {/* Model + Language row */}
+            <div className="flex gap-3 flex-wrap">
+            <div className="space-y-1.5 flex-1 min-w-48">
               <Label className="text-xs text-gray-600">AI Model</Label>
               <Select value={selectedModel} onValueChange={setSelectedModel}>
                 <SelectTrigger className="h-9">
@@ -1028,15 +1031,28 @@ export default function QuizQuestionsPage() {
                     ))
                   ) : (
                     <>
-                      <SelectItem value="deepseek:deepseek-reasoner">DeepSeek Reasoner (Default)</SelectItem>
+                      <SelectItem value="claudible:claude-haiku-4.5">Claudible Haiku 4.5 (Default)</SelectItem>
+                      <SelectItem value="claudible:claude-sonnet-4.6">Claudible Sonnet 4.6</SelectItem>
+                      <SelectItem value="deepseek:deepseek-reasoner">DeepSeek Reasoner</SelectItem>
                       <SelectItem value="openrouter:xiaomi/mimo-v2-pro">OpenRouter — xiaomi/mimo-v2-pro</SelectItem>
                       <SelectItem value="openrouter:qwen/qwen3-plus">OpenRouter — qwen/qwen3-plus</SelectItem>
-                      <SelectItem value="anthropic:claude-haiku-4-5">Anthropic — Claude Haiku 4.5</SelectItem>
-                      <SelectItem value="anthropic:claude-sonnet-4-5">Anthropic — Claude Sonnet 4.5</SelectItem>
                     </>
                   )}
                 </SelectContent>
               </Select>
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs text-gray-600">Language</Label>
+              <Select value={aiLanguage} onValueChange={(v) => setAiLanguage(v as 'ENG' | 'VIE')}>
+                <SelectTrigger className="h-9 w-32">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="ENG">English</SelectItem>
+                  <SelectItem value="VIE">Vietnamese</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
             </div>
 
             {/* Documents context */}

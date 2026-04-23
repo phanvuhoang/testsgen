@@ -157,6 +157,7 @@ model Session {
   startDate        DateTime?
   endDate          DateTime?
   minMarkPerPoint  Float         @default(0.5)
+  vndUnit          String        @default("million")
   createdAt        DateTime      @default(now())
   updatedAt        DateTime      @updatedAt
 

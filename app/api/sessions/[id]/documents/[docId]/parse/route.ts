@@ -300,16 +300,16 @@ ${text.slice(0, 50000)}`
 export async function POST(req: NextRequest, { params }: { params: { id: string; docId: string } }) {
   try {
     const body = await req.json().catch(() => ({}))
-    const forceAI: boolean = body.forceAI === true
+    const forceAI: boolean = body.forceAI === true || body.useAI === true
 
     // Get document
     const doc = await (db as any).document.findUnique({ where: { id: params.docId } })
     if (!doc) return NextResponse.json({ error: 'Document not found' }, { status: 404 })
 
-    // Read per-document parse config (with fallbacks)
-    const parseKeyword: string  = (doc as any).parseKeyword || 'Example'
-    const parseStyle: string    = (doc as any).parseStyle   || 'Heading2'
-    const parseNumber: boolean  = (doc as any).parseNumber  !== false
+    // Read parse config — body overrides doc config, doc config overrides defaults
+    const parseKeyword: string  = body.parseKeyword || (doc as any).parseKeyword || 'Example'
+    const parseStyle: string    = body.parseStyle   || (doc as any).parseStyle   || 'Heading2'
+    const parseNumber: boolean  = body.parseNumber  !== undefined ? body.parseNumber : ((doc as any).parseNumber !== false)
 
     const keywordPattern = parseNumber
       ? new RegExp(`^${parseKeyword}\\s+\\d+\\s*:`, 'i')

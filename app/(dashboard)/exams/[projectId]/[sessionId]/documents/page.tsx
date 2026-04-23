@@ -205,10 +205,16 @@ export default function DocumentsPage() {
   const handleParseDocument = async (docId: string) => {
     setParsingDocId(docId)
     try {
+      const doc = docs.find(d => d.id === docId)
       const res = await fetch(`/api/sessions/${params.sessionId}/documents/${docId}/parse`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ useAI: true }),
+        body: JSON.stringify({
+          useAI: true,
+          parseKeyword: doc?.parseKeyword || undefined,
+          parseStyle: doc?.parseStyle || undefined,
+          parseNumber: doc?.parseNumber ?? true,
+        }),
       })
       const data = await res.json()
       if (data.error && !data.parsed) throw new Error(data.error)
