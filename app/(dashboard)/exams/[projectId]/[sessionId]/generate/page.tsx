@@ -53,6 +53,7 @@ type ParsedSampleQ = {
   questionType: string
   topicId: string | null
   topicName: string | null
+  sectionId: string | null
 }
 
 /** Per-section generate config — replaces the old qtRows/topicRows approach */
@@ -524,6 +525,9 @@ export default function GeneratePage() {
     if (!cfg || sampleQuestions.length === 0) return null
 
     const relevantSamples = sampleQuestions.filter((sq) => {
+      // Section filter: only show samples tagged to this section (or untagged)
+      if (sq.sectionId && sq.sectionId !== sectionId) return false
+      // Topic filter: only show samples matching selected topics (or untagged)
       if (cfg.selectedTopicIds.length === 0) return true
       return sq.topicId ? cfg.selectedTopicIds.includes(sq.topicId) : true
     })
