@@ -234,7 +234,6 @@ export default function DocumentsPage() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          useAI: true,
           parseKeyword: dialogParseKeyword,
           parseNumber: dialogParseNumber,
           parseStyle: dialogParseStyle,
@@ -245,7 +244,7 @@ export default function DocumentsPage() {
       if (!res.ok || (data.error && !data.count)) throw new Error(data.error || 'Parse failed')
       setParseCounts(prev => ({ ...prev, [parseDialogDocId]: data.count ?? 0 }))
       if (data.count === 0) {
-        toast({ title: '0 questions found', description: data.error || `Strategy: ${data.debug?.strategy || 'unknown'}. Try: keyword="${data.debug?.keyword}", suffix="${data.debug?.suffix}", or switch to AI parse style.`, variant: 'destructive' })
+        toast({ title: '0 questions found', description: data.error || `Strategy: ${data.debug?.strategy || 'unknown'}. Try: keyword="${data.debug?.keyword}", suffix="${data.debug?.suffix}", or change style.`, variant: 'destructive' })
       } else {
         toast({ title: `✅ Parsed ${data.count} questions via ${data.strategy || ''}` })
       }
@@ -471,7 +470,6 @@ export default function DocumentsPage() {
                   <SelectItem value="Heading2">Heading 2</SelectItem>
                   <SelectItem value="Heading3">Heading 3</SelectItem>
                   <SelectItem value="numbered">Numbered list (1. 2. 3.)</SelectItem>
-                  <SelectItem value="ai">AI parse only (slowest, most accurate)</SelectItem>
                 </SelectContent>
               </Select>
               <p className="text-xs text-gray-400">For PDF/TXT, heading style is ignored — keyword matching is used.</p>

@@ -10,8 +10,9 @@ import { Card, CardContent } from '@/components/ui/card'
 import { Badge } from '@/components/ui/badge'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Checkbox } from '@/components/ui/checkbox'
 import { useToast } from '@/components/ui/use-toast'
-import { Plus, Pencil, Trash2, Save, X, ChevronDown, ChevronUp, BookOpen, Loader2 } from 'lucide-react'
+import { Plus, Pencil, Trash2, Save, ChevronDown, ChevronUp, BookOpen, Loader2, X } from 'lucide-react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 
 type ParsedQuestion = {
@@ -20,7 +21,9 @@ type ParsedQuestion = {
   content: string
   answer: string | null
   questionType: string
+  topicId: string | null
   topicName: string | null
+  sectionId: string | null
   sectionName: string | null
   syllabusCode: string | null
   difficulty: string
@@ -59,6 +62,16 @@ export default function SamplesPage() {
   const [topics, setTopics] = useState<{ id: string; name: string; isOverall: boolean; parentId: string | null }[]>([])
   const [sections, setSections] = useState<{ id: string; name: string }[]>([])
 
+  // Filter state
+  const [search, setSearch] = useState('')
+  const [filterTopicId, setFilterTopicId] = useState('__all__')
+  const [filterSectionId, setFilterSectionId] = useState('__all__')
+  const [filterType, setFilterType] = useState('__all__')
+
+  // Bulk select state
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [isBulkDeleting, setIsBulkDeleting] = useState(false)
+
   useEffect(() => {
     fetchQuestions()
     fetch(`/api/sessions/${params.sessionId}/topics`).then(r => r.ok ? r.json() : []).then(setTopics).catch(() => {})
@@ -72,6 +85,62 @@ export default function SamplesPage() {
       if (res.ok) setQuestions(await res.json())
     } finally {
       setIsLoading(false)
+    }
+  }
+
+  // Client-side filtering
+  const filteredQuestions = questions.filter(q => {
+    if (search && !q.content.toLowerCase().includes(search.toLowerCase()) && !(q.title ?? '').toLowerCase().includes(search.toLowerCase())) return false
+    if (filterTopicId !== '__all__' && q.topicId !== filterTopicId) return false
+    if (filterSectionId !== '__all__' && q.sectionId !== filterSectionId) return false
+    if (filterType !== '__all__' && q.questionType !== filterType) return false
+    return true
+  })
+
+  const clearFilters = () => {
+    setSearch('')
+    setFilterTopicId('__all__')
+    setFilterSectionId('__all__')
+    setFilterType('__all__')
+  }
+
+  const hasFilters = search || filterTopicId !== '__all__' || filterSectionId !== '__all__' || filterType !== '__all__'
+
+  // Bulk select helpers
+  const allFilteredSelected = filteredQuestions.length > 0 && filteredQuestions.every(q => selectedIds.has(q.id))
+  const toggleSelectAll = () => {
+    if (allFilteredSelected) {
+      setSelectedIds(new Set())
+    } else {
+      setSelectedIds(new Set(filteredQuestions.map(q => q.id)))
+    }
+  }
+  const toggleSelect = (id: string) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
+  const handleBulkDelete = async () => {
+    if (!confirm(`Delete ${selectedIds.size} selected questions?`)) return
+    setIsBulkDeleting(true)
+    const count = selectedIds.size
+    try {
+      await Promise.all(
+        Array.from(selectedIds).map(id =>
+          fetch(`/api/sessions/${params.sessionId}/parsed-questions/${id}`, { method: 'DELETE' })
+        )
+      )
+      setQuestions(prev => prev.filter(q => !selectedIds.has(q.id)))
+      setSelectedIds(new Set())
+      toast({ title: `Deleted ${count} questions` })
+    } catch {
+      toast({ title: 'Bulk delete failed', variant: 'destructive' })
+    } finally {
+      setIsBulkDeleting(false)
     }
   }
 
@@ -117,9 +186,12 @@ export default function SamplesPage() {
     const res = await fetch(`/api/sessions/${params.sessionId}/parsed-questions/${id}`, { method: 'DELETE' })
     if (res.ok) {
       setQuestions(prev => prev.filter(q => q.id !== id))
+      setSelectedIds(prev => { const next = new Set(prev); next.delete(id); return next })
       toast({ title: 'Deleted' })
     }
   }
+
+  const nonOverallTopics = topics.filter(t => !t.isOverall)
 
   return (
     <div className="p-6 max-w-4xl mx-auto">
@@ -133,22 +205,102 @@ export default function SamplesPage() {
         </Button>
       </div>
 
+      {/* Filter bar */}
+      <div className="flex flex-wrap gap-2 mb-3 items-center">
+        <Input
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          placeholder="Search..."
+          className="h-8 text-xs w-48"
+        />
+        <Select value={filterTopicId} onValueChange={setFilterTopicId}>
+          <SelectTrigger className="h-8 text-xs w-36"><SelectValue placeholder="All Topics" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__all__" className="text-xs">All Topics</SelectItem>
+            {nonOverallTopics.map(t => (
+              <SelectItem key={t.id} value={t.id} className="text-xs">
+                {t.parentId ? `↳ ${t.name}` : t.name}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Select value={filterSectionId} onValueChange={setFilterSectionId}>
+          <SelectTrigger className="h-8 text-xs w-36"><SelectValue placeholder="All Sections" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__all__" className="text-xs">All Sections</SelectItem>
+            {sections.map(s => (
+              <SelectItem key={s.id} value={s.id} className="text-xs">{s.name}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        <Select value={filterType} onValueChange={setFilterType}>
+          <SelectTrigger className="h-8 text-xs w-36"><SelectValue placeholder="All Types" /></SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__all__" className="text-xs">All Types</SelectItem>
+            {Object.entries(questionTypeLabels).map(([v, l]) => (
+              <SelectItem key={v} value={v} className="text-xs">{l}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+        {hasFilters && (
+          <Button variant="ghost" size="sm" onClick={clearFilters} className="h-8 text-xs text-gray-500">
+            <X className="h-3 w-3 mr-1" />Clear
+          </Button>
+        )}
+      </div>
+
+      {/* Bulk actions header */}
+      {!isLoading && questions.length > 0 && (
+        <div className="flex items-center gap-3 mb-2 px-1">
+          <Checkbox
+            checked={allFilteredSelected}
+            onCheckedChange={toggleSelectAll}
+            className="h-3.5 w-3.5"
+          />
+          <span className="text-xs text-gray-500">
+            Showing {filteredQuestions.length} of {questions.length} questions
+            {selectedIds.size > 0 && ` — ${selectedIds.size} selected`}
+          </span>
+          {selectedIds.size > 0 && (
+            <Button
+              size="sm"
+              variant="destructive"
+              onClick={handleBulkDelete}
+              disabled={isBulkDeleting}
+              className="h-7 text-xs ml-auto"
+            >
+              {isBulkDeleting ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <Trash2 className="h-3 w-3 mr-1" />}
+              Delete Selected ({selectedIds.size})
+            </Button>
+          )}
+        </div>
+      )}
+
       {isLoading ? (
         <div className="space-y-3">
           {Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-20 w-full" />)}
         </div>
-      ) : questions.length === 0 ? (
+      ) : filteredQuestions.length === 0 ? (
         <div className="text-center py-16 text-gray-400">
           <BookOpen className="h-12 w-12 mx-auto mb-3" />
-          <p className="font-medium">No sample questions yet</p>
-          <p className="text-sm mt-1">Upload a Sample Questions document and click "Parse", or add manually</p>
+          <p className="font-medium">{questions.length === 0 ? 'No sample questions yet' : 'No questions match filters'}</p>
+          <p className="text-sm mt-1">
+            {questions.length === 0
+              ? 'Upload a Sample Questions document and click "Parse", or add manually'
+              : 'Try clearing the filters'}
+          </p>
         </div>
       ) : (
         <div className="space-y-2">
-          {questions.map((q, idx) => (
+          {filteredQuestions.map((q, idx) => (
             <Card key={q.id}>
               <CardContent className="p-4">
                 <div className="flex items-start gap-3">
+                  <Checkbox
+                    checked={selectedIds.has(q.id)}
+                    onCheckedChange={() => toggleSelect(q.id)}
+                    className="h-3.5 w-3.5 mt-1 shrink-0"
+                  />
                   <span className="text-xs font-mono text-gray-300 mt-1 w-6 shrink-0">{idx + 1}</span>
                   <div className="flex-1 min-w-0">
                     <div className="flex items-center gap-2 flex-wrap mb-1">

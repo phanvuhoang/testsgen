@@ -408,27 +408,9 @@ export async function POST(req: NextRequest, { params }: { params: { id: string;
       }
     }
 
-    // AI fallback — always if structural found 0, or forceAI/ai style
-    if (rawQuestions.length === 0 || parseStyle === 'ai' || forceAI) {
-      console.log('[parse] falling back to AI parse...')
-      const text = docxBuffer
-        ? await extractTextFromBuffer(docxBuffer, doc.filePath)
-        : await extractText(doc.filePath, doc.isManualInput, doc.content)
-      if (!text || text.trim().length < 10) {
-        return NextResponse.json({
-          error: 'Could not extract text from document. Is the file corrupted?',
-          parsed: [], count: 0, debug: { strategy, paragraphs: 0 }
-        })
-      }
-      console.log(`[parse] AI parse on ${text.length} chars`)
-      rawQuestions = await parseWithAI(text, params.id, parseKeyword, parseNumber)
-      strategy = 'AI'
-      console.log(`[parse] AI result: ${rawQuestions.length} questions`)
-    }
-
     if (rawQuestions.length === 0) {
       return NextResponse.json({
-        error: `No questions found. Pattern tried: "${parseKeyword}${parseNumber ? ' <N>' : ''}${parseSuffix}". Try: (1) change keyword, (2) use style "None", (3) try AI parse mode.`,
+        error: `No questions found. Pattern tried: "${parseKeyword}${parseNumber ? ' <N>' : ''}${parseSuffix}". Try: (1) change keyword, (2) change style, (3) adjust suffix.`,
         parsed: [], count: 0,
         debug: { strategy, keyword: parseKeyword, suffix: parseSuffix, number: parseNumber }
       })
