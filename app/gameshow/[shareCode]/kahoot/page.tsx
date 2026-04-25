@@ -174,6 +174,8 @@ export default function KahootPage() {
   const configRef = useRef<GameshowConfig|null>(null)
   // Ref to always read current submitted state (avoids stale closure in timer)
   const submittedRef = useRef(false)
+  // Ref to always read current question index (avoids stale closure in SSE handler)
+  const currentIdxRef = useRef(0)
   const currentQuestion = questions[currentIdx]
   const currentPlayer = players[currentPlayerIdx]
   const isMultiple = currentQuestion?.questionType === 'MULTIPLE_RESPONSE'
@@ -186,6 +188,7 @@ export default function KahootPage() {
   useEffect(() => { roomCodeRef.current = roomCode }, [roomCode])
   useEffect(() => { configRef.current = config }, [config])
   useEffect(() => { submittedRef.current = submitted }, [submitted])
+  useEffect(() => { currentIdxRef.current = currentIdx }, [currentIdx])
 
   // Fetch config — detect join vs admin flow
   useEffect(() => {
@@ -296,13 +299,18 @@ export default function KahootPage() {
             const elapsed = (Date.now() - startTime) / 1000
             const cfg = configRef.current
             const remaining = Math.max(1, Math.round((cfg?.timeLimitSeconds ?? 30) - elapsed))
-            setCurrentIdx(idx)
-            setSelectedAnswer(null); setSelectedMultiple([]); setFillAnswer('')
-            setSubmitted(false); setIsCorrect(null); setDistribution({})
-            setMyLastPts(0)
+            // Only reset answer state if this is a NEW question — prevents SSE updates
+            // during the same question from clearing a player's submitted answer
+            const isNewQuestion = idx !== currentIdxRef.current || !submittedRef.current
+            if (isNewQuestion) {
+              setCurrentIdx(idx)
+              setSelectedAnswer(null); setSelectedMultiple([]); setFillAnswer('')
+              setSubmitted(false); setIsCorrect(null); setDistribution({})
+              setMyLastPts(0)
+              timeCountPlayedRef.current = false
+            }
             setTimeLeft(remaining)
             setQuestionStartTime(startTime)
-            timeCountPlayedRef.current = false
             setPhase('question')
           } else if (gs.phase === 'reveal') {
             clearInterval(timerRef.current!)
@@ -336,8 +344,7 @@ export default function KahootPage() {
         if (prev<=5&&!timeCountPlayedRef.current){timeCountPlayedRef.current=true;audio.playTimeCount()}
         if (prev<=1){
           clearInterval(timerRef.current!)
-          // Online players don't call handleTimeout — wait for SSE reveal from admin
-          if (!joinRoomCode) handleTimeout()
+          handleTimeout()
           return 0
         }
         return prev-1
@@ -983,7 +990,13 @@ export default function KahootPage() {
               ?<span className="text-yellow-400 font-bold text-sm animate-pulse">⏸ Waiting…</span>
               :<TimerRing timeLeft={timeLeft} maxTime={maxTime}/>
             }
-            <div className="text-right"><div className="text-white font-bold">{currentPlayer?.score??0}</div><div className="text-xs text-indigo-400">pts</div></div>
+            {/* Score: hide for online admin (no meaningful personal score); show for players/local */}
+            {(!roomCode || joinRoomCode) && (
+              <div className="text-right">
+                <div className="text-white font-bold">{joinRoomCode ? myTotalScore : (currentPlayer?.score ?? 0)}</div>
+                <div className="text-xs text-indigo-400">pts</div>
+              </div>
+            )}
           </div>
         </div>
 
