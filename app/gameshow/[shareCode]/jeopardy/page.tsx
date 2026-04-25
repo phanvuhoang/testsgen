@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { useParams } from 'next/navigation'
+import { useParams, useSearchParams } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
@@ -29,10 +29,13 @@ type GameshowConfig = {
   quizSetTitle: string; questions: Question[]
   clickStartToCount: boolean; manualScoring: boolean; shortLink: string | null
 }
-type Player = { id: string; nickname: string; avatarColor: string; score: number; correctCount: number; wrongCount: number }
+type Player = {
+  id: string; nickname: string; avatarColor: string; score: number; correctCount: number; wrongCount: number
+  lastPointsEarned?: number
+}
 type TileState = 'available' | 'answered'
 type BoardTile = { questionId: string; category: string; points: number; state: TileState }
-type Phase = 'setup' | 'board' | 'question' | 'buzzer' | 'respond' | 'reveal' | 'scoring' | 'linear_question' | 'leaderboard' | 'gameover'
+type Phase = 'setup' | 'lobby' | 'join' | 'waiting' | 'board' | 'question' | 'buzzer' | 'respond' | 'reveal' | 'scoring' | 'linear_question' | 'leaderboard' | 'gameover'
 
 // ─── Utilities ─────────────────────────────────────────────────────────────────
 function parseOptions(q: Question): string[] {
@@ -52,7 +55,7 @@ function getCorrectAnswers(q: Question): string[] {
   return q.correctAnswer.split('||').map(s => s.trim()).filter(Boolean)
 }
 function normalize(s: string) {
-  return s.trim().toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/đ/g, 'd')
+  return s.trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '').replace(/đ/g, 'd')
 }
 function shuffle<T>(arr: T[]): T[] {
   const a = [...arr]
@@ -62,7 +65,17 @@ function shuffle<T>(arr: T[]): T[] {
   }
   return a
 }
-const PLAYER_COLORS = ['#6366f1', '#ef4444', '#f59e0b', '#10b981', '#8b5cf6', '#ec4899']
+const PLAYER_COLORS = ['#6366f1', '#ef4444', '#f59e0b', '#10b981', '#8b5cf6', '#ec4899', '#06b6d4', '#84cc16']
+
+// ─── LobbyQR ─────────────────────────────────────────────────────────────────
+function LobbyQR({ url }: { url: string }) {
+  const [qr, setQr] = useState<string | null>(null)
+  useEffect(() => {
+    if (url) QRCode.toDataURL(url, { margin: 1, width: 280 }).then(setQr).catch(() => {})
+  }, [url])
+  if (!qr) return <div className="w-48 h-48 mx-auto bg-white/20 rounded-2xl animate-pulse mb-2" />
+  return <img src={qr} alt="QR Code" className="w-56 h-56 mx-auto rounded-2xl border-4 border-white/40 mb-2" />
+}
 
 // ─── Buzzer Button ─────────────────────────────────────────────────────────────
 function BuzzerButton({ onClick, disabled, label = 'BUZZ IN' }: { onClick: () => void; disabled: boolean; label?: string }) {
@@ -84,7 +97,10 @@ function BuzzerButton({ onClick, disabled, label = 'BUZZ IN' }: { onClick: () =>
 // ─── Main ──────────────────────────────────────────────────────────────────────
 export default function JeopardyPage() {
   const params = useParams()
+  const searchParams = useSearchParams()
   const shareCode = params.shareCode as string
+  // ?room=ROOMCODE → player is joining an existing online session
+  const joinRoomCode = searchParams.get('room')
 
   const [config, setConfig] = useState<GameshowConfig | null>(null)
   const [loading, setLoading] = useState(true)
@@ -102,7 +118,7 @@ export default function JeopardyPage() {
   const [currentTileCategory, setCurrentTileCategory] = useState('')
   const [linearIdx, setLinearIdx] = useState(0)
 
-  // Buzzer
+  // Buzzer (local/single only)
   const [buzzOrder, setBuzzOrder] = useState<{ playerIdx: number; timeMs: number }[]>([])
   const [buzzerOpen, setBuzzerOpen] = useState(false)
   const [buzzerOpenTime, setBuzzerOpenTime] = useState(0)
@@ -120,11 +136,11 @@ export default function JeopardyPage() {
   const [currentPlayerIdx, setCurrentPlayerIdx] = useState(0)
   const [setupNames, setSetupNames] = useState([''])
 
-  // Answered questions tracking for Free Choice
+  // Answered questions tracking
   const [answeredQuestions, setAnsweredQuestions] = useState<Set<string>>(new Set())
-  const [scoringAdjustments, setScoringAdjustments] = useState<Record<string,number>>({})
+  const [scoringAdjustments, setScoringAdjustments] = useState<Record<string, number>>({})
 
-  // QR code
+  // QR code (setup screen)
   const [qrDataUrl, setQrDataUrl] = useState<string | null>(null)
   const [showQr, setShowQr] = useState(false)
 
@@ -135,8 +151,40 @@ export default function JeopardyPage() {
   const leaderboardTimerRef = useRef<NodeJS.Timeout | null>(null)
 
   const timerRef = useRef<NodeJS.Timeout | null>(null)
-  const isAnsweredRef = useRef(false)  // guards against timeout firing after answer
+  const isAnsweredRef = useRef(false)
   const responseTimerRef = useRef<NodeJS.Timeout | null>(null)
+
+  // Online multiplayer state
+  const [joinNickname, setJoinNickname] = useState('')
+  const [joinError, setJoinError] = useState<string | null>(null)
+  const [joinLoading, setJoinLoading] = useState(false)
+  const [myPlayerId, setMyPlayerId] = useState<string | null>(null)
+  const [onlineLobbyPlayers, setOnlineLobbyPlayers] = useState<{ id: string; nickname: string }[]>([])
+  const [roomCode, setRoomCode] = useState<string | null>(null)
+  const lobbyPollRef = useRef<NodeJS.Timeout | null>(null)
+
+  // Online player personal score tracking
+  const [myLastPts, setMyLastPts] = useState(0)
+  const [myTotalScore, setMyTotalScore] = useState(0)
+
+  // Online player submitted overlay state
+  const [submitted, setSubmitted] = useState(false)
+
+  // Refs for stale closure safety
+  const roomCodeRef = useRef<string | null>(null)
+  const evsRef = useRef<EventSource | null>(null)
+  const configRef = useRef<GameshowConfig | null>(null)
+  const submittedRef = useRef(false)
+  // For Jeopardy we track currentQuestionId instead of index
+  const currentQIdRef = useRef<string | null>(null)
+
+  // Sync refs
+  useEffect(() => { roomCodeRef.current = roomCode }, [roomCode])
+  useEffect(() => { configRef.current = config }, [config])
+  useEffect(() => { submittedRef.current = submitted }, [submitted])
+  useEffect(() => { currentQIdRef.current = currentQuestion?.id ?? null }, [currentQuestion])
+
+  const isFreeChoice = config?.selectionMode === 'FREE_CHOICE'
 
   // Music toggle button
   const MusicBtn = () => (
@@ -149,25 +197,165 @@ export default function JeopardyPage() {
     </button>
   )
 
-  // Fetch config
+  // ─── Fetch config — detect join vs admin flow ────────────────────────────
   useEffect(() => {
     fetch(`/api/gameshow/${shareCode}`)
       .then(r => r.json())
-      .then(data => {
-        if (data.error) { setError(data.error); return }
-        if (data.type !== 'JEOPARDY') { setError('This gameshow is not a Jeopardy game'); return }
+      .then(async data => {
+        if (data.error) { setError(data.error); setLoading(false); return }
+        if (data.type !== 'JEOPARDY') { setError('This gameshow is not a Jeopardy game'); setLoading(false); return }
         setConfig(data)
-        setLoading(false)
-        // Generate QR code for room join URL
-        const joinUrl = data.shortLink || `${window.location.origin}/gameshow/${data.shareCode}`
-        QRCode.toDataURL(joinUrl, { margin: 1, width: 200 }).then(setQrDataUrl).catch(() => {})
-        // Play opening music
-        audio.playBg('opening', 0.5)
+
+        if (data.playMode === 'ONLINE' && joinRoomCode) {
+          // Player joining existing room
+          setLoading(false)
+          setPhase('join')
+        } else if (data.playMode === 'ONLINE' && !joinRoomCode) {
+          // Admin: auto-create online session
+          try {
+            const res = await fetch(`/api/gameshow/${shareCode}/session`, {
+              method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({})
+            })
+            const sData = await res.json()
+            const allQs: Question[] = data.questions ?? []
+            setQuestions(allQs)
+            setRoomCode(sData.roomCode)
+            setOnlineLobbyPlayers([])
+            setPhase('lobby')
+            audio.playBg('opening', 0.5)
+          } catch {
+            setError('Failed to create game session')
+          }
+          setLoading(false)
+        } else {
+          // Setup QR code for non-online modes
+          const joinUrl = data.shortLink || `${window.location.origin}/gameshow/${data.shareCode}`
+          QRCode.toDataURL(joinUrl, { margin: 1, width: 200 }).then(setQrDataUrl).catch(() => {})
+          audio.playBg('opening', 0.5)
+          setLoading(false)
+        }
       })
-      .catch(() => setError('Failed to load gameshow'))
+      .catch(() => { setError('Failed to load gameshow'); setLoading(false) })
   }, [shareCode])
 
-  // Build board from questions
+  // ─── Online lobby polling ─────────────────────────────────────────────────
+  useEffect(() => {
+    if (phase !== 'lobby' || !roomCode) return
+    const poll = async () => {
+      try {
+        const res = await fetch(`/api/gameshow/${shareCode}/session/${roomCode}`)
+        const data = await res.json()
+        if (data.players) setOnlineLobbyPlayers(data.players.map((p: any) => ({ id: p.id, nickname: p.nickname })))
+      } catch {}
+    }
+    poll()
+    lobbyPollRef.current = setInterval(poll, 2000)
+    return () => clearInterval(lobbyPollRef.current!)
+  }, [phase, roomCode])
+
+  // ─── Online player: subscribe to SSE after joining room ──────────────────
+  useEffect(() => {
+    if (!joinRoomCode || !myPlayerId) return
+    let cancelled = false
+
+    const init = async () => {
+      try {
+        const res = await fetch(`/api/gameshow/${shareCode}/session/${joinRoomCode}`)
+        const data = await res.json()
+        if (cancelled || !data.gameshow) return
+        const qs: Question[] = data.gameshow.quizSet?.questions ?? []
+        setQuestions(qs)
+        if (data.players) setOnlineLobbyPlayers(data.players.map((p: any) => ({ id: p.id, nickname: p.nickname })))
+      } catch {}
+
+      if (cancelled) return
+      const es = new EventSource(`/api/gameshow/${shareCode}/session/${joinRoomCode}/events`)
+      evsRef.current = es
+
+      es.onmessage = (event) => {
+        try {
+          const msg = JSON.parse(event.data)
+          if (msg.type !== 'state') return
+
+          // Sync players from server
+          if (msg.players) {
+            setOnlineLobbyPlayers(msg.players.map((p: any) => ({ id: p.id, nickname: p.nickname })))
+            setPlayers(msg.players.map((p: any, i: number) => ({
+              id: p.id, nickname: p.nickname,
+              avatarColor: PLAYER_COLORS[i % PLAYER_COLORS.length],
+              score: p.score ?? 0,
+              correctCount: p.correctCount ?? 0, wrongCount: p.wrongCount ?? 0,
+              lastPointsEarned: p.lastPointsEarned ?? 0,
+            })))
+            const myIdx = msg.players.findIndex((p: any) => p.id === myPlayerId)
+            if (myIdx >= 0) setCurrentPlayerIdx(myIdx)
+          }
+
+          const gs = msg.gameState
+          if (!gs) return
+
+          if (gs.phase === 'board') {
+            clearInterval(timerRef.current!)
+            // Update board state from server if answeredQuestionIds provided
+            if (gs.answeredQuestionIds) {
+              setAnsweredQuestions(new Set(gs.answeredQuestionIds))
+              setBoard(prev => prev.map(col => col.map(tile =>
+                gs.answeredQuestionIds.includes(tile.questionId) ? { ...tile, state: 'answered' as TileState } : tile
+              )))
+            }
+            setPhase('waiting') // Player sees "waiting for host to pick"
+          } else if (gs.phase === 'question') {
+            const qId = gs.currentQuestionId
+            const tilePoints = gs.currentTilePoints ?? 100
+            const startTime = gs.questionStartTime ?? Date.now()
+            const elapsed = (Date.now() - startTime) / 1000
+            const cfg = configRef.current
+            const remaining = Math.max(1, Math.round((cfg?.timeLimitSeconds ?? 30) - elapsed))
+            // Only reset if this is a NEW question
+            const isNewQuestion = qId !== currentQIdRef.current || !submittedRef.current
+            if (isNewQuestion) {
+              // Find the question in questions array
+              setCurrentQuestion(prev => {
+                // We'll set it properly below via the questions state
+                return null
+              })
+              setCurrentTilePoints(tilePoints)
+              setTextAnswer('')
+              setSelectedMCQ(null)
+              setIsCorrect(null)
+              setSubmitted(false)
+              setMyLastPts(0)
+              isAnsweredRef.current = false
+              timeCountPlayedRef.current = false
+            }
+            setQuestionTimeLeft(remaining)
+            setPhase('question')
+            // Look up question by id — use functional update to access latest questions
+            setQuestions(prev => {
+              const q = prev.find(q => q.id === qId)
+              if (q) setCurrentQuestion(q)
+              return prev
+            })
+          } else if (gs.phase === 'reveal') {
+            clearInterval(timerRef.current!)
+            setPhase('reveal')
+          } else if (gs.phase === 'leaderboard') {
+            clearInterval(timerRef.current!)
+            audio.playBg('leaderboard', 0.6)
+            setPhase('leaderboard')
+          } else if (gs.phase === 'gameover') {
+            clearInterval(timerRef.current!)
+            setPhase('gameover')
+          }
+        } catch {}
+      }
+    }
+
+    init()
+    return () => { cancelled = true; evsRef.current?.close(); evsRef.current = null }
+  }, [myPlayerId, joinRoomCode, shareCode])
+
+  // ─── Build board from questions ──────────────────────────────────────────
   const buildBoard = (qs: Question[], cfg: GameshowConfig) => {
     const numCats = cfg.categoriesCount
     const numTiers = cfg.tiersPerCategory
@@ -176,7 +364,6 @@ export default function JeopardyPage() {
     points = points.slice(0, numTiers)
     setTierPoints(points)
 
-    // Build category names: use configured names if available, otherwise fall back to question topics
     let configuredNames: string[] = []
     try { if (cfg.categoryNames) configuredNames = JSON.parse(cfg.categoryNames) } catch {}
     const topicSet = new Set(qs.map(q => q.topic).filter(Boolean) as string[])
@@ -187,16 +374,13 @@ export default function JeopardyPage() {
     }
     setCategories(catNames)
 
-    // Parse jeopardy tags if available
-    let jTags: Record<string, {category: number, tier: number}> = {}
+    let jTags: Record<string, { category: number, tier: number }> = {}
     try { if ((cfg as any).jeopardyTags) jTags = JSON.parse((cfg as any).jeopardyTags) } catch {}
     const hasTagging = Object.keys(jTags).length > 0
 
     if (hasTagging) {
-      // Place questions by tag
-      const grid: BoardTile[][] = Array.from({length: numCats}, () => Array(numTiers).fill(null))
+      const grid: BoardTile[][] = Array.from({ length: numCats }, () => Array(numTiers).fill(null))
       const usedSlots = new Set<string>()
-      // Place tagged questions
       for (const q of qs) {
         const tag = jTags[q.id]
         if (!tag) continue
@@ -207,7 +391,6 @@ export default function JeopardyPage() {
           usedSlots.add(`${ci}-${ti}`)
         }
       }
-      // Fill remaining slots with untagged questions
       const untagged = qs.filter(q => !jTags[q.id])
       let ui = 0
       for (let ci = 0; ci < numCats; ci++) {
@@ -217,14 +400,12 @@ export default function JeopardyPage() {
             ui++
           }
           if (!grid[ci][ti]) {
-            // Fill with placeholder if no question available
             grid[ci][ti] = { questionId: '', category: catNames[ci], points: points[ti] ?? 0, state: 'answered' }
           }
         }
       }
       setBoard(grid)
     } else {
-      // Original logic: distribute questions across the grid
       const shuffledQs = shuffle(qs)
       const boardData: BoardTile[][] = catNames.map((cat, ci) =>
         points.map((pts, ti) => {
@@ -262,11 +443,73 @@ export default function JeopardyPage() {
     if (config.selectionMode === 'FREE_CHOICE') {
       buildBoard(qs, config)
       setPhase('board')
-      // Play selecting-question music on board
       audio.playBg('selecting', 0.5)
     } else {
       setPhase('linear_question')
       showLinearQuestion(qs, 0, config)
+    }
+  }
+
+  // ─── Online admin: build board and start lobby ────────────────────────────
+  const buildBoardForOnline = (qs: Question[], cfg: GameshowConfig) => {
+    const numCats = cfg.categoriesCount
+    const numTiers = cfg.tiersPerCategory
+    let points: number[] = [10, 25, 50, 100, 200]
+    try { if (cfg.tierPoints) points = JSON.parse(cfg.tierPoints) } catch {}
+    points = points.slice(0, numTiers)
+    setTierPoints(points)
+
+    let configuredNames: string[] = []
+    try { if (cfg.categoryNames) configuredNames = JSON.parse(cfg.categoryNames) } catch {}
+    const topicSet = new Set(qs.map(q => q.topic).filter(Boolean) as string[])
+    const topicList = Array.from(topicSet)
+    const catNames: string[] = []
+    for (let i = 0; i < numCats; i++) {
+      catNames.push(configuredNames[i] || topicList[i] || `Category ${i + 1}`)
+    }
+    setCategories(catNames)
+
+    let jTags: Record<string, { category: number, tier: number }> = {}
+    try { if ((cfg as any).jeopardyTags) jTags = JSON.parse((cfg as any).jeopardyTags) } catch {}
+    const hasTagging = Object.keys(jTags).length > 0
+
+    if (hasTagging) {
+      const grid: BoardTile[][] = Array.from({ length: numCats }, () => Array(numTiers).fill(null))
+      const usedSlots = new Set<string>()
+      for (const q of qs) {
+        const tag = jTags[q.id]
+        if (!tag) continue
+        const ci = tag.category - 1
+        const ti = tag.tier - 1
+        if (ci >= 0 && ci < numCats && ti >= 0 && ti < numTiers && !usedSlots.has(`${ci}-${ti}`)) {
+          grid[ci][ti] = { questionId: q.id, category: catNames[ci], points: points[ti] ?? (ti + 1) * 100, state: 'available' }
+          usedSlots.add(`${ci}-${ti}`)
+        }
+      }
+      const untagged = qs.filter(q => !jTags[q.id])
+      let ui = 0
+      for (let ci = 0; ci < numCats; ci++) {
+        for (let ti = 0; ti < numTiers; ti++) {
+          if (!grid[ci][ti] && ui < untagged.length) {
+            grid[ci][ti] = { questionId: untagged[ui].id, category: catNames[ci], points: points[ti] ?? (ti + 1) * 100, state: 'available' }
+            ui++
+          }
+          if (!grid[ci][ti]) {
+            grid[ci][ti] = { questionId: '', category: catNames[ci], points: points[ti] ?? 0, state: 'answered' }
+          }
+        }
+      }
+      setBoard(grid)
+    } else {
+      const shuffledQs = shuffle(qs)
+      const boardData: BoardTile[][] = catNames.map((cat, ci) =>
+        points.map((pts, ti) => {
+          const qIdx = ci * numTiers + ti
+          const q = shuffledQs[qIdx % shuffledQs.length]
+          return { questionId: q.id, category: cat, points: pts, state: 'available' as TileState }
+        })
+      )
+      setBoard(boardData)
     }
   }
 
@@ -295,12 +538,10 @@ export default function JeopardyPage() {
       setPhase('linear_question')
     } else {
       if (activeConfig?.playMode !== 'SINGLE') {
-        // Multiplayer linear: show question then open buzzer, timer NOT running yet
         setTimerRunning(false)
         setPhase('linear_question')
         openBuzzerPhase()
       } else {
-        // Single player: start timer immediately
         audio.playBg('game-play', 0.55)
         setTimerRunning(true)
         setPhase('linear_question')
@@ -313,6 +554,10 @@ export default function JeopardyPage() {
     if (!tile || tile.state !== 'available') return
     const q = questions.find(q => q.id === tile.questionId)
     if (!q) return
+
+    const rc = roomCodeRef.current
+    const isOnlineAdmin = !!rc && !joinRoomCode
+
     isAnsweredRef.current = false
     setCurrentQuestion(q)
     setCurrentTilePoints(tile.points)
@@ -326,19 +571,40 @@ export default function JeopardyPage() {
     const timeLimit = config?.timeLimitSeconds ?? 30
     setQuestionTimeLeft(timeLimit)
 
+    if (isOnlineAdmin) {
+      // Broadcast question to all players via PATCH
+      const startTime = Date.now()
+      fetch(`/api/gameshow/${shareCode}/session/${rc}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          gameState: {
+            phase: 'question',
+            currentQuestionId: q.id,
+            currentTilePoints: tile.points,
+            questionStartTime: startTime,
+          }
+        })
+      }).catch(() => {})
+      // Admin sees the question but cannot answer — start timer
+      setSubmitted(false)
+      isAnsweredRef.current = true // admin can't answer - mark as answered to prevent answer UI
+      setQuestionTimeLeft(timeLimit)
+      audio.playBg('game-play', 0.55)
+      setTimerRunning(true)
+      setPhase('question')
+      return
+    }
+
     if (config?.clickStartToCount) {
       setTimerRunning(false)
       audio.playBg('wait', 0.5)
-      // Always go to question phase; for multiplayer will open buzzer on Start click
       setPhase(config?.playMode === 'SINGLE' ? 'question' : 'question')
     } else {
       if (config?.playMode !== 'SINGLE') {
-        // Multiplayer: show question then open buzzer (timer NOT running until buzz)
         setTimerRunning(false)
         setPhase('question')
         openBuzzerPhase()
       } else {
-        // Single player: start timer immediately
         audio.playBg('game-play', 0.55)
         setTimerRunning(true)
         setPhase('question')
@@ -346,7 +612,7 @@ export default function JeopardyPage() {
     }
   }
 
-  // Timer effect — only runs when timerRunning=true
+  // ─── Timer effect ─────────────────────────────────────────────────────────
   useEffect(() => {
     if (!timerRunning) return
     clearInterval(timerRef.current!)
@@ -374,15 +640,48 @@ export default function JeopardyPage() {
     setTimerRunning(true)
   }
 
-  const handleQuestionTimeout = () => {
-    // Guard: if player already answered, don't override their result
-    if (isAnsweredRef.current) return
+  const handleQuestionTimeout = useCallback(() => {
+    const rc = roomCodeRef.current
+
+    if (joinRoomCode) {
+      // Online player: timer ran out — just mark submitted, wait for SSE reveal
+      if (!submittedRef.current) {
+        setIsCorrect(false)
+        setSubmitted(true)
+      }
+      return
+    }
+
+    // Guard: if player already answered, don't override
+    if (isAnsweredRef.current && !rc) return
+
     audio.stopAll()
     audio.stopTimeCount()
+
+    if (rc && !joinRoomCode) {
+      // Online admin: fetch scores then broadcast reveal
+      fetch(`/api/gameshow/${shareCode}/session/${rc}`).then(r => r.json()).then(data => {
+        if (data.players) setPlayers(data.players.map((p: any, i: number) => ({
+          id: p.id, nickname: p.nickname, avatarColor: PLAYER_COLORS[i % PLAYER_COLORS.length],
+          score: p.score ?? 0, correctCount: p.correctCount ?? 0, wrongCount: p.wrongCount ?? 0,
+          lastPointsEarned: p.lastPointsEarned ?? 0,
+        })))
+      }).catch(() => {})
+      fetch(`/api/gameshow/${shareCode}/session/${rc}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ gameState: { phase: 'reveal' } })
+      }).catch(() => {})
+      audio.playOnce('lost', 0.9)
+      setIsCorrect(false)
+      setTimeout(() => setPhase('reveal'), 800)
+      return
+    }
+
+    // Local/single
     audio.playOnce('lost', 0.9)
     setIsCorrect(false)
     setPhase('reveal')
-  }
+  }, [joinRoomCode, shareCode])
 
   const openBuzzerPhase = () => {
     setBuzzerOpen(true)
@@ -448,12 +747,48 @@ export default function JeopardyPage() {
   }
 
   const handleSingleAnswer = (answer: string) => {
+    if (!currentQuestion) return
+    // Online player: submit via API
+    if (joinRoomCode && myPlayerId) {
+      isAnsweredRef.current = true
+      clearInterval(timerRef.current!)
+      setTimerRunning(false)
+      audio.stopAll()
+      audio.stopTimeCount()
+      const corrects = getCorrectAnswers(currentQuestion)
+      const correct = corrects.some(c => normalize(c) === normalize(answer))
+      setIsCorrect(correct)
+      const elapsed = (config!.timeLimitSeconds - questionTimeLeft)
+      const basePoints = currentTilePoints
+      const pts = config?.scoringMode === 'ACCURACY_ONLY'
+        ? (correct ? basePoints : 0)
+        : correct ? Math.round(basePoints * (0.5 + 0.5 * (1 - elapsed / config!.timeLimitSeconds))) : 0
+      setMyLastPts(pts)
+      setMyTotalScore(prev => prev + pts)
+      setSubmitted(true)
+      if (correct) audio.playOnce('win', 0.9)
+      else audio.playOnce('lost', 0.9)
+      fetch(`/api/gameshow/${shareCode}/session/${joinRoomCode}/answer`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          playerId: myPlayerId,
+          questionId: currentQuestion.id,
+          answer,
+          responseTimeMs: Math.round(elapsed * 1000),
+          isCorrect: correct,
+          pointsEarned: pts
+        })
+      }).catch(() => {})
+      return
+    }
+
+    // Local / single player
     isAnsweredRef.current = true
     clearInterval(timerRef.current!)
     setTimerRunning(false)
     audio.stopAll()
     audio.stopTimeCount()
-    const corrects = getCorrectAnswers(currentQuestion!)
+    const corrects = getCorrectAnswers(currentQuestion)
     const correct = corrects.some(c => normalize(c) === normalize(answer))
     setIsCorrect(correct)
     const elapsed = (config!.timeLimitSeconds - questionTimeLeft)
@@ -482,23 +817,76 @@ export default function JeopardyPage() {
     audio.stopAll()
     if (leaderboardTimerRef.current) clearTimeout(leaderboardTimerRef.current)
 
+    const rc = roomCodeRef.current
+    const isOnlineAdmin = !!rc && !joinRoomCode
+
+    if (isOnlineAdmin) {
+      // Check if all board tiles done
+      const allDone = board.every(col => col.every(t => t.state === 'answered'))
+      if (allDone) {
+        fetch(`/api/gameshow/${shareCode}/session/${rc}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ gameState: { phase: 'gameover' } }) }).catch(() => {})
+        setPhase('gameover')
+        return
+      }
+      // Go back to board — broadcast board state with updated answeredQuestionIds
+      const answeredIds = Array.from(answeredQuestions)
+      fetch(`/api/gameshow/${shareCode}/session/${rc}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ gameState: { phase: 'board', answeredQuestionIds: answeredIds } })
+      }).catch(() => {})
+      setPhase('board')
+      audio.playBg('selecting', 0.5)
+      return
+    }
+
     const isLinear = config?.selectionMode === 'LINEAR'
     if (isLinear) {
       const next = linearIdx + 1
       setLinearIdx(next)
       showLinearQuestion(questions, next)
     } else {
-      // Check board completeness
       const allDone = board.every(col => col.every(t => t.state === 'answered'))
       if (allDone) { setPhase('gameover'); return }
       setPhase('board')
       audio.playBg('selecting', 0.5)
     }
-  }, [config, linearIdx, questions, board, showLinearQuestion, audio])
+  }, [config, linearIdx, questions, board, showLinearQuestion, audio, joinRoomCode, shareCode, answeredQuestions])
 
   const handleNext = () => {
+    const rc = roomCodeRef.current
+    const isOnlineAdmin = !!rc && !joinRoomCode
+
+    if (isOnlineAdmin) {
+      // Mark tile done and go back to board (broadcast)
+      markTileDone()
+      const newAnswered = new Set(Array.from(answeredQuestions).concat(currentQuestion?.id ?? ''))
+      const allDone = board.every(col => col.every(t =>
+        t.state === 'answered' || (currentQuestion && t.questionId === currentQuestion.id)
+      ))
+      if (allDone) {
+        fetch(`/api/gameshow/${shareCode}/session/${rc}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ gameState: { phase: 'gameover' } }) }).catch(() => {})
+        setPhase('gameover')
+        return
+      }
+      if (config?.showLeaderboard) {
+        fetch(`/api/gameshow/${shareCode}/session/${rc}`).then(r => r.json()).then(data => {
+          if (data.players) setPlayers(data.players.map((p: any, i: number) => ({
+            id: p.id, nickname: p.nickname, avatarColor: PLAYER_COLORS[i % PLAYER_COLORS.length],
+            score: p.score ?? 0, correctCount: p.correctCount ?? 0, wrongCount: p.wrongCount ?? 0,
+            lastPointsEarned: p.lastPointsEarned ?? 0,
+          })))
+        }).catch(() => {})
+        fetch(`/api/gameshow/${shareCode}/session/${rc}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ gameState: { phase: 'leaderboard' } }) }).catch(() => {})
+        audio.playBg('leaderboard', 0.6)
+        setPhase('leaderboard')
+      } else {
+        advanceFromLeaderboard()
+      }
+      return
+    }
+
     markTileDone()
-    // LOCAL + manualScoring: show scoring adjustment screen first
+    // LOCAL + manualScoring
     if (config?.playMode === 'LOCAL' && players.length > 1 && config?.manualScoring) {
       setScoringAdjustments({})
       setPhase('scoring')
@@ -526,15 +914,50 @@ export default function JeopardyPage() {
     }
   }
 
-  // Exit to gameover (Free Choice)
   const handleExitToGameover = () => {
     audio.stopAll()
     if (leaderboardTimerRef.current) clearTimeout(leaderboardTimerRef.current)
     clearInterval(timerRef.current!)
+    const rc = roomCodeRef.current
+    if (rc && !joinRoomCode) {
+      fetch(`/api/gameshow/${shareCode}/session/${rc}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ gameState: { phase: 'gameover' }, status: 'FINISHED' }) }).catch(() => {})
+    }
     setPhase('gameover')
   }
 
-  const isFreeChoice = config?.selectionMode === 'FREE_CHOICE'
+  // ─── Online join handlers ─────────────────────────────────────────────────
+  const handleJoinRoom = async () => {
+    if (!joinNickname.trim() || !joinRoomCode) return
+    setJoinLoading(true); setJoinError(null)
+    try {
+      const res = await fetch(`/api/gameshow/${shareCode}/session/${joinRoomCode}/join`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ nickname: joinNickname.trim(), avatarColor: PLAYER_COLORS[Math.floor(Math.random() * PLAYER_COLORS.length)] })
+      })
+      const data = await res.json()
+      if (data.error) { setJoinError(data.error); setJoinLoading(false); return }
+      setMyPlayerId(data.player.id)
+      setPhase('waiting')
+    } catch { setJoinError('Connection error. Please try again.') }
+    setJoinLoading(false)
+  }
+
+  const hostStartGame = async () => {
+    if (!roomCode || !config) return
+    clearInterval(lobbyPollRef.current!)
+    // Build the board for admin
+    const qs = [...config.questions]
+    buildBoardForOnline(qs, config)
+    // Broadcast board phase to players
+    try {
+      await fetch(`/api/gameshow/${shareCode}/session/${roomCode}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ gameState: { phase: 'board', answeredQuestionIds: [] }, status: 'ACTIVE' })
+      })
+    } catch {}
+    audio.playBg('selecting', 0.5)
+    setPhase('board')
+  }
 
   // ─── Loading / Error ──────────────────────────────────────────────────────
   if (loading) return (
@@ -547,6 +970,102 @@ export default function JeopardyPage() {
       <div className="text-center"><XCircle className="h-12 w-12 mx-auto mb-4 text-red-400" /><p>{error}</p></div>
     </div>
   )
+
+  // ─── JOIN (player device) ─────────────────────────────────────────────────
+  if (phase === 'join') {
+    return (
+      <div className="min-h-screen bg-gradient-to-b from-[#060b2e] to-[#0d1b5e] flex items-center justify-center p-4">
+        <div className="w-full max-w-sm">
+          <div className="text-center mb-6">
+            <div className="text-6xl mb-2">📋</div>
+            <h1 className="text-4xl font-black text-yellow-300 tracking-widest">JEOPARDY!</h1>
+            <p className="text-blue-300 mt-1">{config?.name}</p>
+          </div>
+          <div className="bg-[#0d1b5e] border border-blue-500/30 rounded-3xl p-6 shadow-2xl">
+            <div className="text-center mb-4">
+              <p className="text-blue-300 text-sm">Room</p>
+              <div className="text-3xl font-black text-yellow-300 tracking-widest">{joinRoomCode}</div>
+            </div>
+            <h2 className="font-bold text-white mb-3">Enter your name</h2>
+            <Input value={joinNickname} onChange={e => setJoinNickname(e.target.value)}
+              placeholder="Your nickname..."
+              className="bg-[#0a0a2e] border-blue-500/30 text-white placeholder:text-blue-400 rounded-xl mb-4"
+              onKeyDown={e => e.key === 'Enter' && handleJoinRoom()}
+            />
+            {joinError && <p className="text-red-400 text-sm mb-3 text-center">{joinError}</p>}
+            <Button onClick={handleJoinRoom} disabled={!joinNickname.trim() || joinLoading}
+              className="w-full bg-yellow-400 hover:bg-yellow-300 text-black font-bold text-lg py-6 rounded-2xl">
+              {joinLoading ? <Loader2 className="h-5 w-5 animate-spin mx-auto" /> : 'Join Game!'}
+            </Button>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  // ─── WAITING (player joined, waiting for host) ────────────────────────────
+  if (phase === 'waiting') {
+    return (
+      <div className="min-h-screen bg-gradient-to-b from-[#060b2e] to-[#0d1b5e] flex items-center justify-center p-4 text-white">
+        <div className="text-center max-w-sm w-full">
+          <div className="text-6xl mb-2">📋</div>
+          <h1 className="text-4xl font-black text-yellow-300 tracking-widest mb-1">JEOPARDY!</h1>
+          <h2 className="text-xl font-black mb-1 mt-4">You're in!</h2>
+          <p className="text-blue-300 mb-6">Waiting for the host to pick a question…</p>
+          <div className="bg-white/10 rounded-2xl p-4 mb-4">
+            <p className="text-sm text-blue-200 mb-2">Players in the room ({onlineLobbyPlayers.length}):</p>
+            <div className="space-y-2 max-h-48 overflow-y-auto">
+              {onlineLobbyPlayers.map((p, i) => (
+                <div key={p.id} className={`flex items-center gap-2 px-3 py-2 rounded-xl ${p.id === myPlayerId ? 'bg-yellow-400/30 border border-yellow-400/50' : 'bg-white/10'}`}>
+                  <div className="w-8 h-8 rounded-full flex items-center justify-center text-sm font-bold" style={{ backgroundColor: PLAYER_COLORS[i % PLAYER_COLORS.length] }}>{p.nickname[0]?.toUpperCase()}</div>
+                  <span className="font-medium">{p.nickname}</span>
+                  {p.id === myPlayerId && <span className="text-xs text-yellow-300 ml-auto">You</span>}
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className="flex items-center justify-center gap-2 text-blue-300">
+            <Loader2 className="h-4 w-4 animate-spin" />
+            <span className="text-sm">Waiting for host to pick a question…</span>
+          </div>
+        </div>
+      </div>
+    )
+  }
+
+  // ─── LOBBY (host sees room code, QR, player list) ─────────────────────────
+  if (phase === 'lobby') {
+    const joinUrl = typeof window !== 'undefined' ? `${window.location.origin}/gameshow/${shareCode}?room=${roomCode}` : ''
+    return (
+      <div className="relative min-h-screen bg-gradient-to-b from-[#060b2e] to-[#0d1b5e] flex items-center justify-center p-4 text-white">
+        <MusicBtn />
+        <div className="text-center max-w-sm w-full">
+          <div className="text-6xl mb-2">📋</div>
+          <h1 className="text-4xl font-black text-yellow-300 tracking-widest mb-4">JEOPARDY!</h1>
+          <h2 className="text-xl font-black mb-1">Room Code</h2>
+          <div className="text-5xl font-black tracking-widest bg-white/10 rounded-2xl py-3 mb-3">{roomCode}</div>
+          <p className="text-blue-200 text-xs mb-1">Players scan to join:</p>
+          {roomCode && <p className="text-xs opacity-60 mb-2 break-all px-2">{joinUrl}</p>}
+          {roomCode && <LobbyQR url={joinUrl} />}
+          <div className="bg-white/10 rounded-2xl p-3 mt-3 mb-3">
+            <p className="text-sm text-blue-200 mb-2">Players waiting ({onlineLobbyPlayers.length}/{config?.maxPlayers ?? 8}):</p>
+            {onlineLobbyPlayers.length === 0
+              ? <p className="text-xs text-blue-300 italic">No players yet — share the QR code!</p>
+              : <div className="flex flex-wrap gap-2 justify-center">
+                {onlineLobbyPlayers.map((p) => (
+                  <span key={p.id} className="px-3 py-1 bg-white/20 rounded-full text-sm font-medium">{p.nickname}</span>
+                ))}
+              </div>
+            }
+          </div>
+          <Button onClick={hostStartGame}
+            className="w-full bg-yellow-400 hover:bg-yellow-300 text-black font-black text-lg py-5 rounded-2xl">
+            {onlineLobbyPlayers.length === 0 ? "Start Game!" : `Start Game! (${onlineLobbyPlayers.length} players)`}
+          </Button>
+        </div>
+      </div>
+    )
+  }
 
   // ─── SETUP ─────────────────────────────────────────────────────────────────
   if (phase === 'setup') {
@@ -587,7 +1106,6 @@ export default function JeopardyPage() {
               <div>📋 {config?.categoriesCount} categories × {config?.tiersPerCategory} tiers</div>
               {config?.playMode !== 'SINGLE' && <div>🔔 Buzzer mode: first to buzz in answers</div>}
             </div>
-            {/* QR / Join URL for multiplayer */}
             {config?.playMode !== 'SINGLE' && (
               <div className="mb-4 p-3 bg-[#0a0a2e] rounded-xl border border-blue-500/20">
                 <div className="flex items-center justify-between gap-2">
@@ -621,6 +1139,8 @@ export default function JeopardyPage() {
 
   // ─── BOARD ──────────────────────────────────────────────────────────────────
   if (phase === 'board') {
+    const rc = roomCodeRef.current
+    const isOnlineAdmin = !!rc && !joinRoomCode
     return (
       <div className="relative min-h-screen bg-[#060b2e] text-white p-2 sm:p-4">
         <MusicBtn />
@@ -635,8 +1155,11 @@ export default function JeopardyPage() {
                   <span className="text-yellow-300 font-bold text-sm">{p.score}</span>
                 </div>
               ))}
+              {isOnlineAdmin && onlineLobbyPlayers.length > 0 && players.length === 0 && (
+                <div className="text-blue-300 text-sm">{onlineLobbyPlayers.length} players connected</div>
+              )}
             </div>
-            {isFreeChoice && (
+            {(isFreeChoice || isOnlineAdmin) && (
               <Button size="sm" variant="outline"
                 onClick={handleExitToGameover}
                 className="border-red-500/50 text-red-400 hover:bg-red-900/30 gap-1">
@@ -644,6 +1167,10 @@ export default function JeopardyPage() {
               </Button>
             )}
           </div>
+
+          {isOnlineAdmin && (
+            <p className="text-center text-blue-300 text-sm mb-3">Click a tile to show it to all players</p>
+          )}
 
           {/* Board grid */}
           <div className="overflow-x-auto">
@@ -682,7 +1209,7 @@ export default function JeopardyPage() {
     )
   }
 
-  // ─── QUESTION (Single player) ───────────────────────────────────────────────
+  // ─── QUESTION (Single player / Online player) ───────────────────────────────────────────────
   if ((phase === 'question' || phase === 'linear_question') && currentQuestion) {
     const options = parseOptions(currentQuestion)
     const isMCQ = options.length > 0
@@ -690,6 +1217,8 @@ export default function JeopardyPage() {
     const timerPct = (questionTimeLeft / maxTime) * 100
     const timerColor = timerPct > 50 ? 'bg-blue-400' : timerPct > 25 ? 'bg-yellow-400' : 'bg-red-500'
     const waiting = config?.clickStartToCount && !timerRunning
+    const rc = roomCodeRef.current
+    const isOnlineAdmin = !!rc && !joinRoomCode
 
     return (
       <div className="relative min-h-screen bg-[#060b2e] text-white flex flex-col p-4">
@@ -704,7 +1233,9 @@ export default function JeopardyPage() {
             <div className={`text-2xl font-black ${questionTimeLeft <= 5 && timerRunning ? 'text-red-400 animate-pulse' : 'text-white'}`}>
               ⏱ {questionTimeLeft}
             </div>
-            <div className="text-sm text-blue-300">{players[currentPlayerIdx]?.score ?? 0} pts</div>
+            <div className="text-sm text-blue-300">
+              {joinRoomCode ? myTotalScore : (players[currentPlayerIdx]?.score ?? 0)} pts
+            </div>
           </div>
           <div className="h-2 bg-gray-700 rounded-full mb-6">
             <div className={`h-full ${timerColor} rounded-full transition-all duration-1000`} style={{ width: `${timerPct}%` }} />
@@ -716,8 +1247,43 @@ export default function JeopardyPage() {
             <p className="text-lg sm:text-xl font-semibold leading-relaxed">{currentQuestion.stem}</p>
           </div>
 
-          {/* Click-Start-to-count overlay */}
-          {waiting ? (
+          {/* Online admin: skip time / waiting indicator */}
+          {isOnlineAdmin && (
+            <div className="flex justify-center mb-4">
+              <button
+                onClick={() => { clearInterval(timerRef.current!); setQuestionTimeLeft(0); handleQuestionTimeout() }}
+                className="text-xs text-blue-400 hover:text-blue-200 border border-blue-500/30 px-4 py-1.5 rounded-full transition-all hover:bg-blue-900/40"
+              >
+                ⏭ End Question Early
+              </button>
+            </div>
+          )}
+
+          {/* Online player: submitted overlay */}
+          {submitted && !!joinRoomCode && (
+            <div className="fixed inset-0 bg-[#060b2e]/90 flex items-center justify-center z-50">
+              <div className={`text-center p-8 rounded-3xl border-2 max-w-xs w-full mx-4 shadow-2xl ${isCorrect ? 'bg-green-900/60 border-green-500' : 'bg-red-900/60 border-red-500'}`}>
+                <div className="text-6xl mb-3">{isCorrect ? '✅' : '❌'}</div>
+                <p className={`text-2xl font-black mb-2 ${isCorrect ? 'text-green-300' : 'text-red-300'}`}>
+                  {isCorrect ? 'Correct!' : 'Wrong!'}
+                </p>
+                {myLastPts > 0 && (
+                  <p className="text-yellow-300 font-bold text-lg mb-1">+${myLastPts}</p>
+                )}
+                <p className="text-white/70 text-sm mb-4">Total: <strong className="text-white">${myTotalScore}</strong></p>
+                <Loader2 className="h-4 w-4 animate-spin text-blue-300 mx-auto mb-1" />
+                <p className="text-blue-300 text-xs">Waiting for host to reveal…</p>
+              </div>
+            </div>
+          )}
+
+          {/* Online admin sees question but no answer UI */}
+          {isOnlineAdmin ? (
+            <div className="text-center text-blue-300 py-8">
+              <Loader2 className="h-6 w-6 animate-spin mx-auto mb-2" />
+              <p className="text-sm">Players are answering…</p>
+            </div>
+          ) : waiting ? (
             <div className="flex flex-col items-center gap-4">
               <p className="text-blue-300 text-sm">Press Start when ready to begin the timer</p>
               <Button onClick={handleStartTimer}
@@ -726,12 +1292,13 @@ export default function JeopardyPage() {
               </Button>
             </div>
           ) : (
-            /* Answer */
+            /* Answer UI for players */
             isMCQ ? (
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 {options.map((opt, i) => (
                   <button key={opt} onClick={() => handleSingleAnswer(opt)}
-                    className="flex items-center gap-3 p-4 rounded-xl border-2 bg-[#0d1b5e] border-blue-500/50 hover:bg-[#1a2f8e] hover:border-yellow-400 text-left font-medium transition-all hover:scale-[1.02] active:scale-95">
+                    disabled={submitted}
+                    className="flex items-center gap-3 p-4 rounded-xl border-2 bg-[#0d1b5e] border-blue-500/50 hover:bg-[#1a2f8e] hover:border-yellow-400 text-left font-medium transition-all hover:scale-[1.02] active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed">
                     <span className="w-7 h-7 rounded-full bg-yellow-400 text-black font-black text-xs flex items-center justify-center flex-shrink-0">
                       {['A', 'B', 'C', 'D'][i]}
                     </span>
@@ -743,10 +1310,10 @@ export default function JeopardyPage() {
               <div className="flex gap-3">
                 <Input value={textAnswer} onChange={e => setTextAnswer(e.target.value)}
                   onKeyDown={e => e.key === 'Enter' && textAnswer.trim() && handleSingleAnswer(textAnswer)}
-                  placeholder="Type your answer..." autoFocus
+                  placeholder="Type your answer..." autoFocus disabled={submitted}
                   className="bg-[#0d1b5e] border-blue-500/30 text-white placeholder:text-blue-400 rounded-xl text-lg py-6" />
                 <Button onClick={() => textAnswer.trim() && handleSingleAnswer(textAnswer)}
-                  disabled={!textAnswer.trim()}
+                  disabled={!textAnswer.trim() || submitted}
                   className="bg-yellow-400 text-black font-bold hover:bg-yellow-300 rounded-xl px-6">
                   Submit
                 </Button>
@@ -758,7 +1325,7 @@ export default function JeopardyPage() {
     )
   }
 
-  // ─── BUZZER PHASE (Multiplayer) ─────────────────────────────────────────────
+  // ─── BUZZER PHASE (Multiplayer local) ─────────────────────────────────────
   if (phase === 'buzzer' && currentQuestion) {
     return (
       <div className="relative min-h-screen bg-[#060b2e] text-white flex flex-col p-4">
@@ -812,7 +1379,7 @@ export default function JeopardyPage() {
     )
   }
 
-  // ─── RESPOND PHASE ────────────────────────────────────────────────────────
+  // ─── RESPOND PHASE (local multiplayer) ────────────────────────────────────
   if (phase === 'respond' && currentQuestion && respondingPlayerIdx !== null) {
     const responder = players[respondingPlayerIdx]
     const options = parseOptions(currentQuestion)
@@ -893,43 +1460,74 @@ export default function JeopardyPage() {
   // ─── REVEAL ──────────────────────────────────────────────────────────────
   if (phase === 'reveal' && currentQuestion) {
     const corrects = getCorrectAnswers(currentQuestion)
+    const rc = roomCodeRef.current
+    const isOnlineAdmin = !!rc && !joinRoomCode
+
     return (
       <div className="relative min-h-screen bg-[#060b2e] text-white flex flex-col items-center justify-center p-4">
         <MusicBtn />
         <div className="w-full max-w-lg">
-          <div className={`text-center p-6 rounded-2xl mb-6 border-2 ${isCorrect ? 'bg-green-900/40 border-green-500' : 'bg-red-900/40 border-red-500'}`}>
-            {isCorrect
-              ? <><CheckCircle2 className="h-12 w-12 text-green-400 mx-auto mb-2" /><p className="text-2xl font-black text-green-300">Correct! +${currentTilePoints}</p></>
-              : <><XCircle className="h-12 w-12 text-red-400 mx-auto mb-2" /><p className="text-2xl font-black text-red-300">Wrong!</p></>
-            }
-            <div className="mt-3 bg-black/20 rounded-xl p-3">
-              <p className="text-xs text-gray-400 mb-1">Correct answer:</p>
-              <p className="text-yellow-300 font-bold">{corrects.join(' / ')}</p>
-            </div>
-          </div>
 
-          {currentQuestion.explanation && (
-            <div className="bg-blue-900/30 border border-blue-500/30 rounded-xl p-3 mb-5 text-sm text-blue-200">
-              💡 {currentQuestion.explanation}
-            </div>
-          )}
-
-          <div className="bg-[#0d1b5e] rounded-2xl p-4 mb-5">
-            <p className="text-xs uppercase tracking-wide text-blue-400 font-semibold mb-3">Scoreboard</p>
-            {[...players].sort((a, b) => b.score - a.score).map((p, rank) => (
-              <div key={p.id} className="flex items-center justify-between py-2 border-b border-blue-500/20 last:border-0">
-                <div className="flex items-center gap-2">
-                  <span className="text-lg">{['🥇', '🥈', '🥉'][rank] || `${rank + 1}.`}</span>
-                  <span className="text-sm font-medium">{p.nickname}</span>
-                </div>
-                <span className="text-yellow-300 font-bold">${p.score}</span>
+          {/* Online player reveal */}
+          {joinRoomCode ? (
+            <div className={`text-center p-6 rounded-2xl mb-6 border-2 ${isCorrect ? 'bg-green-900/40 border-green-500' : 'bg-red-900/40 border-red-500'}`}>
+              {isCorrect
+                ? <><CheckCircle2 className="h-12 w-12 text-green-400 mx-auto mb-2" /><p className="text-2xl font-black text-green-300">Correct! +${myLastPts}</p></>
+                : <><XCircle className="h-12 w-12 text-red-400 mx-auto mb-2" /><p className="text-2xl font-black text-red-300">Wrong!</p></>
+              }
+              <div className="mt-3 bg-black/20 rounded-xl p-3">
+                <p className="text-xs text-gray-400 mb-1">Correct answer:</p>
+                <p className="text-yellow-300 font-bold">{corrects.join(' / ')}</p>
               </div>
-            ))}
-          </div>
+              {currentQuestion.explanation && (
+                <div className="mt-2 bg-blue-900/30 rounded-xl p-3 text-sm text-blue-200">
+                  💡 {currentQuestion.explanation}
+                </div>
+              )}
+              <p className="text-white/60 text-sm mt-2">Total: ${myTotalScore}</p>
+              <div className="flex items-center justify-center gap-2 text-blue-300 mt-3">
+                <Loader2 className="h-3 w-3 animate-spin" />
+                <span className="text-xs">Waiting for host to advance…</span>
+              </div>
+            </div>
+          ) : (
+            /* Admin / local reveal */
+            <>
+              <div className={`text-center p-6 rounded-2xl mb-6 border-2 ${isCorrect ? 'bg-green-900/40 border-green-500' : 'bg-red-900/40 border-red-500'}`}>
+                {isCorrect
+                  ? <><CheckCircle2 className="h-12 w-12 text-green-400 mx-auto mb-2" /><p className="text-2xl font-black text-green-300">Correct! +${currentTilePoints}</p></>
+                  : <><XCircle className="h-12 w-12 text-red-400 mx-auto mb-2" /><p className="text-2xl font-black text-red-300">Wrong!</p></>
+                }
+                <div className="mt-3 bg-black/20 rounded-xl p-3">
+                  <p className="text-xs text-gray-400 mb-1">Correct answer:</p>
+                  <p className="text-yellow-300 font-bold">{corrects.join(' / ')}</p>
+                </div>
+              </div>
 
-          <Button onClick={handleNext} className="w-full bg-yellow-400 hover:bg-yellow-300 text-black font-bold py-5 rounded-2xl text-lg">
-            {isFreeChoice ? 'Back to Board' : 'Next Question'} <ChevronRight className="h-5 w-5 ml-1" />
-          </Button>
+              {currentQuestion.explanation && (
+                <div className="bg-blue-900/30 border border-blue-500/30 rounded-xl p-3 mb-5 text-sm text-blue-200">
+                  💡 {currentQuestion.explanation}
+                </div>
+              )}
+
+              <div className="bg-[#0d1b5e] rounded-2xl p-4 mb-5">
+                <p className="text-xs uppercase tracking-wide text-blue-400 font-semibold mb-3">Scoreboard</p>
+                {[...players].sort((a, b) => b.score - a.score).map((p, rank) => (
+                  <div key={p.id} className="flex items-center justify-between py-2 border-b border-blue-500/20 last:border-0">
+                    <div className="flex items-center gap-2">
+                      <span className="text-lg">{['🥇', '🥈', '🥉'][rank] || `${rank + 1}.`}</span>
+                      <span className="text-sm font-medium">{p.nickname}</span>
+                    </div>
+                    <span className="text-yellow-300 font-bold">${p.score}</span>
+                  </div>
+                ))}
+              </div>
+
+              <Button onClick={handleNext} className="w-full bg-yellow-400 hover:bg-yellow-300 text-black font-bold py-5 rounded-2xl text-lg">
+                {isFreeChoice ? 'Back to Board' : 'Next Question'} <ChevronRight className="h-5 w-5 ml-1" />
+              </Button>
+            </>
+          )}
         </div>
       </div>
     )
@@ -994,6 +1592,8 @@ export default function JeopardyPage() {
   // ─── LEADERBOARD ────────────────────────────────────────────────────────────
   if (phase === 'leaderboard') {
     const sorted = [...players].sort((a, b) => b.score - a.score).slice(0, 10)
+    const rc = roomCodeRef.current
+    const isOnlineAdmin = !!rc && !joinRoomCode
     return (
       <div className="relative min-h-screen bg-[#060b2e] text-white flex flex-col items-center justify-center p-4">
         <MusicBtn />
@@ -1013,20 +1613,27 @@ export default function JeopardyPage() {
               </div>
             ))}
           </div>
-          <div className="text-center space-y-3">
-            <p className="text-blue-300 text-sm">Auto-continuing in 5 seconds…</p>
-            <div className="flex gap-3 justify-center">
-              <Button onClick={advanceFromLeaderboard} className="bg-yellow-400 hover:bg-yellow-300 text-black font-bold px-8 py-4 rounded-2xl">
-                Continue <ChevronRight className="h-5 w-5 ml-1" />
-              </Button>
-              {isFreeChoice && (
-                <Button onClick={handleExitToGameover} variant="outline"
-                  className="border-red-500/50 text-red-400 hover:bg-red-900/30 px-6 py-4 rounded-2xl gap-1">
-                  <LogOut className="h-4 w-4" /> End Game
-                </Button>
-              )}
+          {joinRoomCode ? (
+            <div className="flex items-center justify-center gap-2 text-blue-300 py-4">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              <span className="text-sm">Waiting for host…</span>
             </div>
-          </div>
+          ) : (
+            <div className="text-center space-y-3">
+              {!isOnlineAdmin && <p className="text-blue-300 text-sm">Auto-continuing in 5 seconds…</p>}
+              <div className="flex gap-3 justify-center">
+                <Button onClick={advanceFromLeaderboard} className="bg-yellow-400 hover:bg-yellow-300 text-black font-bold px-8 py-4 rounded-2xl">
+                  Continue <ChevronRight className="h-5 w-5 ml-1" />
+                </Button>
+                {(isFreeChoice || isOnlineAdmin) && (
+                  <Button onClick={handleExitToGameover} variant="outline"
+                    className="border-red-500/50 text-red-400 hover:bg-red-900/30 px-6 py-4 rounded-2xl gap-1">
+                    <LogOut className="h-4 w-4" /> End Game
+                  </Button>
+                )}
+              </div>
+            </div>
+          )}
         </div>
       </div>
     )
