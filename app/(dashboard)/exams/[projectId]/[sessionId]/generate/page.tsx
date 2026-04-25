@@ -54,6 +54,16 @@ type ParsedSampleQ = {
   topicId: string | null
   topicName: string | null
   sectionId: string | null
+  syllabusCode: string | null
+}
+
+function parseSyllabusIssues(syllabusCode: string | null): { code: string; issues: string[] } {
+  if (!syllabusCode) return { code: '', issues: [] }
+  const parts = syllabusCode.split(' | Issues: ')
+  return {
+    code: parts[0]?.trim() || '',
+    issues: parts[1] ? parts[1].split(',').map(s => s.trim()).filter(Boolean) : [],
+  }
 }
 
 /** Per-section generate config — replaces the old qtRows/topicRows approach */
@@ -564,27 +574,40 @@ export default function GeneratePage() {
             {relevantSamples.length === 0 ? (
               <p className="text-xs text-gray-400 italic">No parsed samples for selected topics.</p>
             ) : (
-              relevantSamples.map((sq) => (
-                <div
-                  key={sq.id}
-                  className="flex items-start gap-2 px-1 py-1.5 rounded hover:bg-gray-50 cursor-pointer"
-                  onClick={() => toggleSampleId(sectionId, sq.id)}
-                >
-                  <Checkbox
-                    checked={cfg.selectedSampleIds.includes(sq.id)}
-                    onCheckedChange={() => toggleSampleId(sectionId, sq.id)}
-                    className="mt-0.5 shrink-0"
-                  />
-                  <div className="min-w-0">
-                    {sq.topicName && (
-                      <span className="text-xs text-[#028a39] font-medium mr-1">[{sq.topicName}]</span>
-                    )}
-                    <span className="text-xs text-gray-700 line-clamp-2">
-                      {sq.title || sq.content.slice(0, 80) + '…'}
-                    </span>
+              relevantSamples.map((sq) => {
+                const { code, issues } = parseSyllabusIssues(sq.syllabusCode)
+                const preview = sq.title || sq.content.replace(/<[^>]+>/g, ' ').trim().slice(0, 120) + '…'
+                return (
+                  <div
+                    key={sq.id}
+                    className="flex items-start gap-2 px-1 py-1.5 rounded hover:bg-gray-50 cursor-pointer"
+                    onClick={() => toggleSampleId(sectionId, sq.id)}
+                    title={preview}
+                  >
+                    <Checkbox
+                      checked={cfg.selectedSampleIds.includes(sq.id)}
+                      onCheckedChange={() => toggleSampleId(sectionId, sq.id)}
+                      className="mt-0.5 shrink-0"
+                    />
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-1 mb-0.5">
+                        {sq.topicName && (
+                          <span className="text-xs text-[#028a39] font-medium">[{sq.topicName}]</span>
+                        )}
+                        {code && (
+                          <span className="text-xs px-1 py-0.5 bg-blue-50 text-blue-700 rounded font-mono">{code}</span>
+                        )}
+                        {issues.map(issue => (
+                          <span key={issue} className="text-xs px-1 py-0.5 bg-amber-50 text-amber-700 rounded">{issue}</span>
+                        ))}
+                      </div>
+                      <span className="text-xs text-gray-700 line-clamp-2">
+                        {sq.title || sq.content.replace(/<[^>]+>/g, ' ').trim().slice(0, 80) + '…'}
+                      </span>
+                    </div>
                   </div>
-                </div>
-              ))
+                )
+              })
             )}
           </div>
           {cfg.selectedSampleIds.length > 0 && (

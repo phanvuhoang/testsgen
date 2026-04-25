@@ -13,7 +13,7 @@ import { Loader2, RefreshCw, Sparkles, BookOpen, Save } from 'lucide-react'
 
 type Section = { id: string; name: string; questionType: string }
 type Topic = { id: string; name: string; isOverall: boolean; parentId: string | null }
-type ParsedSampleQ = { id: string; title: string | null; content: string; topicId: string | null; topicName: string | null }
+type ParsedSampleQ = { id: string; title: string | null; content: string; topicId: string | null; topicName: string | null; sectionId: string | null }
 type AIModel = { id: string; label: string }
 
 export default function ManualPage() {
@@ -61,8 +61,9 @@ export default function ManualPage() {
   const selectedTopic = topics.find(t => t.id === selectedTopicId)
   const selectedSection = sections.find(s => s.id === selectedSectionId)
 
-  // Filter samples by selected topic
+  // Filter samples by selected section and topic
   const relevantSamples = sampleQuestions.filter(sq => {
+    if (selectedSectionId && sq.sectionId && sq.sectionId !== selectedSectionId) return false
     if (!selectedTopicId || selectedTopicId === '__all__') return true
     return sq.topicId === selectedTopicId
   })
@@ -288,8 +289,11 @@ export default function ManualPage() {
               </Button>
             </div>
             <div className="space-y-2">
-              <div className="p-3 bg-gray-50 rounded border text-xs whitespace-pre-wrap font-medium">
-                {generatedResult.questionPrompt}
+              <div className="p-3 bg-gray-50 rounded border text-xs font-medium [&_table]:border-collapse [&_table]:w-full [&_th]:border [&_th]:border-gray-200 [&_th]:bg-gray-100 [&_th]:px-2 [&_th]:py-1 [&_td]:border [&_td]:border-gray-100 [&_td]:px-2 [&_td]:py-1 [&_p]:mb-1">
+                {/<[a-z][\s\S]*>/i.test(generatedResult.questionPrompt)
+                  ? <div dangerouslySetInnerHTML={{ __html: generatedResult.questionPrompt }} />
+                  : <pre className="whitespace-pre-wrap font-sans">{generatedResult.questionPrompt}</pre>
+                }
               </div>
               {generatedResult.modelAnswer && (
                 <div className="p-3 bg-amber-50 border border-amber-100 rounded text-xs">

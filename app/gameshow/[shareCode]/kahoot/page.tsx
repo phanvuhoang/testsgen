@@ -189,14 +189,18 @@ export default function KahootPage() {
       } else if (data.playMode==='ONLINE' && !joinRoomCode) {
         // Admin: auto-create online session, skip name entry screen
         try {
-          let qs = [...(data.questions ?? [])]
-          if (data.shuffleQuestions) qs = shuffle(qs)
-          if (data.questionsCount && data.questionsCount < qs.length) qs = qs.slice(0, data.questionsCount)
-          setQuestions(qs)
           const res = await fetch(`/api/gameshow/${shareCode}/session`, {
             method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify({})
           })
           const sData = await res.json()
+          // Use server's authoritative questionOrder to stay in sync with players
+          const gs = sData.gameState ? (typeof sData.gameState==='string' ? JSON.parse(sData.gameState) : sData.gameState) : {}
+          const serverOrder: string[] = gs.questionOrder ?? []
+          const allQs: Question[] = data.questions ?? []
+          const orderedQs = serverOrder.length > 0
+            ? serverOrder.map((id: string) => allQs.find(q => q.id === id)).filter(Boolean) as Question[]
+            : allQs
+          setQuestions(orderedQs.length > 0 ? orderedQs : allQs)
           setRoomCode(sData.roomCode)
           setOnlineLobbyPlayers([])
           setPhase('lobby')

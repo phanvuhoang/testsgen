@@ -12,7 +12,7 @@ import { Skeleton } from '@/components/ui/skeleton'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { Checkbox } from '@/components/ui/checkbox'
 import { useToast } from '@/components/ui/use-toast'
-import { Plus, Pencil, Trash2, Save, ChevronDown, ChevronUp, BookOpen, Loader2, X } from 'lucide-react'
+import { Plus, Pencil, Trash2, Save, ChevronDown, ChevronUp, BookOpen, Loader2, X, Wand2 } from 'lucide-react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 
 type ParsedQuestion = {
@@ -48,6 +48,14 @@ const difficultyColors: Record<string, string> = {
   HARD: 'bg-red-100 text-red-700',
 }
 
+function hasHtml(text: string | null | undefined): boolean {
+  if (!text) return false
+  return /<[a-z][\s\S]*>/i.test(text)
+}
+
+const HTML_TABLE_CLASSES = '[&_table]:border-collapse [&_table]:w-full [&_th]:border [&_th]:border-gray-200 [&_th]:bg-gray-100 [&_th]:px-2 [&_th]:py-1 [&_th]:text-xs [&_td]:border [&_td]:border-gray-100 [&_td]:px-2 [&_td]:py-1 [&_td]:text-xs [&_p]:mb-1'
+const HTML_TABLE_GREEN = '[&_table]:border-collapse [&_table]:w-full [&_th]:border [&_th]:border-green-200 [&_th]:bg-green-100 [&_th]:px-2 [&_th]:py-1 [&_th]:text-xs [&_td]:border [&_td]:border-green-100 [&_td]:px-2 [&_td]:py-1 [&_td]:text-xs [&_p]:mb-1'
+
 export default function SamplesPage() {
   const params = useParams()
   const { toast } = useToast()
@@ -72,10 +80,16 @@ export default function SamplesPage() {
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [isBulkDeleting, setIsBulkDeleting] = useState(false)
 
+  // Reprocess state
+  const [aiModels, setAiModels] = useState<{ id: string; label: string }[]>([])
+  const [reprocessModel, setReprocessModel] = useState('claudible:1')
+  const [isReprocessing, setIsReprocessing] = useState(false)
+
   useEffect(() => {
     fetchQuestions()
     fetch(`/api/sessions/${params.sessionId}/topics`).then(r => r.ok ? r.json() : []).then(setTopics).catch(() => {})
     fetch(`/api/sessions/${params.sessionId}/sections`).then(r => r.ok ? r.json() : []).then(setSections).catch(() => {})
+    fetch('/api/ai-models').then(r => r.ok ? r.json() : []).then(setAiModels).catch(() => {})
   }, [])
 
   const fetchQuestions = async () => {
@@ -191,6 +205,31 @@ export default function SamplesPage() {
     }
   }
 
+  const handleReprocess = async () => {
+    if (selectedIds.size === 0) return
+    if (!confirm(`Reprocess ${selectedIds.size} selected sample(s) with AI? This will reformat content/answer as HTML and extract syllabus codes.`)) return
+    setIsReprocessing(true)
+    try {
+      const res = await fetch(`/api/sessions/${params.sessionId}/parsed-questions/reprocess`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids: Array.from(selectedIds), modelId: reprocessModel }),
+      })
+      if (!res.ok) throw new Error()
+      const updated: ParsedQuestion[] = await res.json()
+      setQuestions(prev => prev.map(q => {
+        const u = updated.find(u => u.id === q.id)
+        return u ? { ...q, ...u } : q
+      }))
+      setSelectedIds(new Set())
+      toast({ title: `Reprocessed ${updated.length} question(s)` })
+    } catch {
+      toast({ title: 'Reprocess failed', variant: 'destructive' })
+    } finally {
+      setIsReprocessing(false)
+    }
+  }
+
   const nonOverallTopics = topics.filter(t => !t.isOverall)
 
   return (
@@ -262,16 +301,36 @@ export default function SamplesPage() {
             {selectedIds.size > 0 && ` — ${selectedIds.size} selected`}
           </span>
           {selectedIds.size > 0 && (
-            <Button
-              size="sm"
-              variant="destructive"
-              onClick={handleBulkDelete}
-              disabled={isBulkDeleting}
-              className="h-7 text-xs ml-auto"
-            >
-              {isBulkDeleting ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <Trash2 className="h-3 w-3 mr-1" />}
-              Delete Selected ({selectedIds.size})
-            </Button>
+            <div className="flex items-center gap-2 ml-auto">
+              {aiModels.length > 0 && (
+                <Select value={reprocessModel} onValueChange={setReprocessModel}>
+                  <SelectTrigger className="h-7 text-xs w-36"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {aiModels.map(m => <SelectItem key={m.id} value={m.id} className="text-xs">{m.label}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              )}
+              <Button
+                size="sm"
+                variant="outline"
+                onClick={handleReprocess}
+                disabled={isReprocessing || isBulkDeleting}
+                className="h-7 text-xs border-purple-300 text-purple-700 hover:bg-purple-50"
+              >
+                {isReprocessing ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <Wand2 className="h-3 w-3 mr-1" />}
+                Reprocess ({selectedIds.size})
+              </Button>
+              <Button
+                size="sm"
+                variant="destructive"
+                onClick={handleBulkDelete}
+                disabled={isBulkDeleting || isReprocessing}
+                className="h-7 text-xs"
+              >
+                {isBulkDeleting ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <Trash2 className="h-3 w-3 mr-1" />}
+                Delete ({selectedIds.size})
+              </Button>
+            </div>
           )}
         </div>
       )}
@@ -311,11 +370,25 @@ export default function SamplesPage() {
                       {q.topicName && <span className="text-xs px-1.5 py-0.5 bg-blue-50 text-blue-700 rounded">{q.topicName}</span>}
                       {q.sectionName && <span className="text-xs px-1.5 py-0.5 bg-green-50 text-green-700 rounded">{q.sectionName}</span>}
                     </div>
-                    <p className={`text-sm text-gray-700 ${expandedId !== q.id ? 'line-clamp-2' : 'whitespace-pre-wrap'}`}>{q.content}</p>
+                    {hasHtml(q.content) ? (
+                      <div
+                        className={`text-sm text-gray-700 ${expandedId !== q.id ? 'line-clamp-2' : ''} ${HTML_TABLE_CLASSES}`}
+                        dangerouslySetInnerHTML={{ __html: q.content }}
+                      />
+                    ) : (
+                      <p className={`text-sm text-gray-700 ${expandedId !== q.id ? 'line-clamp-2' : 'whitespace-pre-wrap'}`}>{q.content}</p>
+                    )}
                     {expandedId === q.id && q.answer && (
                       <div className="mt-2 p-2 bg-green-50 border border-green-200 rounded text-sm">
                         <span className="font-medium text-green-800 text-xs">Answer/Explanation:</span>
-                        <p className="text-green-900 text-xs mt-1 whitespace-pre-wrap">{q.answer}</p>
+                        {hasHtml(q.answer) ? (
+                          <div
+                            className={`text-green-900 text-xs mt-1 ${HTML_TABLE_GREEN}`}
+                            dangerouslySetInnerHTML={{ __html: q.answer }}
+                          />
+                        ) : (
+                          <p className="text-green-900 text-xs mt-1 whitespace-pre-wrap">{q.answer}</p>
+                        )}
                       </div>
                     )}
                   </div>
