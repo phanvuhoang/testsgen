@@ -10,7 +10,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useToast } from '@/components/ui/use-toast'
-import { Loader2, RefreshCw, Sparkles, BookOpen, Save, ChevronDown } from 'lucide-react'
+import { Loader2, Sparkles, BookOpen, Save, ChevronDown } from 'lucide-react'
+import { RichTextEditor } from '@/components/ui/rich-text-editor'
+import { Checkbox } from '@/components/ui/checkbox'
 
 type Section = { id: string; name: string; questionType: string }
 type Topic = { id: string; name: string; isOverall: boolean; parentId: string | null }
@@ -56,10 +58,13 @@ export default function ManualPage() {
 
   // Step 3
   const [selectedModel, setSelectedModel] = useState('claudible:1')
-  const [isRegenNumbers, setIsRegenNumbers] = useState(false)
+  const [optRegenNumbers, setOptRegenNumbers] = useState(true)
+  const [optUpdateYear, setOptUpdateYear] = useState(true)
+  const [optUpdateRegulations, setOptUpdateRegulations] = useState(true)
   const [isGeneratingQA, setIsGeneratingQA] = useState(false)
   const [generatedResult, setGeneratedResult] = useState<{questionPrompt: string; modelAnswer: string | null} | null>(null)
   const [isSaving, setIsSaving] = useState(false)
+  const [replaceSample, setReplaceSample] = useState(false)
 
   useEffect(() => {
     Promise.all([
@@ -99,24 +104,6 @@ export default function ManualPage() {
     setCaseText(answerIdx > 0 ? content.slice(0, answerIdx).trim() : content)
   }
 
-  const handleRegenNumbers = async () => {
-    if (!caseText.trim()) return
-    setIsRegenNumbers(true)
-    try {
-      const res = await fetch(`/api/sessions/${sessionId}/manual`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ action: 'regenNumbers', caseText, sectionId: selectedSectionId, modelId: selectedModel }),
-      })
-      const data = await res.json()
-      if (data.result) setCaseText(data.result)
-    } catch {
-      toast({ title: 'Failed to regenerate numbers', variant: 'destructive' })
-    } finally {
-      setIsRegenNumbers(false)
-    }
-  }
-
   const handleGenerateQA = async () => {
     if (!caseText.trim()) return
     setIsGeneratingQA(true)
@@ -131,6 +118,9 @@ export default function ManualPage() {
           sectionId: selectedSectionId,
           modelId: selectedModel,
           topicName: selectedTopic?.name,
+          regenNumbers: optRegenNumbers,
+          updateYear: optUpdateYear,
+          updateRegulations: optUpdateRegulations,
         }),
       })
       const data = await res.json()
@@ -146,21 +136,38 @@ export default function ManualPage() {
     if (!generatedResult || !selectedSectionId) return
     setIsSaving(true)
     try {
-      const res = await fetch(`/api/sessions/${sessionId}/questions`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          sectionId: selectedSectionId,
-          stem: `${caseText}\n\n${generatedResult.questionPrompt}`,
-          questionType: selectedSection?.questionType || 'SCENARIO',
-          modelAnswer: generatedResult.modelAnswer,
-          topic: selectedTopic?.name,
-          status: 'NEEDS_REVIEW',
+      const stemContent = `${caseText}\n\n${generatedResult.questionPrompt}`
+      const [bankRes] = await Promise.all([
+        fetch(`/api/sessions/${sessionId}/questions`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            sectionId: selectedSectionId,
+            stem: stemContent,
+            questionType: selectedSection?.questionType || 'SCENARIO',
+            modelAnswer: generatedResult.modelAnswer,
+            topic: selectedTopic?.name,
+            status: 'NEEDS_REVIEW',
+          }),
         }),
-      })
-      if (!res.ok) throw new Error()
-      toast({ title: 'Saved to Question Bank' })
+        replaceSample && selectedSampleId
+          ? fetch(`/api/sessions/${sessionId}/parsed-questions/${selectedSampleId}`, {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                content: stemContent,
+                answer: generatedResult.modelAnswer ?? '',
+                topicName: selectedTopic?.name ?? null,
+                sectionId: selectedSectionId,
+                sectionName: selectedSection?.name ?? null,
+              }),
+            })
+          : Promise.resolve(null),
+      ])
+      if (!bankRes.ok) throw new Error()
+      toast({ title: replaceSample && selectedSampleId ? 'Saved to bank & sample replaced' : 'Saved to Question Bank' })
       setGeneratedResult(null)
+      setReplaceSample(false)
     } catch {
       toast({ title: 'Failed to save', variant: 'destructive' })
     } finally {
@@ -283,11 +290,11 @@ export default function ManualPage() {
           )}
           <div className="space-y-1">
             <Label className="text-xs font-semibold">Case / Scenario text</Label>
-            <Textarea
+            <RichTextEditor
               value={caseText}
-              onChange={e => setCaseText(e.target.value)}
+              onChange={setCaseText}
               placeholder="Enter the case scenario with all relevant data (amounts, dates, entity details, transactions)..."
-              className="min-h-[200px] text-xs font-mono"
+              rows={8}
             />
           </div>
         </CardContent>
@@ -313,25 +320,29 @@ export default function ManualPage() {
               </div>
             )}
 
-            <div className="flex gap-2">
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={handleRegenNumbers}
-                disabled={isRegenNumbers || isGeneratingQA}
-                className="flex-1"
-              >
-                {isRegenNumbers ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> : <RefreshCw className="h-3.5 w-3.5 mr-1" />}
-                Regenerate Numbers
-              </Button>
+            <div className="flex flex-col gap-2">
+              <div className="flex flex-wrap gap-4">
+                <div className="flex items-center gap-2">
+                  <Checkbox id="regenNumbers" checked={optRegenNumbers} onCheckedChange={v => setOptRegenNumbers(!!v)} />
+                  <Label htmlFor="regenNumbers" className="text-xs cursor-pointer">Regenerate numbers</Label>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Checkbox id="updateYear" checked={optUpdateYear} onCheckedChange={v => setOptUpdateYear(!!v)} />
+                  <Label htmlFor="updateYear" className="text-xs cursor-pointer">Update year</Label>
+                </div>
+                <div className="flex items-center gap-2">
+                  <Checkbox id="updateRegs" checked={optUpdateRegulations} onCheckedChange={v => setOptUpdateRegulations(!!v)} />
+                  <Label htmlFor="updateRegs" className="text-xs cursor-pointer">Update regulations</Label>
+                </div>
+              </div>
               <Button
                 size="sm"
                 onClick={handleGenerateQA}
-                disabled={isGeneratingQA || isRegenNumbers}
-                className="flex-1 bg-[#028a39] hover:bg-[#027030] text-white"
+                disabled={isGeneratingQA}
+                className="bg-[#028a39] hover:bg-[#027030] text-white"
               >
                 {isGeneratingQA ? <Loader2 className="h-3.5 w-3.5 animate-spin mr-1" /> : <Sparkles className="h-3.5 w-3.5 mr-1" />}
-                Generate Question & Answer
+                Generate Questions & Answers
               </Button>
             </div>
           </CardContent>
@@ -342,19 +353,27 @@ export default function ManualPage() {
       {generatedResult && (
         <Card className="border-[#028a39]">
           <CardContent className="p-4 space-y-3">
-            <div className="flex items-center justify-between">
+            <div className="flex items-center justify-between flex-wrap gap-2">
               <p className="text-xs font-semibold text-[#028a39] flex items-center gap-1">
                 <BookOpen className="h-3.5 w-3.5" /> Generated Result
               </p>
-              <Button
-                size="sm"
-                onClick={handleSaveToBank}
-                disabled={isSaving || !selectedSectionId}
-                className="bg-[#028a39] hover:bg-[#027030] text-white"
-              >
-                {isSaving ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <Save className="h-3 w-3 mr-1" />}
-                Save to Question Bank
-              </Button>
+              <div className="flex items-center gap-3">
+                {selectedSampleId && (
+                  <div className="flex items-center gap-1.5">
+                    <Checkbox id="replaceSample" checked={replaceSample} onCheckedChange={v => setReplaceSample(!!v)} />
+                    <Label htmlFor="replaceSample" className="text-xs cursor-pointer text-gray-600">Replace sample</Label>
+                  </div>
+                )}
+                <Button
+                  size="sm"
+                  onClick={handleSaveToBank}
+                  disabled={isSaving || !selectedSectionId}
+                  className="bg-[#028a39] hover:bg-[#027030] text-white"
+                >
+                  {isSaving ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <Save className="h-3 w-3 mr-1" />}
+                  Save to Question Bank
+                </Button>
+              </div>
             </div>
             <div className="space-y-2">
               <div className="p-3 bg-gray-50 rounded border text-xs font-medium [&_table]:border-collapse [&_table]:w-full [&_th]:border [&_th]:border-gray-200 [&_th]:bg-gray-100 [&_th]:px-2 [&_th]:py-1 [&_td]:border [&_td]:border-gray-100 [&_td]:px-2 [&_td]:py-1 [&_p]:mb-1">

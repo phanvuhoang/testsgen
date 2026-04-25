@@ -36,6 +36,7 @@ import {
   X,
   Copy,
 } from 'lucide-react'
+import { RichTextEditor } from '@/components/ui/rich-text-editor'
 
 type Question = {
   id: string
@@ -678,11 +679,12 @@ export default function QuizQuestionsPage() {
     return (
       <div className="space-y-3">
         {/* Question text */}
-        <Textarea
+        <RichTextEditor
+          key={`stem-${q.id}`}
           value={editForm.stem || ''}
-          onChange={(e) => setEditForm({ ...editForm, stem: e.target.value })}
-          className="min-h-[80px]"
+          onChange={(v) => setEditForm({ ...editForm, stem: v })}
           placeholder="Question text..."
+          rows={4}
         />
 
         {/* Type + Difficulty + Points */}
@@ -1619,7 +1621,11 @@ export default function QuizQuestionsPage() {
                       #{questionNumber}
                     </span>
                     <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium line-clamp-2">{q.stem}</p>
+                      {/<[a-z][\s\S]*>/i.test(q.stem) ? (
+                        <div className="text-sm font-medium line-clamp-2 [&_*]:inline" dangerouslySetInnerHTML={{ __html: q.stem }} />
+                      ) : (
+                        <p className="text-sm font-medium line-clamp-2">{q.stem}</p>
+                      )}
                       <div className="flex flex-wrap gap-1.5 mt-1.5">
                         <Badge variant="outline" className="text-xs py-0">{TYPE_LABEL[q.questionType] || q.questionType}</Badge>
                         {q.topic && <Badge variant="outline" className="text-xs bg-blue-50 text-blue-600 border-blue-200">{q.topic}</Badge>}

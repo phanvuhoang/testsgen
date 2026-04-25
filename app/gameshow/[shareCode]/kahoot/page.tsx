@@ -172,6 +172,8 @@ export default function KahootPage() {
   const roomCodeRef = useRef<string|null>(null)
   const evsRef = useRef<EventSource|null>(null)
   const configRef = useRef<GameshowConfig|null>(null)
+  // Ref to always read current submitted state (avoids stale closure in timer)
+  const submittedRef = useRef(false)
   const currentQuestion = questions[currentIdx]
   const currentPlayer = players[currentPlayerIdx]
   const isMultiple = currentQuestion?.questionType === 'MULTIPLE_RESPONSE'
@@ -183,6 +185,7 @@ export default function KahootPage() {
   // Sync refs
   useEffect(() => { roomCodeRef.current = roomCode }, [roomCode])
   useEffect(() => { configRef.current = config }, [config])
+  useEffect(() => { submittedRef.current = submitted }, [submitted])
 
   // Fetch config — detect join vs admin flow
   useEffect(() => {
@@ -331,7 +334,12 @@ export default function KahootPage() {
     timerRef.current = setInterval(() => {
       setTimeLeft(prev => {
         if (prev<=5&&!timeCountPlayedRef.current){timeCountPlayedRef.current=true;audio.playTimeCount()}
-        if (prev<=1){clearInterval(timerRef.current!);handleTimeout();return 0}
+        if (prev<=1){
+          clearInterval(timerRef.current!)
+          // Online players don't call handleTimeout — wait for SSE reveal from admin
+          if (!joinRoomCode) handleTimeout()
+          return 0
+        }
         return prev-1
       })
     }, 1000)
@@ -353,25 +361,37 @@ export default function KahootPage() {
   }, [timerRunning])
 
   const handleTimeout = useCallback(() => {
-    if (submitted) return
+    if (submittedRef.current) return  // Use ref to always read current submitted state
     audio.stopAll(); audio.stopTimeCount()
+    const rc = roomCodeRef.current
+    if (joinRoomCode) {
+      // Online player: timer ran out without answering — just mark as not answered, wait for SSE
+      setIsCorrect(false); setSubmitted(true)
+      return
+    }
+    // Admin or local: play lost sound, mark incorrect
     audio.playOnce('lost', 0.9)
     setIsCorrect(false); setSubmitted(true)
     buildDistribution()
-    const rc = roomCodeRef.current
-    if (rc && !joinRoomCode) {
-      // Admin: broadcast reveal to all players
+    if (rc) {
+      // Online admin: fetch latest scores then broadcast reveal
+      fetch(`/api/gameshow/${shareCode}/session/${rc}`).then(r=>r.json()).then(data=>{
+        if (data.players) setPlayers(data.players.map((p:any,i:number)=>({
+          id:p.id,nickname:p.nickname,avatarColor:PLAYER_COLORS[i%PLAYER_COLORS.length],
+          score:p.score??0,correctCount:p.correctCount??0,wrongCount:p.wrongCount??0,
+          streak:p.streak??0,bestStreak:p.bestStreak??0,lastPointsEarned:p.lastPointsEarned??0,
+        })))
+      }).catch(()=>{})
       fetch(`/api/gameshow/${shareCode}/session/${rc}`, {
         method:'PATCH', headers:{'Content-Type':'application/json'},
         body: JSON.stringify({ gameState: { phase: 'reveal' } })
       }).catch(()=>{})
       revealTimeoutRef.current = setTimeout(()=>setPhase('reveal'), 800)
-    } else if (!joinRoomCode) {
+    } else {
       // Local/single mode
       revealTimeoutRef.current = setTimeout(()=>setPhase('reveal'), 800)
     }
-    // Online player: wait for admin SSE reveal signal — don't auto-advance
-  }, [submitted, joinRoomCode, shareCode])
+  }, [joinRoomCode, shareCode])
 
   const buildDistribution = () => {
     if (!currentQuestion) return
@@ -1029,7 +1049,7 @@ export default function KahootPage() {
         {!joinRoomCode && !!roomCode && !submitted && phase === 'question' && (
           <div className="flex justify-center py-2">
             <button
-              onClick={() => { clearInterval(timerRef.current!); handleTimeout() }}
+              onClick={() => { clearInterval(timerRef.current!); setTimeLeft(0); handleTimeout() }}
               className="text-xs text-indigo-400 hover:text-indigo-200 border border-indigo-500/30 px-4 py-1.5 rounded-full transition-all hover:bg-indigo-900/40"
             >
               ⏭ Skip Time Count
@@ -1112,16 +1132,47 @@ export default function KahootPage() {
       <div className="relative min-h-screen bg-[#1a1a2e] text-white flex flex-col p-4">
         <MusicBtn/>
         <div className="max-w-2xl mx-auto w-full flex-1 flex flex-col">
-          <div className={`text-center p-5 rounded-2xl mb-4 border-2 mt-4 ${isCorrect?'bg-green-900/40 border-green-500':'bg-red-900/40 border-red-500'}`}>
-            {isCorrect
-              ?<><CheckCircle2 className="h-10 w-10 text-green-400 mx-auto mb-1"/><p className="text-xl font-black text-green-300">Correct!</p></>
-              :<><XCircle className="h-10 w-10 text-red-400 mx-auto mb-1"/><p className="text-xl font-black text-red-300">Wrong!</p></>
-            }
-            {isCorrect&&currentPlayer&&<p className="text-yellow-300 font-bold mt-1">+{currentPlayer.lastPointsEarned} pts{config?.enableStreak&&currentPlayer.streak>=2?` · 🔥 ${currentPlayer.streak} streak!`:''}</p>}
-            <p className="text-sm text-gray-300 mt-1">Answer: <span className="text-green-300 font-bold">{corrects.join(', ')}</span></p>
-          </div>
 
-          {Object.keys(distribution).length>0&&(
+          {/* Admin: neutral "Correct Answer" banner (no "Wrong" text) */}
+          {/* Player: show their result */}
+          {joinRoomCode ? (
+            // Online player reveal: show their answer + correct answer + explanation
+            <div className={`p-5 rounded-2xl mb-4 border-2 mt-4 ${isCorrect?'bg-green-900/40 border-green-500':'bg-red-900/40 border-red-500'}`}>
+              <div className="text-center mb-3">
+                {isCorrect
+                  ?<><CheckCircle2 className="h-10 w-10 text-green-400 mx-auto mb-1"/><p className="text-xl font-black text-green-300">Correct!</p></>
+                  :<><XCircle className="h-10 w-10 text-red-400 mx-auto mb-1"/><p className="text-xl font-black text-red-300">Wrong!</p></>
+                }
+                {myLastPts > 0 && <p className="text-yellow-300 font-bold">+{myLastPts} pts</p>}
+                {myStreak >= 2 && <p className="text-orange-400 text-sm">🔥 {myStreak} streak!</p>}
+                <p className="text-white/60 text-xs mt-1">Total: {myTotalScore} pts</p>
+              </div>
+              <div className="bg-black/30 rounded-xl p-3 text-sm">
+                <p className="text-gray-400 text-xs mb-1">Correct answer:</p>
+                <p className="text-green-300 font-bold">{corrects.join(', ')}</p>
+                {currentQuestion.explanation && (
+                  <p className="text-indigo-200 text-xs mt-2">💡 {currentQuestion.explanation}</p>
+                )}
+              </div>
+              <div className="flex items-center justify-center gap-2 text-indigo-300 mt-3">
+                <Loader2 className="h-3 w-3 animate-spin"/>
+                <span className="text-xs">Waiting for host to advance…</span>
+              </div>
+            </div>
+          ) : (
+            // Admin / local: neutral "time's up" banner with correct answer
+            <div className="bg-[#16213e] border border-indigo-500/30 rounded-2xl p-5 mb-4 mt-4">
+              <div className="text-center mb-2">
+                {isCorrect
+                  ?<><CheckCircle2 className="h-8 w-8 text-green-400 mx-auto mb-1"/><p className="text-lg font-black text-green-300">Correct!</p></>
+                  :<p className="text-lg font-black text-indigo-300">Time's Up</p>
+                }
+              </div>
+              <p className="text-center text-sm text-gray-300">Correct answer: <span className="text-green-300 font-bold">{corrects.join(', ')}</span></p>
+            </div>
+          )}
+
+          {!joinRoomCode && Object.keys(distribution).length>0&&(
             <div className="space-y-2 mb-4">
               {options.map((opt,i)=>{
                 const col=KAHOOT_COLORS[i%4]
@@ -1142,37 +1193,35 @@ export default function KahootPage() {
             </div>
           )}
 
-          {currentQuestion.explanation&&(
+          {!joinRoomCode && currentQuestion.explanation&&(
             <div className="bg-indigo-900/40 border border-indigo-500/30 rounded-xl p-3 mb-3 text-xs text-indigo-200">
               💡 {currentQuestion.explanation}
             </div>
           )}
 
+          {/* Top 10 leaderboard (admin only) */}
+          {!joinRoomCode && (
           <div className="bg-[#16213e] rounded-2xl p-4 mb-4">
-            {[...players].sort((a,b)=>b.score-a.score).slice(0,5).map((p,rank)=>(
-              <div key={p.id} className={`flex items-center justify-between py-2 border-b border-gray-700/50 last:border-0 ${p.id===currentPlayer?.id?'bg-indigo-900/30 -mx-2 px-2 rounded-lg':''}`}>
+            <p className="text-xs text-indigo-400 font-semibold mb-2 uppercase tracking-wide">Top {Math.min(players.length, 10)}</p>
+            {[...players].sort((a,b)=>b.score-a.score).slice(0,10).map((p,rank)=>(
+              <div key={p.id} className={`flex items-center justify-between py-2 border-b border-gray-700/50 last:border-0`}>
                 <div className="flex items-center gap-2">
                   <span className="text-lg">{['🥇','🥈','🥉'][rank]||`${rank+1}.`}</span>
                   <span className="text-sm font-medium">{p.nickname}</span>
                   {p.streak>=2&&<span className="text-xs text-orange-400">🔥{p.streak}</span>}
                 </div>
-                <span className="text-yellow-300 font-bold">{p.score}</span>
+                <div className="text-right">
+                  <span className="text-yellow-300 font-bold">{p.score}</span>
+                  {p.lastPointsEarned>0&&<span className="text-green-400 text-xs ml-1">(+{p.lastPointsEarned})</span>}
+                </div>
               </div>
             ))}
           </div>
+          )}
 
           {joinRoomCode ? (
-            // Online player: show their result summary + waiting message
-            <div className={`text-center p-4 rounded-2xl border-2 mb-2 ${isCorrect ? 'bg-green-900/30 border-green-500/40' : 'bg-red-900/30 border-red-500/40'}`}>
-              <p className={`text-lg font-black ${isCorrect ? 'text-green-300' : 'text-red-300'}`}>{isCorrect ? '✅ Correct!' : '❌ Wrong!'}</p>
-              {myLastPts > 0 && <p className="text-yellow-300 font-bold">+{myLastPts} pts</p>}
-              {myStreak >= 2 && <p className="text-orange-400 text-sm">🔥 {myStreak} streak!</p>}
-              <p className="text-white/60 text-xs mt-2">Total: {myTotalScore} pts</p>
-              <div className="flex items-center justify-center gap-2 text-indigo-300 mt-3">
-                <Loader2 className="h-3 w-3 animate-spin"/>
-                <span className="text-xs">Waiting for host to advance…</span>
-              </div>
-            </div>
+            // Player: no next button, just waiting
+            null
           ) : (
             <>
               {exitConfirm && (

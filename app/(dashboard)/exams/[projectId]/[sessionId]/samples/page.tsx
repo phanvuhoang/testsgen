@@ -14,6 +14,7 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { useToast } from '@/components/ui/use-toast'
 import { Plus, Pencil, Trash2, Save, ChevronDown, ChevronUp, BookOpen, Loader2, X, Wand2 } from 'lucide-react'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
+import { RichTextEditor } from '@/components/ui/rich-text-editor'
 
 type ParsedQuestion = {
   id: string
@@ -424,18 +425,26 @@ export default function SamplesPage() {
                 </div>
                 {editingId === q.id && (
                   <div className="mt-3 pt-3 border-t space-y-2">
-                    <Textarea
-                      value={editForm.content ?? ''}
-                      onChange={e => setEditForm(p => ({ ...p, content: e.target.value }))}
-                      className="text-sm min-h-[100px]"
-                      placeholder="Question content..."
-                    />
-                    <Textarea
-                      value={editForm.answer ?? ''}
-                      onChange={e => setEditForm(p => ({ ...p, answer: e.target.value }))}
-                      className="text-sm min-h-[60px]"
-                      placeholder="Answer/explanation..."
-                    />
+                    <div className="space-y-1">
+                      <Label className="text-xs font-semibold">Content</Label>
+                      <RichTextEditor
+                        key={`content-${editingId}`}
+                        value={editForm.content ?? ''}
+                        onChange={v => setEditForm(p => ({ ...p, content: v }))}
+                        placeholder="Question content..."
+                        rows={5}
+                      />
+                    </div>
+                    <div className="space-y-1">
+                      <Label className="text-xs font-semibold">Answer / Explanation</Label>
+                      <RichTextEditor
+                        key={`answer-${editingId}`}
+                        value={editForm.answer ?? ''}
+                        onChange={v => setEditForm(p => ({ ...p, answer: v }))}
+                        placeholder="Answer/explanation..."
+                        rows={3}
+                      />
+                    </div>
                     <div className="grid grid-cols-2 gap-2">
                       <Select value={editForm.questionType ?? 'MCQ_SINGLE'} onValueChange={v => setEditForm(p => ({ ...p, questionType: v }))}>
                         <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
@@ -499,20 +508,20 @@ export default function SamplesPage() {
             </div>
             <div className="space-y-1">
               <Label className="text-xs">Question Content *</Label>
-              <Textarea
+              <RichTextEditor
                 value={addForm.content}
-                onChange={e => setAddForm(p => ({ ...p, content: e.target.value }))}
-                className="min-h-[150px] text-sm font-mono"
+                onChange={v => setAddForm(p => ({ ...p, content: v }))}
                 placeholder="Paste or type the question here (including options if MCQ)..."
+                rows={6}
               />
             </div>
             <div className="space-y-1">
               <Label className="text-xs">Answer / Explanation</Label>
-              <Textarea
+              <RichTextEditor
                 value={addForm.answer}
-                onChange={e => setAddForm(p => ({ ...p, answer: e.target.value }))}
-                className="min-h-[80px] text-sm"
+                onChange={v => setAddForm(p => ({ ...p, answer: v }))}
                 placeholder="Answer, marking scheme, or explanation..."
+                rows={3}
               />
             </div>
             <div className="flex gap-2 justify-end">

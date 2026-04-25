@@ -16,8 +16,9 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/u
 import {
   Search, Download, Pencil, Trash2, ChevronDown, ChevronUp,
   Check, ThumbsUp, AlertCircle, RefreshCw, BookOpen, Loader2,
-  FileText, Eye, Code2, CheckCircle2,
+  FileText, Eye, Code2, CheckCircle2, Library,
 } from 'lucide-react'
+import { RichTextEditor } from '@/components/ui/rich-text-editor'
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -94,52 +95,30 @@ function HtmlContent({ html }: { html: string }) {
   return <p className="text-xs whitespace-pre-wrap">{html}</p>
 }
 
-// ─── HTML Editor (preview + raw toggle) ──────────────────────────────────────
+// ─── HTML Editor (now uses RichTextEditor for WYSIWYG editing) ───────────────
 function HtmlEditor({
   label,
   value,
   onChange,
   placeholder,
+  editorKey,
 }: {
   label: string
   value: string
   onChange: (v: string) => void
   placeholder?: string
+  editorKey?: string
 }) {
-  const [mode, setMode] = useState<'preview' | 'raw'>('raw')
   return (
     <div className="space-y-1">
-      <div className="flex items-center justify-between">
-        <Label className="text-xs font-semibold">{label}</Label>
-        <div className="flex gap-1">
-          <button
-            type="button"
-            onClick={() => setMode('raw')}
-            className={`flex items-center gap-1 px-2 py-0.5 rounded text-xs border transition-colors ${mode === 'raw' ? 'bg-gray-200 border-gray-300' : 'border-transparent hover:bg-gray-100'}`}
-          >
-            <Code2 className="h-3 w-3" />HTML
-          </button>
-          <button
-            type="button"
-            onClick={() => setMode('preview')}
-            className={`flex items-center gap-1 px-2 py-0.5 rounded text-xs border transition-colors ${mode === 'preview' ? 'bg-gray-200 border-gray-300' : 'border-transparent hover:bg-gray-100'}`}
-          >
-            <Eye className="h-3 w-3" />Preview
-          </button>
-        </div>
-      </div>
-      {mode === 'raw' ? (
-        <Textarea
-          value={value}
-          onChange={(e) => onChange(e.target.value)}
-          placeholder={placeholder}
-          className="min-h-[80px] font-mono text-xs"
-        />
-      ) : (
-        <div className="min-h-[80px] p-3 border rounded-md bg-white text-xs">
-          {value ? <HtmlContent html={value} /> : <span className="text-gray-400">{placeholder}</span>}
-        </div>
-      )}
+      <Label className="text-xs font-semibold">{label}</Label>
+      <RichTextEditor
+        key={editorKey}
+        value={value}
+        onChange={onChange}
+        placeholder={placeholder}
+        rows={4}
+      />
     </div>
   )
 }
@@ -357,6 +336,8 @@ export default function ExamQuestionsPage() {
   // Bulk selection
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
   const [isExportingWord, setIsExportingWord] = useState(false)
+  // Add to Sample
+  const [addingToSampleId, setAddingToSampleId] = useState<string | null>(null)
 
   useEffect(() => {
     fetchQuestions()
@@ -491,6 +472,33 @@ export default function ExamQuestionsPage() {
     }
   }
 
+  const handleAddToSample = async (q: Question) => {
+    setAddingToSampleId(q.id)
+    try {
+      const res = await fetch(`/api/sessions/${params.sessionId}/parsed-questions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          content: q.stem,
+          answer: [q.markingScheme, q.modelAnswer].filter(Boolean).join('\n\n'),
+          questionType: q.questionType === 'SCENARIO' ? 'SCENARIO' : q.questionType === 'SHORT_ANSWER' ? 'SHORT_ANSWER' : q.questionType === 'ESSAY' ? 'ESSAY' : 'OTHER',
+          difficulty: q.difficulty,
+          topicName: q.topic,
+          sectionId: q.section?.id ?? null,
+          sectionName: q.section?.name ?? null,
+          syllabusCode: q.syllabusCode,
+          isManual: true,
+        }),
+      })
+      if (!res.ok) throw new Error()
+      toast({ title: 'Added to Samples' })
+    } catch {
+      toast({ title: 'Failed to add to samples', variant: 'destructive' })
+    } finally {
+      setAddingToSampleId(null)
+    }
+  }
+
   const handleExportJSON = async () => {
     const res = await fetch(`/api/sessions/${params.sessionId}/questions?format=json`)
     if (!res.ok) return
@@ -616,15 +624,13 @@ export default function ExamQuestionsPage() {
   // ── Render edit panel ─────────────────────────────────────────────────────
   const renderEditPanel = (q: Question) => (
     <div className="space-y-3">
-      <div className="space-y-1">
-        <Label className="text-xs font-semibold">Question Stem</Label>
-        <Textarea
-          value={editForm.stem || ''}
-          onChange={(e) => setEditForm({ ...editForm, stem: e.target.value })}
-          className="min-h-[80px]"
-          placeholder="Question stem..."
-        />
-      </div>
+      <HtmlEditor
+        label="Question Stem"
+        value={editForm.stem || ''}
+        onChange={(v) => setEditForm({ ...editForm, stem: v })}
+        placeholder="Question stem..."
+        editorKey={`stem-${q.id}`}
+      />
       {q.options && (
         <div className="space-y-1">
           <Label className="text-xs font-semibold">Options</Label>
@@ -639,16 +645,18 @@ export default function ExamQuestionsPage() {
         </div>
       )}
       <HtmlEditor
-        label="Marking Scheme (HTML)"
+        label="Marking Scheme"
         value={editForm.markingScheme || ''}
         onChange={(v) => setEditForm({ ...editForm, markingScheme: v })}
-        placeholder="<table>...</table> or plain text marking scheme"
+        placeholder="Marking scheme..."
+        editorKey={`marking-${q.id}`}
       />
       <HtmlEditor
-        label="Model Answer (HTML)"
+        label="Model Answer"
         value={editForm.modelAnswer || ''}
         onChange={(v) => setEditForm({ ...editForm, modelAnswer: v })}
-        placeholder="Full model answer with HTML tables for calculations"
+        placeholder="Full model answer with working..."
+        editorKey={`model-${q.id}`}
       />
       <div className="grid grid-cols-2 gap-2">
         <div className="space-y-1">
@@ -844,6 +852,14 @@ export default function ExamQuestionsPage() {
                     }}
                   >
                     <Pencil className="h-3 w-3" />
+                  </Button>
+                  <Button
+                    size="icon" variant="ghost" className="h-7 w-7 text-purple-500"
+                    title="Add to Samples"
+                    onClick={(e) => { e.stopPropagation(); handleAddToSample(q) }}
+                    disabled={addingToSampleId === q.id}
+                  >
+                    {addingToSampleId === q.id ? <Loader2 className="h-3 w-3 animate-spin" /> : <Library className="h-3 w-3" />}
                   </Button>
                   <Button size="icon" variant="ghost" className="h-7 w-7 text-red-500" onClick={(e) => { e.stopPropagation(); handleDelete(q.id) }}>
                     <Trash2 className="h-3 w-3" />
