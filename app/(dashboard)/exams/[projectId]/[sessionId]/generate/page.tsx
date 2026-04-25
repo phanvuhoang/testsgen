@@ -576,13 +576,13 @@ export default function GeneratePage() {
             ) : (
               relevantSamples.map((sq) => {
                 const { code, issues } = parseSyllabusIssues(sq.syllabusCode)
-                const preview = sq.title || sq.content.replace(/<[^>]+>/g, ' ').trim().slice(0, 120) + '…'
+                const contentPreview = sq.content.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 400)
                 return (
                   <div
                     key={sq.id}
                     className="flex items-start gap-2 px-1 py-1.5 rounded hover:bg-gray-50 cursor-pointer"
                     onClick={() => toggleSampleId(sectionId, sq.id)}
-                    title={preview}
+                    title={contentPreview}
                   >
                     <Checkbox
                       checked={cfg.selectedSampleIds.includes(sq.id)}

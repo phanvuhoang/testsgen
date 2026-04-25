@@ -16,6 +16,9 @@ export function CopySessionButton({ sourceSession, allSessions }: { sourceSessio
   const [copySections, setCopySections] = useState(true)
   const [copyTopics, setCopyTopics] = useState(true)
   const [copyDocTypes, setCopyDocTypes] = useState<string[]>(['SYLLABUS', 'TAX_REGULATIONS', 'SAMPLE_QUESTIONS', 'STUDY_MATERIAL', 'RATES_TARIFF', 'OTHER'])
+  const [copySamples, setCopySamples] = useState(false)
+  const [copyVariables, setCopyVariables] = useState(false)
+  const [copyQuestionBank, setCopyQuestionBank] = useState(false)
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState<string | null>(null)
 
@@ -29,11 +32,19 @@ export function CopySessionButton({ sourceSession, allSessions }: { sourceSessio
       const res = await fetch(`/api/sessions/${sourceSession.id}/copy`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ targetSessionId: targetId, copySections, copyTopics, copyDocTypes }),
+        body: JSON.stringify({ targetSessionId: targetId, copySections, copyTopics, copyDocTypes, copySamples, copyVariables, copyQuestionBank }),
       })
       const data = await res.json()
       if (data.ok) {
-        setResult(`Copied: ${data.copied.sections} sections, ${data.copied.topics} topics, ${data.copied.documents} documents`)
+        const parts = [
+          data.copied.sections && `${data.copied.sections} sections`,
+          data.copied.topics && `${data.copied.topics} topics`,
+          data.copied.documents && `${data.copied.documents} documents`,
+          data.copied.samples && `${data.copied.samples} samples`,
+          data.copied.variables && `${data.copied.variables} variables`,
+          data.copied.questions && `${data.copied.questions} questions`,
+        ].filter(Boolean)
+        setResult(`Copied: ${parts.join(', ')}`)
       } else {
         setResult('Error: ' + (data.error ?? 'Unknown error'))
       }
@@ -72,12 +83,12 @@ export function CopySessionButton({ sourceSession, allSessions }: { sourceSessio
             </div>
             <div className="space-y-2">
               <Label className="text-xs font-semibold">What to copy</Label>
-              
+
               <div className="flex items-center gap-2">
                 <Checkbox id="copySections" checked={copySections} onCheckedChange={v => setCopySections(!!v)} />
                 <Label htmlFor="copySections" className="text-sm">Exam Sections</Label>
               </div>
-              
+
               <div className="flex items-center gap-2">
                 <Checkbox id="copyTopics" checked={copyTopics} onCheckedChange={v => setCopyTopics(!!v)} />
                 <Label htmlFor="copyTopics" className="text-sm">Topics (including sub-topics)</Label>
@@ -95,7 +106,7 @@ export function CopySessionButton({ sourceSession, allSessions }: { sourceSessio
                   {[
                     { value: 'SYLLABUS', label: 'Syllabus' },
                     { value: 'TAX_REGULATIONS', label: 'Regulations' },
-                    { value: 'SAMPLE_QUESTIONS', label: 'Sample Questions' },
+                    { value: 'SAMPLE_QUESTIONS', label: 'Sample Questions (documents)' },
                     { value: 'STUDY_MATERIAL', label: 'Study Material' },
                     { value: 'RATES_TARIFF', label: 'Rates / Tariff' },
                     { value: 'OTHER', label: 'Other' },
@@ -113,6 +124,21 @@ export function CopySessionButton({ sourceSession, allSessions }: { sourceSessio
                     </div>
                   ))}
                 </div>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <Checkbox id="copySamples" checked={copySamples} onCheckedChange={v => setCopySamples(!!v)} />
+                <Label htmlFor="copySamples" className="text-sm">Processed Samples</Label>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <Checkbox id="copyVariables" checked={copyVariables} onCheckedChange={v => setCopyVariables(!!v)} />
+                <Label htmlFor="copyVariables" className="text-sm">Variables</Label>
+              </div>
+
+              <div className="flex items-center gap-2">
+                <Checkbox id="copyQBank" checked={copyQuestionBank} onCheckedChange={v => setCopyQuestionBank(!!v)} />
+                <Label htmlFor="copyQBank" className="text-sm">Question Bank</Label>
               </div>
             </div>
             {result && <p className={`text-sm ${result.startsWith('Error') ? 'text-red-600' : 'text-green-600'}`}>{result}</p>}

@@ -152,6 +152,14 @@ export default function KahootPage() {
   const [scoringAdjustments, setScoringAdjustments] = useState<Record<string,number>>({})
   const [scoringNotes, setScoringNotes] = useState('')
 
+  // Online player personal score tracking (players[] is empty on player devices)
+  const [myLastPts, setMyLastPts] = useState(0)
+  const [myTotalScore, setMyTotalScore] = useState(0)
+  const [myStreak, setMyStreak] = useState(0)
+
+  // Exit game confirm
+  const [exitConfirm, setExitConfirm] = useState(false)
+
   // Buzz mode state
   const [buzzedPlayer, setBuzzedPlayer] = useState<number|null>(null) // which player buzzed
   const [buzzerOpen, setBuzzerOpen] = useState(false) // can players buzz right now?
@@ -288,6 +296,7 @@ export default function KahootPage() {
             setCurrentIdx(idx)
             setSelectedAnswer(null); setSelectedMultiple([]); setFillAnswer('')
             setSubmitted(false); setIsCorrect(null); setDistribution({})
+            setMyLastPts(0)
             setTimeLeft(remaining)
             setQuestionStartTime(startTime)
             timeCountPlayedRef.current = false
@@ -399,7 +408,10 @@ export default function KahootPage() {
     if(correct){audio.playOnce('win',0.9);if((currentPlayer?.streak??0)>=2)setShowConfetti(true);setTimeout(()=>setShowConfetti(false),1500)}
     else audio.playOnce('lost',0.9)
     if(joinRoomCode && myPlayerId) {
-      // Online player: submit score to server, wait for admin SSE reveal
+      // Online player: track local score + submit to server
+      setMyLastPts(pts)
+      setMyTotalScore(prev => prev + pts)
+      setMyStreak(prev => correct ? prev + 1 : 0)
       fetch(`/api/gameshow/${shareCode}/session/${joinRoomCode}/answer`, {
         method:'POST', headers:{'Content-Type':'application/json'},
         body: JSON.stringify({ playerId: myPlayerId, questionId: currentQuestion.id, answer, responseTimeMs: Math.round(elapsed*1000), isCorrect: correct, pointsEarned: pts })
@@ -424,6 +436,9 @@ export default function KahootPage() {
     if(correct){audio.playOnce('win',0.9);setShowConfetti(true);setTimeout(()=>setShowConfetti(false),1500)}
     else audio.playOnce('lost',0.9)
     if(joinRoomCode && myPlayerId) {
+      setMyLastPts(pts)
+      setMyTotalScore(prev => prev + pts)
+      setMyStreak(prev => correct ? prev + 1 : 0)
       fetch(`/api/gameshow/${shareCode}/session/${joinRoomCode}/answer`, {
         method:'POST', headers:{'Content-Type':'application/json'},
         body: JSON.stringify({ playerId: myPlayerId, questionId: currentQuestion.id, answer: answerStr, responseTimeMs: Math.round(elapsed*1000), isCorrect: correct, pointsEarned: pts })
@@ -447,6 +462,9 @@ export default function KahootPage() {
     if(correct){audio.playOnce('win',0.9);setShowConfetti(true);setTimeout(()=>setShowConfetti(false),1500)}
     else audio.playOnce('lost',0.9)
     if(joinRoomCode && myPlayerId) {
+      setMyLastPts(pts)
+      setMyTotalScore(prev => prev + pts)
+      setMyStreak(prev => correct ? prev + 1 : 0)
       fetch(`/api/gameshow/${shareCode}/session/${joinRoomCode}/answer`, {
         method:'POST', headers:{'Content-Type':'application/json'},
         body: JSON.stringify({ playerId: myPlayerId, questionId: currentQuestion.id, answer: fillAnswer, responseTimeMs: Math.round(elapsed*1000), isCorrect: correct, pointsEarned: pts })
@@ -986,17 +1004,36 @@ export default function KahootPage() {
           </div>
         )}
 
-        {/* Online player: submitted overlay — waiting for host reveal */}
+        {/* Online player: submitted overlay — show result while waiting for host */}
         {submitted && !!joinRoomCode && (
-          <div className="fixed inset-0 bg-[#0f0f1e]/85 flex items-center justify-center z-50">
-            <div className="text-center p-6 bg-[#16213e] rounded-3xl border border-indigo-500/30 max-w-xs w-full mx-4 shadow-2xl">
-              <div className="text-5xl mb-3">{isCorrect ? '🎉' : '😢'}</div>
-              <p className={`text-xl font-black mb-3 ${isCorrect ? 'text-green-400' : 'text-red-400'}`}>
+          <div className="fixed inset-0 bg-[#0f0f1e]/90 flex items-center justify-center z-50">
+            <div className={`text-center p-8 rounded-3xl border-2 max-w-xs w-full mx-4 shadow-2xl ${isCorrect ? 'bg-green-900/60 border-green-500' : 'bg-red-900/60 border-red-500'}`}>
+              <div className="text-6xl mb-3">{isCorrect ? '✅' : '❌'}</div>
+              <p className={`text-2xl font-black mb-2 ${isCorrect ? 'text-green-300' : 'text-red-300'}`}>
                 {isCorrect ? 'Correct!' : 'Wrong!'}
               </p>
-              <Loader2 className="h-5 w-5 animate-spin text-indigo-300 mx-auto mb-2"/>
-              <p className="text-indigo-300 text-sm">Waiting for host to reveal…</p>
+              {myLastPts > 0 && (
+                <p className="text-yellow-300 font-bold text-lg mb-1">+{myLastPts} pts</p>
+              )}
+              {myStreak >= 2 && (
+                <p className="text-orange-400 text-sm font-bold mb-1">🔥 {myStreak} streak!</p>
+              )}
+              <p className="text-white/70 text-sm mb-4">Total: <strong className="text-white">{myTotalScore}</strong> pts</p>
+              <Loader2 className="h-4 w-4 animate-spin text-indigo-300 mx-auto mb-1"/>
+              <p className="text-indigo-300 text-xs">Waiting for host to reveal…</p>
             </div>
+          </div>
+        )}
+
+        {/* Online admin: Skip timer button */}
+        {!joinRoomCode && !!roomCode && !submitted && phase === 'question' && (
+          <div className="flex justify-center py-2">
+            <button
+              onClick={() => { clearInterval(timerRef.current!); handleTimeout() }}
+              className="text-xs text-indigo-400 hover:text-indigo-200 border border-indigo-500/30 px-4 py-1.5 rounded-full transition-all hover:bg-indigo-900/40"
+            >
+              ⏭ Skip Time Count
+            </button>
           </div>
         )}
 
@@ -1125,24 +1162,53 @@ export default function KahootPage() {
           </div>
 
           {joinRoomCode ? (
-            // Online player: wait for host to advance
-            <div className="flex items-center justify-center gap-2 text-indigo-300 py-4">
-              <Loader2 className="h-4 w-4 animate-spin"/>
-              <span className="text-sm">Waiting for host…</span>
+            // Online player: show their result summary + waiting message
+            <div className={`text-center p-4 rounded-2xl border-2 mb-2 ${isCorrect ? 'bg-green-900/30 border-green-500/40' : 'bg-red-900/30 border-red-500/40'}`}>
+              <p className={`text-lg font-black ${isCorrect ? 'text-green-300' : 'text-red-300'}`}>{isCorrect ? '✅ Correct!' : '❌ Wrong!'}</p>
+              {myLastPts > 0 && <p className="text-yellow-300 font-bold">+{myLastPts} pts</p>}
+              {myStreak >= 2 && <p className="text-orange-400 text-sm">🔥 {myStreak} streak!</p>}
+              <p className="text-white/60 text-xs mt-2">Total: {myTotalScore} pts</p>
+              <div className="flex items-center justify-center gap-2 text-indigo-300 mt-3">
+                <Loader2 className="h-3 w-3 animate-spin"/>
+                <span className="text-xs">Waiting for host to advance…</span>
+              </div>
             </div>
           ) : (
-            <div className="flex gap-3">
-              {isFreeChoice&&(
-                <Button onClick={()=>{clearTimeout(leaderboardTimeoutRef.current!);audio.stopAll();const rc=roomCodeRef.current;if(rc)fetch(`/api/gameshow/${shareCode}/session/${rc}`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({gameState:{phase:'select'}})}).catch(()=>{});audio.playBg('selecting',0.5);setPhase('select')}}
-                  variant="outline" className="flex-1 border-indigo-500/30 text-indigo-300 hover:bg-indigo-900/20">
-                  Board
-                </Button>
+            <>
+              {exitConfirm && (
+                <div className="fixed inset-0 bg-black/70 flex items-center justify-center z-50">
+                  <div className="bg-[#16213e] rounded-2xl p-6 max-w-sm w-full mx-4 border border-red-500/40">
+                    <p className="text-white font-bold text-center mb-2">Exit Game?</p>
+                    <p className="text-indigo-300 text-sm text-center mb-4">This will end the game for all players.</p>
+                    <div className="flex gap-3">
+                      <Button variant="outline" className="flex-1 border-indigo-500/30 text-indigo-300" onClick={() => setExitConfirm(false)}>Cancel</Button>
+                      <Button className="flex-1 bg-red-600 hover:bg-red-500 text-white" onClick={() => {
+                        setExitConfirm(false)
+                        const rc = roomCodeRef.current
+                        if (rc) fetch(`/api/gameshow/${shareCode}/session/${rc}`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({gameState:{phase:'gameover'},status:'FINISHED'})}).catch(()=>{})
+                        audio.stopAll(); setPhase('gameover')
+                      }}>Exit Game</Button>
+                    </div>
+                  </div>
+                </div>
               )}
-              <Button onClick={handleNext}
-                className={`${isFreeChoice?'flex-1':'w-full'} bg-[#6366f1] hover:bg-[#4f46e5] text-white font-bold py-5 rounded-2xl text-lg`}>
-                {currentIdx>=questions.length-1?'Final Results':'Next'} <ChevronRight className="h-5 w-5 ml-1"/>
-              </Button>
-            </div>
+              <div className="flex gap-3">
+                {isFreeChoice&&(
+                  <Button onClick={()=>{clearTimeout(leaderboardTimeoutRef.current!);audio.stopAll();const rc=roomCodeRef.current;if(rc)fetch(`/api/gameshow/${shareCode}/session/${rc}`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({gameState:{phase:'select'}})}).catch(()=>{});audio.playBg('selecting',0.5);setPhase('select')}}
+                    variant="outline" className="border-indigo-500/30 text-indigo-300 hover:bg-indigo-900/20">
+                    Board
+                  </Button>
+                )}
+                <Button onClick={() => setExitConfirm(true)}
+                  variant="outline" className="border-red-500/40 text-red-400 hover:bg-red-900/20">
+                  <LogOut className="h-4 w-4 mr-1"/>Exit
+                </Button>
+                <Button onClick={handleNext}
+                  className={`flex-1 bg-[#6366f1] hover:bg-[#4f46e5] text-white font-bold py-5 rounded-2xl text-lg`}>
+                  {currentIdx>=questions.length-1?'Final Results':'Next Question'} <ChevronRight className="h-5 w-5 ml-1"/>
+                </Button>
+              </div>
+            </>
           )}
         </div>
       </div>

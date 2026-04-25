@@ -8,7 +8,7 @@ import { db } from '@/lib/db'
 export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
   try {
     const body = await req.json()
-    const { targetSessionId, copyDocTypes, copySections = true, copyTopics = true } = body
+    const { targetSessionId, copyDocTypes, copySections = true, copyTopics = true, copySamples = false, copyVariables = false, copyQuestionBank = false } = body
 
     if (!targetSessionId) {
       return NextResponse.json({ error: 'targetSessionId required' }, { status: 400 })
@@ -28,7 +28,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     const targetSession = await db.session.findUnique({ where: { id: targetSessionId } })
     if (!targetSession) return NextResponse.json({ error: 'Target session not found' }, { status: 404 })
 
-    const results: { sections: number; documents: number; topics: number } = { sections: 0, documents: 0, topics: 0 }
+    const results: { sections: number; documents: number; topics: number; samples: number; variables: number; questions: number } = { sections: 0, documents: 0, topics: 0, samples: 0, variables: 0, questions: 0 }
 
     // Copy sections
     if (copySections && sourceSession.sections.length > 0) {
@@ -119,6 +119,90 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
             }
           })
           results.documents++
+        }
+      } catch {}
+    }
+
+    // Copy processed samples (ParsedQuestion)
+    if (copySamples) {
+      try {
+        const sourceSamples = await (db as any).parsedQuestion.findMany({ where: { sessionId: params.id } })
+        for (const s of sourceSamples) {
+          await (db as any).parsedQuestion.create({
+            data: {
+              sessionId: targetSessionId,
+              documentId: null,
+              title: s.title,
+              content: s.content,
+              answer: s.answer,
+              questionType: s.questionType,
+              topicId: null,
+              topicName: s.topicName,
+              sectionId: null,
+              sectionName: s.sectionName,
+              syllabusCode: s.syllabusCode,
+              difficulty: s.difficulty,
+              sortOrder: s.sortOrder,
+              isManual: s.isManual,
+            },
+          })
+          results.samples++
+        }
+      } catch {}
+    }
+
+    // Copy session variables
+    if (copyVariables) {
+      try {
+        const sourceVars = await (db as any).sessionVariable.findMany({ where: { sessionId: params.id } })
+        for (const v of sourceVars) {
+          await (db as any).sessionVariable.create({
+            data: {
+              sessionId: targetSessionId,
+              varKey: v.varKey,
+              varLabel: v.varLabel,
+              varValue: v.varValue,
+              varUnit: v.varUnit,
+              description: v.description,
+            },
+          })
+          results.variables++
+        }
+      } catch {}
+    }
+
+    // Copy question bank (sections must be copied first for sectionId mapping)
+    if (copyQuestionBank) {
+      try {
+        const sourceQuestions = await db.question.findMany({ where: { sessionId: params.id } })
+        // Build section name map to find matching target sections
+        const targetSections = await (db as any).examSection.findMany({ where: { sessionId: targetSessionId } })
+        const secNameMap: Record<string, string> = {}
+        for (const ts of targetSections) secNameMap[ts.name] = ts.id
+
+        for (const q of sourceQuestions) {
+          const srcSec = sourceSession.sections.find((s: any) => s.id === q.sectionId)
+          const targetSecId = srcSec ? (secNameMap[srcSec.name] || null) : null
+          if (!targetSecId) continue
+          await db.question.create({
+            data: {
+              sessionId: targetSessionId,
+              sectionId: targetSecId,
+              stem: q.stem,
+              options: q.options as any,
+              correctAnswer: q.correctAnswer,
+              markingScheme: q.markingScheme,
+              modelAnswer: q.modelAnswer,
+              topic: q.topic,
+              difficulty: q.difficulty,
+              status: q.status,
+              questionType: q.questionType,
+              marks: q.marks,
+              syllabusCode: q.syllabusCode,
+              regulationRefs: q.regulationRefs,
+            },
+          })
+          results.questions++
         }
       } catch {}
     }

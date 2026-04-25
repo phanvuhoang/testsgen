@@ -154,21 +154,23 @@ export async function POST(_req: NextRequest, { params }: { params: { id: string
         const selectedTopicNames: string[] = sectionConfig.selectedTopicNames || []
 
         // Filter sample questions: if specific samples were selected use those;
-        // otherwise filter by selected topics matching topicId or topicName
+        // otherwise filter by section first (primary), then by topics
         let filteredSamples: any[] = []
         if (sectionConfig.selectedSampleIds && sectionConfig.selectedSampleIds.length > 0) {
           filteredSamples = allParsedQuestions.filter((q: any) =>
             sectionConfig.selectedSampleIds.includes(q.id)
           )
-        } else if (selectedTopics.length > 0 || selectedTopicNames.length > 0) {
+        } else {
           filteredSamples = allParsedQuestions.filter((q: any) => {
+            // Section filter: only use samples tagged to this section (or untagged)
+            if (q.sectionId && q.sectionId !== sectionConfig.sectionId) return false
+            // Topic filter (if specified)
+            if (selectedTopics.length === 0 && selectedTopicNames.length === 0) return true
             const byId = selectedTopics.length > 0 && q.topicId && selectedTopics.includes(q.topicId)
             const byName = selectedTopicNames.length > 0 && q.topicName &&
               selectedTopicNames.some((n: string) => n.toLowerCase() === q.topicName.toLowerCase())
             return byId || byName
           })
-        } else {
-          filteredSamples = allParsedQuestions
         }
 
         const sampleQuestionsFiltered = filteredSamples.length > 0

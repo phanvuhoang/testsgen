@@ -7,14 +7,32 @@ import { Label } from '@/components/ui/label'
 import { Textarea } from '@/components/ui/textarea'
 import { Card, CardContent } from '@/components/ui/card'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
+import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/popover'
 import { Skeleton } from '@/components/ui/skeleton'
 import { useToast } from '@/components/ui/use-toast'
-import { Loader2, RefreshCw, Sparkles, BookOpen, Save } from 'lucide-react'
+import { Loader2, RefreshCw, Sparkles, BookOpen, Save, ChevronDown } from 'lucide-react'
 
 type Section = { id: string; name: string; questionType: string }
 type Topic = { id: string; name: string; isOverall: boolean; parentId: string | null }
-type ParsedSampleQ = { id: string; title: string | null; content: string; topicId: string | null; topicName: string | null; sectionId: string | null }
+type ParsedSampleQ = {
+  id: string
+  title: string | null
+  content: string
+  topicId: string | null
+  topicName: string | null
+  sectionId: string | null
+  syllabusCode: string | null
+}
 type AIModel = { id: string; label: string }
+
+function parseSyllabusIssues(syllabusCode: string | null): { code: string; issues: string[] } {
+  if (!syllabusCode) return { code: '', issues: [] }
+  const parts = syllabusCode.split(' | Issues: ')
+  return {
+    code: parts[0]?.trim() || '',
+    issues: parts[1] ? parts[1].split(',').map(s => s.trim()).filter(Boolean) : [],
+  }
+}
 
 export default function ManualPage() {
   const params = useParams()
@@ -26,6 +44,7 @@ export default function ManualPage() {
   const [sampleQuestions, setSampleQuestions] = useState<ParsedSampleQ[]>([])
   const [aiModels, setAIModels] = useState<AIModel[]>([])
   const [isLoading, setIsLoading] = useState(true)
+  const [samplePopoverOpen, setSamplePopoverOpen] = useState(false)
 
   // Step 1
   const [selectedSectionId, setSelectedSectionId] = useState('')
@@ -68,12 +87,14 @@ export default function ManualPage() {
     return sq.topicId === selectedTopicId
   })
 
+  const selectedSample = sampleQuestions.find(s => s.id === selectedSampleId)
+
   const handleLoadSample = (sampleId: string) => {
     setSelectedSampleId(sampleId)
+    setSamplePopoverOpen(false)
     const sample = sampleQuestions.find(s => s.id === sampleId)
     if (!sample) return
-    // Load content without answer portion
-    const content = sample.content
+    const content = sample.content.replace(/<[^>]+>/g, '\n').replace(/\n{3,}/g, '\n\n').trim()
     const answerIdx = content.search(/\n(answer|solution|working|a\.|b\.)/i)
     setCaseText(answerIdx > 0 ? content.slice(0, answerIdx).trim() : content)
   }
@@ -169,7 +190,7 @@ export default function ManualPage() {
           <div className="grid grid-cols-2 gap-3">
             <div className="space-y-1">
               <Label className="text-xs font-semibold">Section</Label>
-              <Select value={selectedSectionId} onValueChange={setSelectedSectionId}>
+              <Select value={selectedSectionId} onValueChange={v => { setSelectedSectionId(v); setSelectedSampleId('') }}>
                 <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Select section..." /></SelectTrigger>
                 <SelectContent>
                   {sections.map(s => <SelectItem key={s.id} value={s.id} className="text-xs">{s.name}</SelectItem>)}
@@ -178,7 +199,7 @@ export default function ManualPage() {
             </div>
             <div className="space-y-1">
               <Label className="text-xs font-semibold">Topic <span className="text-gray-400 font-normal">(optional)</span></Label>
-              <Select value={selectedTopicId} onValueChange={setSelectedTopicId}>
+              <Select value={selectedTopicId} onValueChange={v => { setSelectedTopicId(v); setSelectedSampleId('') }}>
                 <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Select topic..." /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="__all__" className="text-xs">Any topic</SelectItem>
@@ -201,16 +222,63 @@ export default function ManualPage() {
           {relevantSamples.length > 0 && (
             <div className="space-y-1">
               <Label className="text-xs">Load from Sample Question <span className="text-gray-400 font-normal">(optional)</span></Label>
-              <Select value={selectedSampleId} onValueChange={handleLoadSample}>
-                <SelectTrigger className="h-8 text-xs"><SelectValue placeholder="Select a sample to load..." /></SelectTrigger>
-                <SelectContent>
-                  {relevantSamples.map(sq => (
-                    <SelectItem key={sq.id} value={sq.id} className="text-xs">
-                      {sq.title || sq.content.slice(0, 60) + '…'}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <Popover open={samplePopoverOpen} onOpenChange={setSamplePopoverOpen}>
+                <PopoverTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className={`h-8 text-xs justify-between w-full ${selectedSampleId ? 'border-[#028a39] text-[#028a39]' : ''}`}
+                  >
+                    {selectedSample
+                      ? (selectedSample.title || selectedSample.content.replace(/<[^>]+>/g, ' ').trim().slice(0, 50) + '…')
+                      : `Select a sample to load… (${relevantSamples.length} available)`}
+                    <ChevronDown className="ml-1 h-3 w-3 opacity-50" />
+                  </Button>
+                </PopoverTrigger>
+                <PopoverContent className="w-96 p-2" align="start">
+                  <p className="text-xs font-semibold text-gray-500 mb-2">
+                    Sample questions <span className="font-normal text-gray-400">(click to load case scenario)</span>
+                  </p>
+                  <div className="space-y-0.5 max-h-64 overflow-y-auto">
+                    {relevantSamples.map(sq => {
+                      const { code, issues } = parseSyllabusIssues(sq.syllabusCode)
+                      const contentPreview = sq.content.replace(/<[^>]+>/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 400)
+                      const isSelected = selectedSampleId === sq.id
+                      return (
+                        <div
+                          key={sq.id}
+                          className={`px-2 py-2 rounded cursor-pointer transition-colors ${isSelected ? 'bg-green-50 border border-green-200' : 'hover:bg-gray-50'}`}
+                          onClick={() => handleLoadSample(sq.id)}
+                          title={contentPreview}
+                        >
+                          <div className="flex flex-wrap items-center gap-1 mb-0.5">
+                            {sq.topicName && (
+                              <span className="text-xs text-[#028a39] font-medium">[{sq.topicName}]</span>
+                            )}
+                            {code && (
+                              <span className="text-xs px-1 py-0.5 bg-blue-50 text-blue-700 rounded font-mono">{code}</span>
+                            )}
+                            {issues.map(issue => (
+                              <span key={issue} className="text-xs px-1 py-0.5 bg-amber-50 text-amber-700 rounded">{issue}</span>
+                            ))}
+                          </div>
+                          <span className="text-xs text-gray-700 line-clamp-2">
+                            {sq.title || sq.content.replace(/<[^>]+>/g, ' ').trim().slice(0, 80) + '…'}
+                          </span>
+                        </div>
+                      )
+                    })}
+                  </div>
+                  {selectedSampleId && (
+                    <button
+                      className="mt-2 text-xs text-gray-400 hover:text-gray-600 w-full text-left"
+                      onClick={() => { setSelectedSampleId(''); setSamplePopoverOpen(false) }}
+                    >
+                      Clear selection
+                    </button>
+                  )}
+                </PopoverContent>
+              </Popover>
             </div>
           )}
           <div className="space-y-1">
