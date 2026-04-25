@@ -39,7 +39,7 @@ export async function GET(
       topic: true,
       tags: true,
       createdAt: true,
-    },
+    } as any,
   });
 
   return NextResponse.json(questions);
@@ -75,6 +75,7 @@ export async function POST(
     points = 1,
     sortOrder,
     poolTag,
+    imageUrl,
   } = body;
 
   // TEXT_BLOCK does not require stem or correctAnswer strictly, but stem is needed
@@ -127,7 +128,8 @@ export async function POST(
       points: resolvedPoints,
       sortOrder: resolvedSortOrder,
       poolTag: poolTag ?? null,
-    },
+      ...(imageUrl !== undefined ? { imageUrl: imageUrl ?? null } : {}),
+    } as any,
   });
 
   return NextResponse.json(newQuestion, { status: 201 });

@@ -83,14 +83,18 @@ export default function SamplesPage() {
 
   // Reprocess state
   const [aiModels, setAiModels] = useState<{ id: string; label: string }[]>([])
-  const [reprocessModel, setReprocessModel] = useState('claudible:1')
+  const [reprocessModel, setReprocessModel] = useState('')
   const [isReprocessing, setIsReprocessing] = useState(false)
 
   useEffect(() => {
     fetchQuestions()
     fetch(`/api/sessions/${params.sessionId}/topics`).then(r => r.ok ? r.json() : []).then(setTopics).catch(() => {})
     fetch(`/api/sessions/${params.sessionId}/sections`).then(r => r.ok ? r.json() : []).then(setSections).catch(() => {})
-    fetch('/api/ai-models').then(r => r.ok ? r.json() : []).then(setAiModels).catch(() => {})
+    fetch('/api/ai-models').then(r => r.ok ? r.json() : []).then((data: { id: string; label: string; isDefault?: boolean }[]) => {
+      setAiModels(data)
+      const def = (data.find(m => m.isDefault) || data[0])?.id || ''
+      if (def) setReprocessModel(def)
+    }).catch(() => {})
   }, [])
 
   const fetchQuestions = async () => {

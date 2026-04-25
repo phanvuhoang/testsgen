@@ -47,6 +47,7 @@ export async function GET(
     points: q.points,
     topic: q.topic,
     tags: q.tags,
+    imageUrl: q.imageUrl ?? null,
     sortOrder: q.sortOrder,
   }))
 
@@ -81,6 +82,7 @@ export async function GET(
     buzzerMode: (gameshow as any).buzzerMode ?? false,
     manualScoring: (gameshow as any).manualScoring ?? false,
     shortLink: (gameshow as any).shortLink ?? null,
+    coverImage: (gameshow as any).coverImage ?? null,
     quizSetTitle: (gameshow as any).quizSet?.title ?? '',
     questions: safeQuestions,
   })

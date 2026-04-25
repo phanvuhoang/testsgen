@@ -526,6 +526,7 @@ model QuizQuestion {
   poolTag       String?          // question pool tag (e.g. "Pool A")
   topic         String?          // e.g. "Algebra", "World War II"
   tags          String?          // comma-separated tags e.g. "math,equations,grade10"
+  imageUrl      String?          // optional illustration image
   createdAt     DateTime         @default(now())
 
   // Relations
@@ -703,6 +704,7 @@ model Gameshow {
   buzzerMode        Boolean    @default(false)  // Online: players buzz in to answer
   manualScoring     Boolean    @default(false)  // Local: host manually adjusts scores after each question
   shortLink         String?    // Custom short URL for the gameshow
+  coverImage        String?    // optional cover image for the lobby/starting screen
 
   // Timer settings
   timeLimitSeconds  Int        @default(30)   // Per-question timer

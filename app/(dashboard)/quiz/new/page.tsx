@@ -66,6 +66,7 @@ type AIModelChoice = {
   label: string
   provider: string
   model: string
+  isDefault?: boolean
 }
 
 type Step2Form = z.infer<typeof step2Schema>
@@ -78,7 +79,7 @@ export default function NewQuizPage() {
   const [step, setStep] = useState<Step>(1)
   const [source, setSource] = useState<'upload' | 'paste' | 'manual' | null>(null)
   const [aiModels, setAIModels] = useState<AIModelChoice[]>([])
-  const [selectedModel, setSelectedModel] = useState<string>('deepseek:deepseek-reasoner')
+  const [selectedModel, setSelectedModel] = useState<string>('')
 
   // Handle ?mode=manual: pre-select manual mode and jump to step 2
   useEffect(() => {
@@ -91,7 +92,8 @@ export default function NewQuizPage() {
       .then((r) => r.json())
       .then((data: AIModelChoice[]) => {
         setAIModels(data)
-        if (data.length > 0) setSelectedModel(data[0].id)
+        const def = (data.find(m => m.isDefault) || data[0])?.id || ''
+        if (def) setSelectedModel(def)
       })
       .catch(() => {})
   }, [])

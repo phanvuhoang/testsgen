@@ -37,6 +37,7 @@ import {
   Copy,
 } from 'lucide-react'
 import { RichTextEditor } from '@/components/ui/rich-text-editor'
+import { ImagePicker } from '@/components/ui/image-picker'
 
 type Question = {
   id: string
@@ -51,6 +52,7 @@ type Question = {
   poolTag: string | null
   topic?: string | null
   tags?: string | null
+  imageUrl?: string | null
   createdAt: string
 }
 
@@ -59,6 +61,7 @@ type AIModel = {
   label: string
   provider: string
   model: string
+  isDefault?: boolean
 }
 
 const ALL_QUESTION_TYPES = [
@@ -129,7 +132,7 @@ export default function QuizQuestionsPage() {
   // AI generate state
   const [showAIPanel, setShowAIPanel] = useState(false)
   const [aiModels, setAIModels] = useState<AIModel[]>([])
-  const [selectedModel, setSelectedModel] = useState<string>('claudible:1')
+  const [selectedModel, setSelectedModel] = useState<string>('')
   const [aiLanguage, setAiLanguage] = useState<'ENG' | 'VIE'>('ENG')
   const [aiTopic, setAITopic] = useState('')
   const [aiCount, setAICount] = useState(10)
@@ -224,6 +227,8 @@ export default function QuizQuestionsPage() {
       if (!res.ok) return
       const data: AIModel[] = await res.json()
       setAIModels(data)
+      const def = (data.find((m: any) => m.isDefault) || data[0])?.id || ''
+      if (def) setSelectedModel(def)
     } catch {}
   }
 
@@ -294,6 +299,7 @@ export default function QuizQuestionsPage() {
           ...patchData,
           topic: editForm.topic?.trim() || null,
           tags: editForm.tags?.trim() || null,
+          imageUrl: editForm.imageUrl || null,
         }),
       })
       if (!res.ok) throw new Error()
@@ -881,6 +887,14 @@ export default function QuizQuestionsPage() {
               onChange={(e) => setEditForm({ ...editForm, tags: e.target.value })}
             />
           </div>
+        </div>
+
+        <div className="space-y-1.5">
+          <Label>Illustration Image <span className="text-muted-foreground font-normal text-xs">(optional)</span></Label>
+          <ImagePicker
+            value={editForm.imageUrl ?? undefined}
+            onChange={(url) => setEditForm({ ...editForm, imageUrl: url })}
+          />
         </div>
 
         <div className="flex gap-2 justify-end">

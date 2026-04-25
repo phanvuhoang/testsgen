@@ -74,6 +74,7 @@ export async function PATCH(
       ...(body.buzzerMode !== undefined ? { buzzerMode: body.buzzerMode } as any : {}),
       ...(body.manualScoring !== undefined ? { manualScoring: body.manualScoring } as any : {}),
       ...(body.shortLink !== undefined ? { shortLink: body.shortLink } as any : {}),
+      ...(body.coverImage !== undefined ? { coverImage: body.coverImage } as any : {}),
       easyCount: body.easyCount != null ? parseInt(body.easyCount) || null : undefined,
       mediumCount: body.mediumCount != null ? parseInt(body.mediumCount) || null : undefined,
       hardCount: body.hardCount != null ? parseInt(body.hardCount) || null : undefined,

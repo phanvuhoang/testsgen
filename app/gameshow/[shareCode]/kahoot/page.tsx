@@ -22,7 +22,7 @@ type GameshowConfig = {
   shuffleQuestions: boolean; showLeaderboard: boolean; clickStartToCount: boolean
   buzzerMode: boolean
   manualScoring: boolean
-  maxPlayers: number; shortLink: string | null; quizSetTitle: string; questions: Question[]
+  maxPlayers: number; shortLink: string | null; coverImage: string | null; quizSetTitle: string; questions: Question[]
 }
 type Player = {
   id: string; nickname: string; avatarColor: string
@@ -845,7 +845,10 @@ export default function KahootPage() {
     return(
       <div className="min-h-screen bg-gradient-to-b from-[#6366f1] to-[#4f46e5] flex items-center justify-center p-4 text-white">
         <div className="text-center max-w-sm w-full">
-          <div className="text-6xl mb-4 animate-bounce">🎮</div>
+          {config?.coverImage
+            ? <img src={config.coverImage} alt={config?.name ?? ''} className="h-28 w-full object-cover rounded-2xl mb-3"/>
+            : <div className="text-6xl mb-4 animate-bounce">🎮</div>
+          }
           <h2 className="text-2xl font-black mb-1">You're in!</h2>
           <p className="text-indigo-200 mb-6">Waiting for the host…</p>
           <div className="bg-white/20 rounded-2xl p-4 mb-4">
@@ -876,7 +879,10 @@ export default function KahootPage() {
       <div className="relative min-h-screen bg-gradient-to-b from-[#6366f1] to-[#4f46e5] flex items-center justify-center p-4 text-white">
         <MusicBtn/>
         <div className="text-center max-w-sm w-full">
-          <div className="text-4xl mb-2">🎮</div>
+          {config?.coverImage
+            ? <img src={config.coverImage} alt={config.name} className="h-32 w-full object-cover rounded-2xl mb-3"/>
+            : <div className="text-4xl mb-2">🎮</div>
+          }
           <h2 className="text-xl font-black mb-1">Room Code</h2>
           <div className="text-5xl font-black tracking-widest bg-white/20 rounded-2xl py-3 mb-3">{roomCode}</div>
           <p className="text-indigo-200 text-xs mb-1">Players scan to join:</p>

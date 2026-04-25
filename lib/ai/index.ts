@@ -15,20 +15,26 @@ export type AIModelChoice = {
   label: string        // display label
   provider: string
   model: string
+  isDefault?: boolean
 }
 
 export function getAvailableModels(): AIModelChoice[] {
   const openrouterModel1 = process.env.OPENROUTER_MODEL1 || 'xiaomi/mimo-v2-pro'
   const openrouterModel2 = process.env.OPENROUTER_MODEL2 || 'qwen/qwen3-plus'
+  const openrouterModel3 = process.env.OPENROUTER_MODEL3 || ''
+  const openrouterModel4 = process.env.OPENROUTER_MODEL4 || ''
   const claudibleModel1  = process.env.CLAUDIBLE_MODEL  || 'claude-haiku-4.5'
   const claudibleModel2  = process.env.CLAUDIBLE_MODEL2 || ''
   const anthropicModel1  = process.env.ANTHROPIC_MODEL1 || ''
   const anthropicModel2  = process.env.ANTHROPIC_MODEL2 || ''
+  const openaiModel1     = process.env.OPENAI_MODEL1 || ''
+  const openaiModel2     = process.env.OPENAI_MODEL2 || ''
+  const hasOpenAI        = !!process.env.OPENAI_API_KEY
 
   const models: AIModelChoice[] = [
     {
       id: 'claudible:1',
-      label: `Claudible — ${claudibleModel1} (Default)`,
+      label: `Claudible — ${claudibleModel1}`,
       provider: 'claudible',
       model: claudibleModel1,
     },
@@ -61,7 +67,32 @@ export function getAvailableModels(): AIModelChoice[] {
       label: `OpenRouter — ${openrouterModel2}`,
       provider: 'openrouter',
       model: openrouterModel2,
+      isDefault: true,
     },
+    ...(openrouterModel3 ? [{
+      id: `openrouter:${openrouterModel3}`,
+      label: `OpenRouter — ${openrouterModel3}`,
+      provider: 'openrouter',
+      model: openrouterModel3,
+    }] : []),
+    ...(openrouterModel4 ? [{
+      id: `openrouter:${openrouterModel4}`,
+      label: `OpenRouter — ${openrouterModel4}`,
+      provider: 'openrouter',
+      model: openrouterModel4,
+    }] : []),
+    ...(hasOpenAI && openaiModel1 ? [{
+      id: `openai:${openaiModel1}`,
+      label: `OpenAI — ${openaiModel1}`,
+      provider: 'openai',
+      model: openaiModel1,
+    }] : []),
+    ...(hasOpenAI && openaiModel2 ? [{
+      id: `openai:${openaiModel2}`,
+      label: `OpenAI — ${openaiModel2}`,
+      provider: 'openai',
+      model: openaiModel2,
+    }] : []),
     {
       id: 'deepseek:deepseek-reasoner',
       label: 'DeepSeek Reasoner',
@@ -90,6 +121,10 @@ export function parseModelId(modelId: string): { provider: string; model: string
     if (modelPart === '1') return { provider: 'anthropic', model: process.env.ANTHROPIC_MODEL1 || 'claude-haiku-4-5' }
     if (modelPart === '2') return { provider: 'anthropic', model: process.env.ANTHROPIC_MODEL2 || 'claude-sonnet-4-5' }
     return { provider: 'anthropic', model: modelPart }
+  }
+
+  if (provider === 'openai') {
+    return { provider: 'openai', model: modelPart }
   }
 
   return { provider, model: modelPart }

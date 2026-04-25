@@ -54,6 +54,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       ...(body.buzzerMode !== undefined ? { buzzerMode: body.buzzerMode } as any : {}),
       ...(body.manualScoring !== undefined ? { manualScoring: body.manualScoring } as any : {}),
       shortLink: body.shortLink ?? null,
+      ...(body.coverImage !== undefined ? { coverImage: body.coverImage } as any : {}),
       easyCount: body.easyCount ? parseInt(body.easyCount) : null,
       mediumCount: body.mediumCount ? parseInt(body.mediumCount) : null,
       hardCount: body.hardCount ? parseInt(body.hardCount) : null,

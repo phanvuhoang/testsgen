@@ -15,6 +15,7 @@ import { useToast } from '@/components/ui/use-toast'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
 import { Loader2, Plus, Trash2, ExternalLink, Copy, Gamepad2, Pencil, BarChart2, ChevronDown, ChevronUp } from 'lucide-react'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
+import { ImagePicker } from '@/components/ui/image-picker'
 
 type GameshowType = 'WWTBAM' | 'KAHOOT' | 'JEOPARDY'
 type PlayMode = 'SINGLE' | 'LOCAL' | 'ONLINE'
@@ -46,6 +47,7 @@ type Gameshow = {
   buzzerMode: boolean
   manualScoring: boolean
   shortLink: string | null
+  coverImage?: string | null
   categoryNames?: string | null
   jeopardyTags?: string | null
   createdAt: string
@@ -103,6 +105,7 @@ const emptyForm = {
   buzzerMode: 'false',
   manualScoring: 'false',
   shortLink: '',
+  coverImage: '',
   categoryNames: '[]',
   jeopardyTags: '{}',
 }
@@ -194,6 +197,7 @@ export default function GameshowsPage() {
       buzzerMode: String(g.buzzerMode ?? false),
         manualScoring: String(g.manualScoring ?? false),
       shortLink: g.shortLink ?? '',
+      coverImage: g.coverImage ?? '',
       categoryNames: g.categoryNames ?? '[]',
       jeopardyTags: g.jeopardyTags ?? '{}',
     })
@@ -235,6 +239,7 @@ export default function GameshowsPage() {
         buzzerMode: (form as any).buzzerMode === 'true',
         manualScoring: (form as any).manualScoring === 'true',
         shortLink: (form as any).shortLink?.trim() || null,
+        coverImage: (form as any).coverImage?.trim() || null,
         categoryNames: (form as any).categoryNames || '[]',
         jeopardyTags: (form as any).jeopardyTags || '{}',
       }
@@ -785,6 +790,13 @@ export default function GameshowsPage() {
                   placeholder="e.g. https://s.example.com/abc123"
                 />
                 <p className="text-xs text-gray-400">If set, this URL is shown instead of the full game link and used for the QR code.</p>
+              </div>
+              <div className="space-y-1.5 pt-2 border-t">
+                <Label>Cover Image <span className="text-gray-400 font-normal text-xs">(shown on lobby/waiting screen)</span></Label>
+                <ImagePicker
+                  value={(form as any).coverImage || undefined}
+                  onChange={(url) => setForm({ ...form, coverImage: url ?? '' } as any)}
+                />
               </div>
             </TabsContent>
           </Tabs>

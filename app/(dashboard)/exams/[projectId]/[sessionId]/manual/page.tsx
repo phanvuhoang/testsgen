@@ -57,7 +57,7 @@ export default function ManualPage() {
   const [selectedSampleId, setSelectedSampleId] = useState('')
 
   // Step 3
-  const [selectedModel, setSelectedModel] = useState('claudible:1')
+  const [selectedModel, setSelectedModel] = useState('')
   const [optRegenNumbers, setOptRegenNumbers] = useState(true)
   const [optUpdateYear, setOptUpdateYear] = useState(true)
   const [optUpdateRegulations, setOptUpdateRegulations] = useState(true)
@@ -77,7 +77,11 @@ export default function ManualPage() {
       setTopics(tops.filter((t: Topic) => !t.isOverall))
       setSampleQuestions(samples)
       if ('ok' in modelRes && (modelRes as Response).ok) {
-        (modelRes as Response).json().then(setAIModels)
+        (modelRes as Response).json().then((data: { id: string; label: string; isDefault?: boolean }[]) => {
+          setAIModels(data)
+          const def = (data.find(m => m.isDefault) || data[0])?.id || ''
+          if (def) setSelectedModel(def)
+        })
       }
     }).finally(() => setIsLoading(false))
   }, [sessionId])

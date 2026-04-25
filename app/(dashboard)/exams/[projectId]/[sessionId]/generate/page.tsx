@@ -142,7 +142,7 @@ export default function GeneratePage() {
   const [sectionConfigs, setSectionConfigs] = useState<Record<string, SectionGenConfig>>({})
   const [expandedSec, setExpandedSec] = useState<Set<string>>(new Set())
   const [extraInstructions, setExtraInstructions] = useState('')
-  const [selectedModel, setSelectedModel] = useState('claudible:1')
+  const [selectedModel, setSelectedModel] = useState('')
   const [generateLanguage, setGenerateLanguage] = useState<'ENG' | 'VIE'>('ENG')
   const [assumedDate, setAssumedDate] = useState('')
 
@@ -227,8 +227,10 @@ export default function GeneratePage() {
       }
 
       if ('ok' in modelRes && modelRes.ok) {
-        const models = await (modelRes as Response).json()
+        const models: { id: string; label: string; isDefault?: boolean }[] = await (modelRes as Response).json()
         setAIModels(models)
+        const def = (models.find(m => m.isDefault) || models[0])?.id || ''
+        if (def) setSelectedModel(def)
       }
     } finally {
       setIsLoading(false)
