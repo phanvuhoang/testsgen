@@ -1277,13 +1277,7 @@ export default function JeopardyPage() {
             </div>
           )}
 
-          {/* Online admin sees question but no answer UI */}
-          {isOnlineAdmin ? (
-            <div className="text-center text-blue-300 py-8">
-              <Loader2 className="h-6 w-6 animate-spin mx-auto mb-2" />
-              <p className="text-sm">Players are answering…</p>
-            </div>
-          ) : waiting ? (
+          {waiting && !isOnlineAdmin ? (
             <div className="flex flex-col items-center gap-4">
               <p className="text-blue-300 text-sm">Press Start when ready to begin the timer</p>
               <Button onClick={handleStartTimer}
@@ -1291,34 +1285,43 @@ export default function JeopardyPage() {
                 <Play className="h-5 w-5" /> Start Timer
               </Button>
             </div>
+          ) : isMCQ ? (
+            /* MCQ options — disabled and view-only for online admin */
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {options.map((opt, i) => (
+                <button key={opt} onClick={() => !isOnlineAdmin && handleSingleAnswer(opt)}
+                  disabled={submitted || isOnlineAdmin}
+                  className={`flex items-center gap-3 p-4 rounded-xl border-2 text-left font-medium transition-all
+                    ${isOnlineAdmin
+                      ? 'bg-[#0d1b5e] border-blue-500/30 opacity-80 cursor-default'
+                      : 'bg-[#0d1b5e] border-blue-500/50 hover:bg-[#1a2f8e] hover:border-yellow-400 hover:scale-[1.02] active:scale-95 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed'}`}>
+                  <span className="w-7 h-7 rounded-full bg-yellow-400 text-black font-black text-xs flex items-center justify-center flex-shrink-0">
+                    {['A', 'B', 'C', 'D'][i]}
+                  </span>
+                  <span className="text-sm">{opt}</span>
+                </button>
+              ))}
+              {isOnlineAdmin && (
+                <p className="col-span-2 text-center text-blue-400 text-xs mt-1">Players are answering — options shown for reference</p>
+              )}
+            </div>
+          ) : isOnlineAdmin ? (
+            <div className="text-center text-blue-300 py-8">
+              <Loader2 className="h-6 w-6 animate-spin mx-auto mb-2" />
+              <p className="text-sm">Players are answering…</p>
+            </div>
           ) : (
-            /* Answer UI for players */
-            isMCQ ? (
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                {options.map((opt, i) => (
-                  <button key={opt} onClick={() => handleSingleAnswer(opt)}
-                    disabled={submitted}
-                    className="flex items-center gap-3 p-4 rounded-xl border-2 bg-[#0d1b5e] border-blue-500/50 hover:bg-[#1a2f8e] hover:border-yellow-400 text-left font-medium transition-all hover:scale-[1.02] active:scale-95 disabled:opacity-50 disabled:cursor-not-allowed">
-                    <span className="w-7 h-7 rounded-full bg-yellow-400 text-black font-black text-xs flex items-center justify-center flex-shrink-0">
-                      {['A', 'B', 'C', 'D'][i]}
-                    </span>
-                    <span className="text-sm">{opt}</span>
-                  </button>
-                ))}
-              </div>
-            ) : (
-              <div className="flex gap-3">
-                <Input value={textAnswer} onChange={e => setTextAnswer(e.target.value)}
-                  onKeyDown={e => e.key === 'Enter' && textAnswer.trim() && handleSingleAnswer(textAnswer)}
-                  placeholder="Type your answer..." autoFocus disabled={submitted}
-                  className="bg-[#0d1b5e] border-blue-500/30 text-white placeholder:text-blue-400 rounded-xl text-lg py-6" />
-                <Button onClick={() => textAnswer.trim() && handleSingleAnswer(textAnswer)}
-                  disabled={!textAnswer.trim() || submitted}
-                  className="bg-yellow-400 text-black font-bold hover:bg-yellow-300 rounded-xl px-6">
-                  Submit
-                </Button>
-              </div>
-            )
+            <div className="flex gap-3">
+              <Input value={textAnswer} onChange={e => setTextAnswer(e.target.value)}
+                onKeyDown={e => e.key === 'Enter' && textAnswer.trim() && handleSingleAnswer(textAnswer)}
+                placeholder="Type your answer..." autoFocus disabled={submitted}
+                className="bg-[#0d1b5e] border-blue-500/30 text-white placeholder:text-blue-400 rounded-xl text-lg py-6" />
+              <Button onClick={() => textAnswer.trim() && handleSingleAnswer(textAnswer)}
+                disabled={!textAnswer.trim() || submitted}
+                className="bg-yellow-400 text-black font-bold hover:bg-yellow-300 rounded-xl px-6">
+                Submit
+              </Button>
+            </div>
           )}
         </div>
       </div>

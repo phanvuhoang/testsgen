@@ -321,6 +321,7 @@ export default function KahootPage() {
             setPhase('leaderboard')
           } else if (gs.phase === 'select') {
             clearInterval(timerRef.current!)
+            if (gs.answeredQuestionIds) setAnsweredQuestions(new Set(gs.answeredQuestionIds))
             setPhase('waiting')
           } else if (gs.phase === 'gameover') {
             clearInterval(timerRef.current!)
@@ -682,11 +683,18 @@ export default function KahootPage() {
   }
 
   const handleNext=()=>{
-    const allAnswered=answeredQuestions.size>=questions.length
-    const isLast=isFreeChoice?allAnswered:currentIdx>=questions.length-1
     audio.stopAll()
     const rc = roomCodeRef.current
     const isOnlineAdmin = !!rc && !joinRoomCode
+    // For online admin FREE_CHOICE: mark current question done before computing isLast
+    // (admin never goes through handleAnswer, so answered set must be updated here)
+    let newAnswered = answeredQuestions
+    if(isFreeChoice && isOnlineAdmin && currentQuestion) {
+      newAnswered = new Set(Array.from(answeredQuestions).concat(currentQuestion.id))
+      setAnsweredQuestions(newAnswered)
+    }
+    const allAnswered=newAnswered.size>=questions.length
+    const isLast=isFreeChoice?allAnswered:currentIdx>=questions.length-1
     if(isOnlineAdmin) {
       if(isLast) {
         fetch(`/api/gameshow/${shareCode}/session/${rc}`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({gameState:{phase:'gameover'}})}).catch(()=>{})
@@ -1262,7 +1270,15 @@ export default function KahootPage() {
               )}
               <div className="flex gap-3">
                 {isFreeChoice&&(
-                  <Button onClick={()=>{clearTimeout(leaderboardTimeoutRef.current!);audio.stopAll();const rc=roomCodeRef.current;if(rc)fetch(`/api/gameshow/${shareCode}/session/${rc}`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({gameState:{phase:'select'}})}).catch(()=>{});audio.playBg('selecting',0.5);setPhase('select')}}
+                  <Button onClick={()=>{
+                    clearTimeout(leaderboardTimeoutRef.current!);audio.stopAll()
+                    const rc=roomCodeRef.current
+                    // Mark current question answered (admin can't answer, so we track here)
+                    const na=currentQuestion?new Set(Array.from(answeredQuestions).concat(currentQuestion.id)):answeredQuestions
+                    if(currentQuestion)setAnsweredQuestions(na)
+                    if(rc)fetch(`/api/gameshow/${shareCode}/session/${rc}`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({gameState:{phase:'select',answeredQuestionIds:Array.from(na)}})}).catch(()=>{})
+                    audio.playBg('selecting',0.5);setPhase('select')
+                  }}
                     variant="outline" className="border-indigo-500/30 text-indigo-300 hover:bg-indigo-900/20">
                     Board
                   </Button>

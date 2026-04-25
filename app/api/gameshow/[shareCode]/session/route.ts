@@ -37,6 +37,15 @@ export async function POST(
   
   // Build question order
   let questions = [...gameshow.quizSet.questions]
+  // Apply fixedQuestionIds filter (same logic as the config API)
+  if ((gameshow as any).fixedQuestionIds) {
+    try {
+      const ids: string[] = JSON.parse((gameshow as any).fixedQuestionIds)
+      const idMap = new Map(questions.map(q => [q.id, q]))
+      const fixed = ids.map(id => idMap.get(id)).filter(Boolean) as typeof questions
+      if (fixed.length > 0) questions = fixed
+    } catch {}
+  }
   if (gameshow.shuffleQuestions) {
     questions = questions.sort(() => Math.random() - 0.5)
   }

@@ -292,6 +292,10 @@ export default function WwtbamPage() {
           } else if (gs.phase === 'reveal') {
             clearInterval(timerRef.current!)
             setPhase('reveal')
+          } else if (gs.phase === 'select') {
+            clearInterval(timerRef.current!)
+            if (gs.answeredQuestionIds) setAnsweredQuestions(new Set(gs.answeredQuestionIds))
+            setPhase('waiting')
           } else if (gs.phase === 'leaderboard') {
             clearInterval(timerRef.current!)
             audio.playBg('leaderboard', 0.6)
@@ -571,9 +575,29 @@ export default function WwtbamPage() {
   const goToSelect = () => {
     setTimerRunning(false)
     audio.stopAll()
-    if (answeredQuestions.size >= questions.length) {
+    const rc = roomCodeRef.current
+    const isOnlineAdmin = !!rc && !joinRoomCode
+    // Mark current question as answered (admin never goes through handleAnswer)
+    const newAnswered = currentQuestion
+      ? new Set(Array.from(answeredQuestions).concat(currentQuestion.id))
+      : answeredQuestions
+    if (currentQuestion) setAnsweredQuestions(newAnswered)
+
+    if (newAnswered.size >= questions.length) {
+      if (isOnlineAdmin) {
+        fetch(`/api/gameshow/${shareCode}/session/${rc}`, {
+          method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ gameState: { phase: 'gameover' }, status: 'FINISHED' })
+        }).catch(() => {})
+      }
       setPhase('gameover')
       return
+    }
+    if (isOnlineAdmin) {
+      fetch(`/api/gameshow/${shareCode}/session/${rc}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ gameState: { phase: 'select', answeredQuestionIds: Array.from(newAnswered) } })
+      }).catch(() => {})
     }
     audio.playBg('selecting', 0.5)
     setPhase('select')
@@ -614,14 +638,26 @@ export default function WwtbamPage() {
   const hostStartGame = async () => {
     if (!roomCode) return
     clearInterval(lobbyPollRef.current!)
-    const startTime = Date.now()
-    try {
-      await fetch(`/api/gameshow/${shareCode}/session/${roomCode}`, {
-        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ gameState: { phase: 'question', currentQuestionIndex: 0, questionStartTime: startTime, questionOrder: questions.map(q => q.id) }, status: 'ACTIVE' })
-      })
-    } catch {}
-    beginQuestion(0)
+    if (config?.selectionMode === 'FREE_CHOICE') {
+      // FREE_CHOICE: go to select screen so admin can pick questions
+      try {
+        await fetch(`/api/gameshow/${shareCode}/session/${roomCode}`, {
+          method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ gameState: { phase: 'select', questionOrder: questions.map(q => q.id), answeredQuestionIds: [] }, status: 'ACTIVE' })
+        })
+      } catch {}
+      audio.playBg('selecting', 0.5)
+      setPhase('select')
+    } else {
+      const startTime = Date.now()
+      try {
+        await fetch(`/api/gameshow/${shareCode}/session/${roomCode}`, {
+          method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ gameState: { phase: 'question', currentQuestionIndex: 0, questionStartTime: startTime, questionOrder: questions.map(q => q.id) }, status: 'ACTIVE' })
+        })
+      } catch {}
+      beginQuestion(0)
+    }
   }
 
   // ─── Lifelines ───────────────────────────────────────────────────────────
@@ -947,9 +983,11 @@ export default function WwtbamPage() {
                 : <span className={`text-xl font-black ${timeLeft <= 5 ? 'text-red-400 animate-pulse' : 'text-yellow-300'}`}>{timeLeft}</span>
               }
             </div>
-            <div className="text-sm text-blue-300">
-              {joinRoomCode ? myTotalScore : (currentPlayer?.score ?? 0)} pts
-            </div>
+            {(!roomCode || joinRoomCode) && (
+              <div className="text-sm text-blue-300">
+                {joinRoomCode ? myTotalScore : (currentPlayer?.score ?? 0)} pts
+              </div>
+            )}
           </div>
           <div className="max-w-2xl mx-auto mt-2 h-2 bg-gray-700 rounded-full overflow-hidden">
             <div className={`h-full ${timerColor} transition-all duration-1000`}
@@ -1017,16 +1055,17 @@ export default function WwtbamPage() {
               </div>
             )}
 
-            {/* Options — disabled for online admin */}
-            <div className={`grid grid-cols-1 sm:grid-cols-2 gap-3 ${(waitingForStart || isOnlineAdmin) ? 'opacity-60 pointer-events-none' : ''}`}>
+            {/* Options — visible to all; disabled for online admin */}
+            <div className={`grid grid-cols-1 sm:grid-cols-2 gap-3 ${(waitingForStart && !isOnlineAdmin) ? 'opacity-60 pointer-events-none' : ''}`}>
               {options.map((option, i) => {
                 const letter = ['A', 'B', 'C', 'D'][i]
                 const isElim = eliminatedOptions.includes(option)
                 return (
-                  <button key={option} disabled={isElim || !!selectedAnswer || waitingForStart || isOnlineAdmin}
-                    onClick={() => !isElim && handleAnswer(option)}
+                  <button key={option} disabled={isElim || !!selectedAnswer || (waitingForStart && !isOnlineAdmin) || isOnlineAdmin}
+                    onClick={() => !isElim && !isOnlineAdmin && handleAnswer(option)}
                     className={`flex items-center gap-3 p-3 sm:p-4 rounded-xl border-2 text-left font-medium transition-all duration-200
                       ${isElim ? 'opacity-20 cursor-not-allowed bg-gray-800 border-gray-700'
+                      : isOnlineAdmin ? 'bg-[#0d1b5e] border-blue-500/30 opacity-75 cursor-default'
                                : 'bg-[#0d1b5e] border-blue-500/50 hover:bg-[#1a2f7e] hover:border-yellow-400 hover:scale-[1.02] cursor-pointer active:scale-[0.98]'}`}>
                     <span className="flex-shrink-0 w-8 h-8 rounded-full bg-yellow-400 text-black font-black text-sm flex items-center justify-center">{letter}</span>
                     <span className="text-sm sm:text-base">{option}</span>
@@ -1034,6 +1073,9 @@ export default function WwtbamPage() {
                 )
               })}
             </div>
+            {isOnlineAdmin && (
+              <p className="text-center text-blue-400 text-xs mt-3">Players are answering — options shown for reference</p>
+            )}
 
             {/* Lifelines — only in non-online mode */}
             {config?.enableLifelines && !joinRoomCode && !isOnlineAdmin && (
