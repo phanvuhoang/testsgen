@@ -168,7 +168,9 @@ export default function KahootPage() {
   type BuzzState = { playerId: string; playerNickname: string; answer: string | null; isCorrect: boolean | null; isBuzzing?: boolean }
   const [buzzState, setBuzzState] = useState<BuzzState|null>(null)
   const [disabledOptions, setDisabledOptions] = useState<string[]>([])
+  const [disabledPlayerIds, setDisabledPlayerIds] = useState<string[]>([])
   const [hasBuzzed, setHasBuzzed] = useState(false) // player pressed buzz button
+  const [buzzTimeRemaining, setBuzzTimeRemaining] = useState(0) // admin: time left when Result clicked
   // Bet mechanism
   const [betsRemaining, setBetsRemaining] = useState(0)
   const [isBetting, setIsBetting] = useState(false)
@@ -308,9 +310,9 @@ export default function KahootPage() {
             const elapsed = (Date.now() - startTime) / 1000
             const cfg = configRef.current
             const remaining = Math.max(1, Math.round((cfg?.timeLimitSeconds ?? 30) - elapsed))
-            // Only reset answer state if this is a NEW question — prevents SSE updates
-            // during the same question from clearing a player's submitted answer
-            const isNewQuestion = idx !== currentIdxRef.current || !submittedRef.current
+            // buzzContinue: admin pressed Continue (wrong answer) — reset all players' states
+            const isBuzzContinue = gs.buzzContinue === true
+            const isNewQuestion = isBuzzContinue || idx !== currentIdxRef.current || !submittedRef.current
             if (isNewQuestion) {
               setCurrentIdx(idx)
               setSelectedAnswer(null); setSelectedMultiple([]); setFillAnswer('')
@@ -319,9 +321,17 @@ export default function KahootPage() {
               timeCountPlayedRef.current = false
               setBuzzState(null); setHasBuzzed(false); setIsBetting(false)
             }
-            // Always sync buzz state (someone may buzz mid-question)
-            if (gs.buzzState !== undefined) setBuzzState(gs.buzzState ?? null)
+            // Always sync buzz/disabled state
+            if (gs.buzzState !== undefined) {
+              setBuzzState(gs.buzzState ?? null)
+              // Pause local timer when someone buzzes in BUZZ mode
+              if (gs.buzzState !== null && cfg?.playMode === 'BUZZ') {
+                clearInterval(timerRef.current!)
+                setTimerRunning(false)
+              }
+            }
             if (gs.disabledOptions !== undefined) setDisabledOptions(gs.disabledOptions ?? [])
+            if (gs.disabledPlayerIds !== undefined) setDisabledPlayerIds(gs.disabledPlayerIds ?? [])
             setTimeLeft(remaining)
             setQuestionStartTime(startTime)
             setPhase('question')
@@ -360,6 +370,7 @@ export default function KahootPage() {
         if (gs) {
           if (gs.buzzState !== undefined) setBuzzState(gs.buzzState ?? null)
           if (gs.disabledOptions !== undefined) setDisabledOptions(gs.disabledOptions ?? [])
+          if (gs.disabledPlayerIds !== undefined) setDisabledPlayerIds(gs.disabledPlayerIds ?? [])
         }
         if (msg.players) {
           setPlayers(msg.players.map((p: any, i: number) => ({
@@ -617,7 +628,7 @@ export default function KahootPage() {
       try {
         await fetch(`/api/gameshow/${shareCode}/session/${roomCode}`, {
           method:'PATCH', headers:{'Content-Type':'application/json'},
-          body: JSON.stringify({ gameState: { phase: 'question', currentQuestionIndex: 0, questionStartTime: startTime, buzzState: null, disabledOptions: [] }, status: 'ACTIVE' })
+          body: JSON.stringify({ gameState: { phase: 'question', currentQuestionIndex: 0, questionStartTime: startTime, buzzState: null, disabledOptions: [], disabledPlayerIds: [] }, status: 'ACTIVE' })
         })
       } catch {}
       beginQuestion(0)
@@ -672,7 +683,7 @@ export default function KahootPage() {
     timeCountPlayedRef.current=false
     // Reset buzz state (local multiplayer legacy + BUZZ play mode)
     setBuzzedPlayer(null); setBuzzerOpen(false); setShowBuzz(false)
-    setBuzzState(null); setDisabledOptions([]); setHasBuzzed(false); setIsBetting(false)
+    setBuzzState(null); setDisabledOptions([]); setDisabledPlayerIds([]); setHasBuzzed(false); setIsBetting(false)
     setPhase('question')
 
     if(config?.clickStartToCount){
@@ -739,23 +750,31 @@ export default function KahootPage() {
     } catch { setHasBuzzed(false) }
   }
 
-  // BUZZ play mode: admin clicks Continue (wrong answer → others can try)
+  // BUZZ play mode: admin clicks Continue (wrong answer → others can try, timer resumes)
   const handleBuzzContinue = () => {
     const rc = roomCodeRef.current
     const wrongAnswer = buzzState?.answer
-    const newDisabled = wrongAnswer ? [...disabledOptions, wrongAnswer] : disabledOptions
-    setDisabledOptions(newDisabled)
+    const wrongPlayerId = buzzState?.playerId
+    const newDisabledOpts = wrongAnswer ? [...disabledOptions, wrongAnswer] : disabledOptions
+    const newDisabledPlayers = wrongPlayerId ? [...disabledPlayerIds, wrongPlayerId] : disabledPlayerIds
+    // Resume timer from where it was paused (buzzTimeRemaining captured when Result was clicked)
+    const totalTime = config?.timeLimitSeconds ?? 30
+    const resumeMs = (totalTime - buzzTimeRemaining) * 1000
+    const resumeStartTime = Date.now() - resumeMs
+
+    setDisabledOptions(newDisabledOpts)
+    setDisabledPlayerIds(newDisabledPlayers)
     setBuzzState(null)
     setSubmitted(false); setSelectedAnswer(null); setIsCorrect(null)
-    setTimerRunning(false)
-    setTimeLeft(config?.timeLimitSeconds ?? 30)
+    setTimeLeft(buzzTimeRemaining)
     timeCountPlayedRef.current = false
     if (rc) {
       fetch(`/api/gameshow/${shareCode}/session/${rc}`, {
         method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ gameState: { phase: 'question', currentQuestionIndex: currentIdx, questionStartTime: Date.now(), buzzState: null, disabledOptions: newDisabled } })
+        body: JSON.stringify({ gameState: { phase: 'question', currentQuestionIndex: currentIdx, questionStartTime: resumeStartTime, buzzState: null, disabledOptions: newDisabledOpts, disabledPlayerIds: newDisabledPlayers, buzzContinue: true } })
       }).catch(() => {})
     }
+    setTimerRunning(true)
     setPhase('question')
   }
 
@@ -774,7 +793,7 @@ export default function KahootPage() {
       }
       const nextIdx = currentIdx+1
       const startTime = Date.now()
-      fetch(`/api/gameshow/${shareCode}/session/${rc}`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({gameState:{phase:'question',currentQuestionIndex:nextIdx,questionStartTime:startTime,buzzState:null,disabledOptions:[]}})}).catch(()=>{})
+      fetch(`/api/gameshow/${shareCode}/session/${rc}`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({gameState:{phase:'question',currentQuestionIndex:nextIdx,questionStartTime:startTime,buzzState:null,disabledOptions:[],disabledPlayerIds:[]}})}).catch(()=>{})
       beginQuestion(nextIdx); return
     }
     if(config?.playMode==='LOCAL'&&players.length>1){
@@ -1192,7 +1211,9 @@ export default function KahootPage() {
                   <p className="text-white text-sm">answered: <span className="font-bold">{buzzState.answer}</span></p>
                 </div>
                 <Button onClick={() => {
+                  setBuzzTimeRemaining(timeLeft)
                   clearInterval(timerRef.current!)
+                  setTimerRunning(false)
                   const rc = roomCodeRef.current
                   if (rc) fetch(`/api/gameshow/${shareCode}/session/${rc}`, {
                     method: 'PATCH', headers: { 'Content-Type': 'application/json' },
@@ -1214,7 +1235,7 @@ export default function KahootPage() {
         )}
 
         {/* BUZZ play mode: Buzz button for player (buzzButton setting) */}
-        {config?.playMode === 'BUZZ' && !!joinRoomCode && config?.buzzButton && !buzzState && !submitted && (
+        {config?.playMode === 'BUZZ' && !!joinRoomCode && config?.buzzButton && !buzzState && !submitted && !disabledPlayerIds.includes(myPlayerId || '') && (
           <div className="flex justify-center py-4 bg-[#0f0f1e]">
             <button onClick={handleBuzzButton} disabled={hasBuzzed}
               className="px-10 py-5 rounded-2xl bg-red-500 hover:bg-red-400 active:scale-95 border-4 border-red-700 text-white font-black text-2xl shadow-[0_8px_0_#991b1b] active:shadow-[0_2px_0_#991b1b] active:translate-y-1.5 transition-all disabled:opacity-50 disabled:cursor-not-allowed">
@@ -1223,14 +1244,26 @@ export default function KahootPage() {
           </div>
         )}
 
-        {/* BUZZ play mode: player overlay — someone else answered */}
-        {config?.playMode === 'BUZZ' && !!joinRoomCode && buzzState && buzzState.playerId !== myPlayerId && !submitted && (
+        {/* BUZZ play mode: player overlay — someone else answered (not shown to eliminated players) */}
+        {config?.playMode === 'BUZZ' && !!joinRoomCode && buzzState && buzzState.playerId !== myPlayerId && !submitted && !disabledPlayerIds.includes(myPlayerId || '') && (
           <div className="fixed inset-0 bg-[#0f0f1e]/85 flex items-center justify-center z-40">
             <div className="text-center p-6 rounded-2xl bg-[#16213e] border-2 border-yellow-500/40 max-w-xs w-full mx-4">
               <Zap className="h-10 w-10 text-yellow-400 mx-auto mb-2 animate-pulse"/>
               <p className="text-yellow-300 font-black text-xl mb-1">{buzzState.playerNickname}</p>
               <p className="text-indigo-300 text-sm">answered first!</p>
               <p className="text-xs text-indigo-400 mt-3">Waiting for host to reveal result…</p>
+            </div>
+          </div>
+        )}
+
+        {/* BUZZ play mode: eliminated player overlay — answered wrong, others still playing */}
+        {config?.playMode === 'BUZZ' && !!joinRoomCode && disabledPlayerIds.includes(myPlayerId || '') && (
+          <div className="fixed inset-0 bg-[#0f0f1e]/85 flex items-center justify-center z-40">
+            <div className="text-center p-6 rounded-2xl bg-[#16213e] border-2 border-red-500/40 max-w-xs w-full mx-4">
+              <XCircle className="h-10 w-10 text-red-400 mx-auto mb-2"/>
+              <p className="text-red-300 font-black text-xl mb-1">Wrong Answer!</p>
+              <p className="text-indigo-300 text-sm">Others are still answering…</p>
+              <p className="text-xs text-indigo-400 mt-3">Waiting for host to reveal…</p>
             </div>
           </div>
         )}
@@ -1272,7 +1305,7 @@ export default function KahootPage() {
         {/* Answers */}
         <div className="flex-1 p-4">
           <div className="max-w-2xl mx-auto h-full flex flex-col justify-center">
-            <div className={(waitingForStart||showBuzz&&buzzedPlayer===null||(!joinRoomCode&&!!roomCodeRef.current)||(config?.playMode==='BUZZ'&&!!joinRoomCode&&config?.buzzButton&&!hasBuzzed&&!buzzState)||(config?.playMode==='BUZZ'&&!!joinRoomCode&&!!buzzState&&buzzState.playerId!==myPlayerId))?'opacity-60 pointer-events-none':''}>
+            <div className={(waitingForStart||showBuzz&&buzzedPlayer===null||(!joinRoomCode&&!!roomCodeRef.current)||(config?.playMode==='BUZZ'&&!!joinRoomCode&&disabledPlayerIds.includes(myPlayerId||''))||(config?.playMode==='BUZZ'&&!!joinRoomCode&&config?.buzzButton&&!hasBuzzed&&!buzzState&&!disabledPlayerIds.includes(myPlayerId||''))||(config?.playMode==='BUZZ'&&!!joinRoomCode&&!!buzzState&&buzzState.playerId!==myPlayerId&&!disabledPlayerIds.includes(myPlayerId||'')))?'opacity-60 pointer-events-none':''}>
               {isFillBlank?(
                 <div className="space-y-4">
                   <Input value={fillAnswer} onChange={e=>setFillAnswer(e.target.value)}
@@ -1307,7 +1340,7 @@ export default function KahootPage() {
                     const col=KAHOOT_COLORS[i%4];const isSel=selectedAnswer===opt
                     const isDisabledOpt = disabledOptions.includes(opt)
                     return(
-                      <button key={opt} disabled={submitted||isDisabledOpt} onClick={()=>handleAnswer(opt)}
+                      <button key={opt} disabled={submitted||isDisabledOpt||disabledPlayerIds.includes(myPlayerId||'')} onClick={()=>handleAnswer(opt)}
                         className={`flex items-center gap-3 p-4 sm:p-5 rounded-2xl border-4 text-left font-bold transition-all active:scale-95
                           ${submitted&&isSel?'opacity-90 scale-[0.97]':''}
                           ${submitted&&!isSel?'opacity-50':''}
@@ -1350,9 +1383,11 @@ export default function KahootPage() {
           {/* Player: show their result */}
           {joinRoomCode ? (
             // Online player reveal: show their answer + correct answer + explanation
-            <div className={`p-5 rounded-2xl mb-4 border-2 mt-4 ${isCorrect?'bg-green-900/40 border-green-500':'bg-red-900/40 border-red-500'}`}>
+            <div className={`p-5 rounded-2xl mb-4 border-2 mt-4 ${isCorrect===true?'bg-green-900/40 border-green-500':isCorrect===false?'bg-red-900/40 border-red-500':'bg-[#16213e] border-gray-700'}`}>
               <div className="text-center mb-3">
-                {isCorrect
+                {isCorrect===null
+                  ?<p className="text-xl font-black text-gray-300">Time's Up!</p>
+                  :isCorrect
                   ?<><CheckCircle2 className="h-10 w-10 text-green-400 mx-auto mb-1"/><p className="text-xl font-black text-green-300">Correct!</p></>
                   :<><XCircle className="h-10 w-10 text-red-400 mx-auto mb-1"/><p className="text-xl font-black text-red-300">Wrong!</p></>
                 }
@@ -1487,8 +1522,9 @@ export default function KahootPage() {
                     Board
                   </Button>
                 )}
-                {/* BUZZ mode: Continue lets others try after a wrong answer */}
-                {config?.playMode === 'BUZZ' && buzzState?.isCorrect === false && (
+                {/* BUZZ mode: Continue — only when more than 1 option hasn't been tried yet */}
+                {config?.playMode === 'BUZZ' && buzzState?.isCorrect === false &&
+                  options.filter(opt => ![...disabledOptions, buzzState.answer].filter(Boolean).includes(opt)).length > 1 && (
                   <Button onClick={handleBuzzContinue}
                     className="bg-orange-500 hover:bg-orange-400 text-white font-bold px-4 rounded-2xl">
                     Continue

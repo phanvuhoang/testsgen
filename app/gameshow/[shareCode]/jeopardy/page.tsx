@@ -176,7 +176,9 @@ export default function JeopardyPage() {
   type BuzzState = { playerId: string; playerNickname: string; answer: string | null; isCorrect: boolean | null; isBuzzing?: boolean }
   const [buzzState, setBuzzState] = useState<BuzzState | null>(null)
   const [disabledOptions, setDisabledOptions] = useState<string[]>([])
+  const [disabledPlayerIds, setDisabledPlayerIds] = useState<string[]>([])
   const [hasBuzzed, setHasBuzzed] = useState(false)
+  const [buzzTimeRemaining, setBuzzTimeRemaining] = useState(0)
   // Bet mechanism
   const [betsRemaining, setBetsRemaining] = useState(0)
   const [isBetting, setIsBetting] = useState(false)
@@ -323,14 +325,12 @@ export default function JeopardyPage() {
             const elapsed = (Date.now() - startTime) / 1000
             const cfg = configRef.current
             const remaining = Math.max(1, Math.round((cfg?.timeLimitSeconds ?? 30) - elapsed))
-            // Only reset if this is a NEW question
-            const isNewQuestion = qId !== currentQIdRef.current || !submittedRef.current
+            // buzzContinue: admin pressed Continue — reset all players' states
+            const isBuzzContinue = gs.buzzContinue === true
+            // Only reset if this is a NEW question (or buzzContinue)
+            const isNewQuestion = isBuzzContinue || qId !== currentQIdRef.current || !submittedRef.current
             if (isNewQuestion) {
-              // Find the question in questions array
-              setCurrentQuestion(prev => {
-                // We'll set it properly below via the questions state
-                return null
-              })
+              setCurrentQuestion(null)
               setCurrentTilePoints(tilePoints)
               setTextAnswer('')
               setSelectedMCQ(null)
@@ -341,9 +341,16 @@ export default function JeopardyPage() {
               timeCountPlayedRef.current = false
               setBuzzState(null); setHasBuzzed(false); setIsBetting(false)
             }
-            // Always sync buzz state (someone may buzz mid-question)
-            if (gs.buzzState !== undefined) setBuzzState(gs.buzzState ?? null)
+            // Always sync buzz/disabled state
+            if (gs.buzzState !== undefined) {
+              setBuzzState(gs.buzzState ?? null)
+              if (gs.buzzState !== null && cfg?.playMode === 'BUZZ') {
+                clearInterval(timerRef.current!)
+                setTimerRunning(false)
+              }
+            }
             if (gs.disabledOptions !== undefined) setDisabledOptions(gs.disabledOptions ?? [])
+            if (gs.disabledPlayerIds !== undefined) setDisabledPlayerIds(gs.disabledPlayerIds ?? [])
             setQuestionTimeLeft(remaining)
             setPhase('question')
             // Look up question by id — use functional update to access latest questions
@@ -383,6 +390,7 @@ export default function JeopardyPage() {
         if (gs) {
           if (gs.buzzState !== undefined) setBuzzState(gs.buzzState ?? null)
           if (gs.disabledOptions !== undefined) setDisabledOptions(gs.disabledOptions ?? [])
+          if (gs.disabledPlayerIds !== undefined) setDisabledPlayerIds(gs.disabledPlayerIds ?? [])
         }
         if (msg.players) {
           setPlayers(msg.players.map((p: any, i: number) => ({
@@ -459,8 +467,21 @@ export default function JeopardyPage() {
     }
   }
 
-  const startGame = () => {
+  const startGame = async () => {
     if (!config) return
+    // BUZZ/ONLINE mode: create session and go to lobby (admin does not play)
+    if (config.playMode === 'ONLINE' || config.playMode === 'BUZZ') {
+      try {
+        const res = await fetch(`/api/gameshow/${shareCode}/session`, {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({})
+        })
+        const data = await res.json()
+        setRoomCode(data.roomCode)
+        setOnlineLobbyPlayers([])
+        setPhase('lobby')
+      } catch { setError('Failed to create game session') }
+      return
+    }
     const names = setupNames.filter(n => n.trim())
     if (!names.length) return
 
@@ -569,7 +590,7 @@ export default function JeopardyPage() {
     setIsCorrect(null)
     setBuzzOrder([])
     setRespondingPlayerIdx(null)
-    setBuzzState(null); setDisabledOptions([]); setHasBuzzed(false); setIsBetting(false)
+    setBuzzState(null); setDisabledOptions([]); setDisabledPlayerIds([]); setHasBuzzed(false); setIsBetting(false)
     timeCountPlayedRef.current = false
     const timeLimit = activeConfig?.timeLimitSeconds ?? 30
     setQuestionTimeLeft(timeLimit)
@@ -610,7 +631,7 @@ export default function JeopardyPage() {
     setIsCorrect(null)
     setBuzzOrder([])
     setRespondingPlayerIdx(null)
-    setBuzzState(null); setDisabledOptions([]); setHasBuzzed(false); setIsBetting(false)
+    setBuzzState(null); setDisabledOptions([]); setDisabledPlayerIds([]); setHasBuzzed(false); setIsBetting(false)
     timeCountPlayedRef.current = false
     const timeLimit = config?.timeLimitSeconds ?? 30
     setQuestionTimeLeft(timeLimit)
@@ -628,6 +649,7 @@ export default function JeopardyPage() {
             questionStartTime: startTime,
             buzzState: null,
             disabledOptions: [],
+            disabledPlayerIds: [],
           }
         })
       }).catch(() => {})
@@ -890,13 +912,16 @@ export default function JeopardyPage() {
   const handleBuzzContinue = () => {
     const rc = roomCodeRef.current
     const wrongAnswer = buzzState?.answer
-    const newDisabled = wrongAnswer ? [...disabledOptions, wrongAnswer] : disabledOptions
-    setDisabledOptions(newDisabled)
+    const wrongPlayerId = buzzState?.playerId
+    const newDisabledOpts = wrongAnswer ? [...disabledOptions, wrongAnswer] : disabledOptions
+    const newDisabledPlayers = wrongPlayerId ? [...disabledPlayerIds, wrongPlayerId] : disabledPlayerIds
+    const totalTime = config?.timeLimitSeconds ?? 30
+    const resumeMs = (totalTime - buzzTimeRemaining) * 1000
+    const resumeStartTime = Date.now() - resumeMs
+    setDisabledOptions(newDisabledOpts); setDisabledPlayerIds(newDisabledPlayers)
     setBuzzState(null)
     setIsCorrect(null)
-    setTimerRunning(false)
-    setQuestionTimeLeft(config?.timeLimitSeconds ?? 30)
-    timeCountPlayedRef.current = false
+    setQuestionTimeLeft(buzzTimeRemaining); timeCountPlayedRef.current = false
     isAnsweredRef.current = true // admin still can't answer
     if (rc && currentQuestion) {
       fetch(`/api/gameshow/${shareCode}/session/${rc}`, {
@@ -906,13 +931,16 @@ export default function JeopardyPage() {
             phase: 'question',
             currentQuestionId: currentQuestion.id,
             currentTilePoints,
-            questionStartTime: Date.now(),
+            questionStartTime: resumeStartTime,
             buzzState: null,
-            disabledOptions: newDisabled,
+            disabledOptions: newDisabledOpts,
+            disabledPlayerIds: newDisabledPlayers,
+            buzzContinue: true,
           }
         })
       }).catch(() => {})
     }
+    setTimerRunning(true)
     setPhase('question')
   }
 
@@ -1386,6 +1414,8 @@ export default function JeopardyPage() {
                   </div>
                   <Button onClick={() => {
                     clearInterval(timerRef.current!)
+                    setBuzzTimeRemaining(questionTimeLeft)
+                    setTimerRunning(false)
                     const rc = roomCodeRef.current
                     if (rc) fetch(`/api/gameshow/${shareCode}/session/${rc}`, {
                       method: 'PATCH', headers: { 'Content-Type': 'application/json' },
@@ -1425,7 +1455,7 @@ export default function JeopardyPage() {
           )}
 
           {/* BUZZ play mode: Buzz button for player */}
-          {config?.playMode === 'BUZZ' && !!joinRoomCode && config?.buzzButton && !buzzState && !submitted && (
+          {config?.playMode === 'BUZZ' && !!joinRoomCode && config?.buzzButton && !buzzState && !submitted && !disabledPlayerIds.includes(myPlayerId || '') && (
             <div className="flex justify-center mb-4">
               <button onClick={handleBuzzButton} disabled={hasBuzzed}
                 className="px-10 py-5 rounded-2xl bg-red-500 hover:bg-red-400 active:scale-95 border-4 border-red-700 text-white font-black text-2xl shadow-[0_8px_0_#991b1b] active:shadow-[0_2px_0_#991b1b] active:translate-y-1.5 transition-all disabled:opacity-50 disabled:cursor-not-allowed">
@@ -1434,8 +1464,20 @@ export default function JeopardyPage() {
             </div>
           )}
 
+          {/* BUZZ play mode: eliminated player overlay */}
+          {config?.playMode === 'BUZZ' && !!joinRoomCode && disabledPlayerIds.includes(myPlayerId || '') && (
+            <div className="fixed inset-0 bg-[#060b2e]/85 flex items-center justify-center z-40">
+              <div className="text-center p-6 rounded-2xl bg-[#0d1b5e] border-2 border-red-500/40 max-w-xs w-full mx-4">
+                <XCircle className="h-10 w-10 text-red-400 mx-auto mb-2"/>
+                <p className="text-red-300 font-black text-xl mb-1">Wrong Answer!</p>
+                <p className="text-blue-300 text-sm">Others are still answering…</p>
+                <p className="text-xs text-blue-400 mt-3">Waiting for host to reveal…</p>
+              </div>
+            </div>
+          )}
+
           {/* BUZZ play mode: player overlay — someone else answered */}
-          {config?.playMode === 'BUZZ' && !!joinRoomCode && buzzState && buzzState.playerId !== myPlayerId && !submitted && (
+          {config?.playMode === 'BUZZ' && !!joinRoomCode && buzzState && buzzState.playerId !== myPlayerId && !submitted && !disabledPlayerIds.includes(myPlayerId || '') && (
             <div className="fixed inset-0 bg-[#060b2e]/85 flex items-center justify-center z-40">
               <div className="text-center p-6 rounded-2xl bg-[#0d1b5e] border-2 border-yellow-500/40 max-w-xs w-full mx-4">
                 <Zap className="h-10 w-10 text-yellow-400 mx-auto mb-2 animate-pulse"/>
@@ -1474,12 +1516,12 @@ export default function JeopardyPage() {
             </div>
           ) : isMCQ ? (
             /* MCQ options — disabled and view-only for online admin */
-            <div className={`grid grid-cols-1 sm:grid-cols-2 gap-3 ${config?.playMode === 'BUZZ' && !!joinRoomCode && ((config?.buzzButton && !hasBuzzed && !buzzState) || (!!buzzState && buzzState.playerId !== myPlayerId)) ? 'opacity-60 pointer-events-none' : ''}`}>
+            <div className={`grid grid-cols-1 sm:grid-cols-2 gap-3 ${config?.playMode === 'BUZZ' && !!joinRoomCode && ((config?.buzzButton && !hasBuzzed && !buzzState) || (!!buzzState && buzzState.playerId !== myPlayerId) || disabledPlayerIds.includes(myPlayerId || '')) ? 'opacity-60 pointer-events-none' : ''}`}>
               {options.map((opt, i) => {
                 const isDisabledOpt = disabledOptions.includes(opt)
                 return (
                   <button key={opt} onClick={() => !isOnlineAdmin && !isDisabledOpt && handleSingleAnswer(opt)}
-                    disabled={submitted || isOnlineAdmin || isDisabledOpt}
+                    disabled={submitted || isOnlineAdmin || isDisabledOpt || (!!joinRoomCode && disabledPlayerIds.includes(myPlayerId || ''))}
                     className={`flex items-center gap-3 p-4 rounded-xl border-2 text-left font-medium transition-all
                       ${isOnlineAdmin ? 'bg-[#0d1b5e] border-blue-500/30 opacity-80 cursor-default'
                       : isDisabledOpt ? 'bg-gray-900 border-gray-700 opacity-30 cursor-not-allowed line-through'
@@ -1501,7 +1543,7 @@ export default function JeopardyPage() {
               <p className="text-sm">Players are answering…</p>
             </div>
           ) : !isOnlineAdmin ? (
-            <div className={`flex gap-3 ${config?.playMode === 'BUZZ' && !!joinRoomCode && ((config?.buzzButton && !hasBuzzed && !buzzState) || (!!buzzState && buzzState.playerId !== myPlayerId)) ? 'opacity-60 pointer-events-none' : ''}`}>
+            <div className={`flex gap-3 ${config?.playMode === 'BUZZ' && !!joinRoomCode && ((config?.buzzButton && !hasBuzzed && !buzzState) || (!!buzzState && buzzState.playerId !== myPlayerId) || disabledPlayerIds.includes(myPlayerId || '')) ? 'opacity-60 pointer-events-none' : ''}`}>
               <Input value={textAnswer} onChange={e => setTextAnswer(e.target.value)}
                 onKeyDown={e => e.key === 'Enter' && textAnswer.trim() && handleSingleAnswer(textAnswer)}
                 placeholder="Type your answer..." autoFocus disabled={submitted}
@@ -1609,10 +1651,12 @@ export default function JeopardyPage() {
 
           {/* Online player reveal */}
           {joinRoomCode ? (
-            <div className={`text-center p-6 rounded-2xl mb-6 border-2 ${isCorrect ? 'bg-green-900/40 border-green-500' : 'bg-red-900/40 border-red-500'}`}>
-              {isCorrect
+            <div className={`text-center p-6 rounded-2xl mb-6 border-2 ${isCorrect === true ? 'bg-green-900/40 border-green-500' : isCorrect === false ? 'bg-red-900/40 border-red-500' : 'bg-gray-900/40 border-gray-500'}`}>
+              {isCorrect === true
                 ? <><CheckCircle2 className="h-12 w-12 text-green-400 mx-auto mb-2" /><p className="text-2xl font-black text-green-300">Correct! +${myLastPts}</p></>
-                : <><XCircle className="h-12 w-12 text-red-400 mx-auto mb-2" /><p className="text-2xl font-black text-red-300">Wrong!</p></>
+                : isCorrect === false
+                ? <><XCircle className="h-12 w-12 text-red-400 mx-auto mb-2" /><p className="text-2xl font-black text-red-300">Wrong!</p></>
+                : <><XCircle className="h-12 w-12 text-gray-400 mx-auto mb-2" /><p className="text-2xl font-black text-gray-300">Time&apos;s Up!</p></>
               }
               <div className="mt-3 bg-black/20 rounded-xl p-3">
                 <p className="text-xs text-gray-400 mb-1">Correct answer:</p>
@@ -1692,7 +1736,8 @@ export default function JeopardyPage() {
               )}
 
               <div className="flex gap-3">
-                {config?.playMode === 'BUZZ' && buzzState?.isCorrect === false && (
+                {config?.playMode === 'BUZZ' && buzzState?.isCorrect === false && currentQuestion &&
+                  parseOptions(currentQuestion).filter(opt => ![...disabledOptions, buzzState?.answer].filter(Boolean).includes(opt)).length > 1 && (
                   <Button onClick={handleBuzzContinue}
                     className="bg-orange-500 hover:bg-orange-400 text-white font-bold px-4 rounded-2xl">
                     Continue
