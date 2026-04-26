@@ -909,7 +909,17 @@ export default function WwtbamPage() {
               </p>
             </div>
             <Button size="sm" variant="outline"
-              onClick={() => { audio.stopAll(); setPhase('gameover') }}
+              onClick={() => {
+                audio.stopAll()
+                const rc = roomCodeRef.current
+                if (rc && !joinRoomCode) {
+                  fetch(`/api/gameshow/${shareCode}/session/${rc}`, {
+                    method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ gameState: { phase: 'gameover' }, status: 'FINISHED' })
+                  }).catch(() => {})
+                }
+                setPhase('gameover')
+              }}
               className="border-red-500/50 text-red-400 hover:bg-red-900/20">
               <LogOut className="h-4 w-4 mr-1" /> End Game
             </Button>
@@ -946,7 +956,17 @@ export default function WwtbamPage() {
           </div>
           {allAnswered && (
             <div className="mt-6 text-center">
-              <Button onClick={() => { audio.stopAll(); setPhase('gameover') }}
+              <Button onClick={() => {
+                audio.stopAll()
+                const rc2 = roomCodeRef.current
+                if (rc2 && !joinRoomCode) {
+                  fetch(`/api/gameshow/${shareCode}/session/${rc2}`, {
+                    method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ gameState: { phase: 'gameover' }, status: 'FINISHED' })
+                  }).catch(() => {})
+                }
+                setPhase('gameover')
+              }}
                 className="bg-yellow-400 hover:bg-yellow-300 text-black font-bold px-8 py-4">
                 <Trophy className="h-5 w-5 mr-2" /> See Final Results
               </Button>
@@ -1162,13 +1182,24 @@ export default function WwtbamPage() {
           ) : (
             /* Admin / local reveal */
             <>
-              <div className={`text-center p-6 rounded-2xl mb-6 border-2 ${isCorrect ? 'bg-green-900/40 border-green-500' : 'bg-red-900/40 border-red-500'}`}>
-                {isCorrect
-                  ? <><CheckCircle2 className="h-12 w-12 text-green-400 mx-auto mb-2" /><p className="text-2xl font-black text-green-300">CORRECT!</p></>
-                  : <><XCircle className="h-12 w-12 text-red-400 mx-auto mb-2" /><p className="text-2xl font-black text-red-300">WRONG!</p></>
-                }
-                <p className="text-yellow-300 font-bold mt-2">{currentPlayer?.score ?? 0} pts total</p>
-              </div>
+              {isOnlineAdmin ? (
+                <div className="text-center p-6 rounded-2xl mb-6 border-2 bg-[#0d1b5e] border-blue-500/40">
+                  <CheckCircle2 className="h-12 w-12 text-blue-400 mx-auto mb-2" />
+                  <p className="text-2xl font-black text-blue-200">Answer Revealed</p>
+                  <div className="mt-3 bg-black/30 rounded-xl p-3 text-sm">
+                    <p className="text-gray-400 text-xs mb-1">Correct answer:</p>
+                    <p className="text-yellow-300 font-bold">{getCorrectAnswers(currentQuestion).join(', ')}</p>
+                  </div>
+                </div>
+              ) : (
+                <div className={`text-center p-6 rounded-2xl mb-6 border-2 ${isCorrect ? 'bg-green-900/40 border-green-500' : 'bg-red-900/40 border-red-500'}`}>
+                  {isCorrect
+                    ? <><CheckCircle2 className="h-12 w-12 text-green-400 mx-auto mb-2" /><p className="text-2xl font-black text-green-300">CORRECT!</p></>
+                    : <><XCircle className="h-12 w-12 text-red-400 mx-auto mb-2" /><p className="text-2xl font-black text-red-300">WRONG!</p></>
+                  }
+                  <p className="text-yellow-300 font-bold mt-2">{currentPlayer?.score ?? 0} pts total</p>
+                </div>
+              )}
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 mb-6">
                 {options.map((opt, i) => {
@@ -1391,10 +1422,12 @@ export default function WwtbamPage() {
             ))}
           </div>
           <div className="flex gap-3">
-            <Button onClick={() => { setPhase('setup'); setSetupNames([setupNames[0] || '']) }}
-              variant="outline" className="flex-1 border-blue-500/30 text-blue-300 hover:bg-blue-900/30">
-              <RotateCcw className="h-4 w-4 mr-2" /> Play Again
-            </Button>
+            {!joinRoomCode && (
+              <Button onClick={() => { setPhase('setup'); setSetupNames([setupNames[0] || '']) }}
+                variant="outline" className="flex-1 border-blue-500/30 text-blue-300 hover:bg-blue-900/30">
+                <RotateCcw className="h-4 w-4 mr-2" /> Play Again
+              </Button>
+            )}
             <Button onClick={() => window.close()} variant="outline"
               className="flex-1 border-blue-500/30 text-blue-300 hover:bg-blue-900/30">
               <Home className="h-4 w-4 mr-2" /> Exit

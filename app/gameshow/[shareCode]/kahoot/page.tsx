@@ -936,7 +936,14 @@ export default function KahootPage() {
               <p className="text-indigo-300 text-sm">{answeredQuestions.size}/{questions.length} done &middot; {currentPlayer?.score??0} pts</p>
             </div>
             <Button size="sm" variant="outline"
-              onClick={()=>{audio.stopAll();setPhase('gameover')}}
+              onClick={()=>{
+                audio.stopAll()
+                const rc=roomCodeRef.current
+                if(rc&&!joinRoomCode){
+                  fetch(`/api/gameshow/${shareCode}/session/${rc}`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({gameState:{phase:'gameover'},status:'FINISHED'})}).catch(()=>{})
+                }
+                setPhase('gameover')
+              }}
               className="border-red-500/50 text-red-400 hover:bg-red-900/20">
               <LogOut className="h-4 w-4 mr-1"/>End Game
             </Button>
@@ -1444,10 +1451,12 @@ export default function KahootPage() {
             ))}
           </div>
           <div className="flex gap-3">
-            <Button onClick={()=>{setPhase('setup');setSetupNames([setupNames[0]||''])}}
-              variant="outline" className="flex-1 border-white/30 text-white hover:bg-white/10 rounded-2xl">
-              <RotateCcw className="h-4 w-4 mr-2"/>Play Again
-            </Button>
+            {!joinRoomCode && (
+              <Button onClick={()=>{setPhase('setup');setSetupNames([setupNames[0]||''])}}
+                variant="outline" className="flex-1 border-white/30 text-white hover:bg-white/10 rounded-2xl">
+                <RotateCcw className="h-4 w-4 mr-2"/>Play Again
+              </Button>
+            )}
             <Button onClick={()=>window.close()} variant="outline"
               className="flex-1 border-white/30 text-white hover:bg-white/10 rounded-2xl">
               <Home className="h-4 w-4 mr-2"/>Exit

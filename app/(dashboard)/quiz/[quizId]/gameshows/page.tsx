@@ -13,7 +13,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@
 import { Checkbox } from '@/components/ui/checkbox'
 import { useToast } from '@/components/ui/use-toast'
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from '@/components/ui/alert-dialog'
-import { Loader2, Plus, Trash2, ExternalLink, Copy, Gamepad2, Pencil, BarChart2, ChevronDown, ChevronUp } from 'lucide-react'
+import { Loader2, Plus, Trash2, ExternalLink, Copy, Gamepad2, Pencil, BarChart2, ChevronDown, ChevronUp, Square, Download } from 'lucide-react'
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { ImagePicker } from '@/components/ui/image-picker'
 
@@ -130,6 +130,8 @@ export default function GameshowsPage() {
   const [analyticsLoading, setAnalyticsLoading] = useState(false)
   const [expandedPlayers, setExpandedPlayers] = useState<Set<string>>(new Set())
   const [deletingSessionId, setDeletingSessionId] = useState<string | null>(null)
+  const [endingSessionId, setEndingSessionId] = useState<string | null>(null)
+  const [exportingSessionId, setExportingSessionId] = useState<string | null>(null)
 
   useEffect(() => { fetchData() }, [])
 
@@ -302,6 +304,76 @@ export default function GameshowsPage() {
     setDeletingSessionId(null)
   }
 
+  const endAnalyticsSession = async (session: any) => {
+    if (!analyticsGameshow) return
+    setEndingSessionId(session.sessionId)
+    try {
+      const res = await fetch(`/api/gameshow/${analyticsGameshow.shareCode}/session/${session.roomCode}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'FINISHED', gameState: { phase: 'gameover' } }),
+      })
+      if (res.ok) {
+        setAnalyticsData((prev: any) => prev ? {
+          ...prev,
+          sessions: prev.sessions.map((s: any) => s.sessionId === session.sessionId ? { ...s, status: 'FINISHED' } : s),
+        } : prev)
+      }
+    } catch {}
+    setEndingSessionId(null)
+  }
+
+  const exportSession = async (session: any) => {
+    setExportingSessionId(session.sessionId)
+    try {
+      // Fetch question details
+      const qRes = await fetch(`/api/quiz-sets/${params.quizId}/questions`)
+      const allQs: any[] = qRes.ok ? await qRes.json() : []
+      const qMap = new Map(allQs.map((q: any) => [q.id, q]))
+
+      const rows: string[][] = []
+      const players: any[] = [...(session.players ?? [])].sort((a: any, b: any) => b.score - a.score)
+
+      // Header
+      const playerCols = players.flatMap((p: any) => [p.nickname + ' (answer)', p.nickname + ' (result)', p.nickname + ' (pts)', p.nickname + ' (time)'])
+      rows.push(['Question', 'Correct Answer', ...playerCols])
+
+      // Gather all questionIds from all players
+      const allQIds: string[] = []
+      players.forEach((p: any) => {
+        ;(p.answers ?? []).forEach((a: any) => { if (!allQIds.includes(a.questionId)) allQIds.push(a.questionId) })
+      })
+
+      allQIds.forEach(qId => {
+        const q = qMap.get(qId)
+        const questionText = q?.stem ?? qId
+        const correctAnswer = q?.correctAnswer ?? ''
+        const playerData = players.flatMap((p: any) => {
+          const ans = (p.answers ?? []).find((a: any) => a.questionId === qId)
+          if (!ans) return ['', '', '', '']
+          const pts = ans.pointsEarned ?? ans.points ?? 0
+          const ms = ans.responseTimeMs || ans.elapsedMs || 0
+          const timeStr = ms ? `${(ms / 1000).toFixed(1)}s` : ''
+          return [ans.answer ?? '', ans.correct ? 'Correct' : 'Wrong', String(pts), timeStr]
+        })
+        rows.push([questionText, correctAnswer, ...playerData])
+      })
+
+      // Summary row
+      rows.push(['', 'TOTAL', ...players.flatMap((p: any) => ['', '', String(p.score), ''])])
+
+      const csv = rows.map(r => r.map(c => `"${String(c).replace(/"/g, '""')}"`).join(',')).join('\n')
+      const blob = new Blob([csv], { type: 'text/csv' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = `session-${session.roomCode}-results.csv`
+      a.click()
+      URL.revokeObjectURL(url)
+    } catch {}
+    setExportingSessionId(null)
+  }
+
   const openAnalytics = async (g: Gameshow) => {
     setAnalyticsGameshow(g)
     setAnalyticsData(null)
@@ -355,7 +427,7 @@ export default function GameshowsPage() {
             <div className="text-xs mt-1 opacity-75">
               {type === 'KAHOOT' && 'Fast-paced color buttons, streaks, live leaderboard'}
               {type === 'WWTBAM' && 'Progressive difficulty, lifelines, dramatic reveals'}
-              {type === 'JEOPARDY' && 'Category board, point tiers, buzzer competition'}
+              {type === 'JEOPARDY' && 'Category board, point tiers, turn-based multiplayer'}
             </div>
           </div>
         ))}
@@ -525,7 +597,6 @@ export default function GameshowsPage() {
                 <BoolCheckbox k="shuffleQuestions" label="Shuffle question order" />
                 <BoolCheckbox k="showLeaderboard" label="Show leaderboard after each question (top 10 players)" />
                 <BoolCheckbox k="clickStartToCount" label="Click Start button to begin timer (wait before timing starts)" />
-                {form.playMode === 'ONLINE' && <BoolCheckbox k="buzzerMode" label="Buzz mode — players race to press buzz button to answer first" />}
                 {form.playMode === 'LOCAL' && <BoolCheckbox k="manualScoring" label="Manual score adjustment — host adjusts points after each question" />}
                 {form.playMode !== 'SINGLE' && (
                   <div className="space-y-1.5">
@@ -620,13 +691,6 @@ export default function GameshowsPage() {
                     <Input type="number" min="2" max="15" value={form.answerRevealSeconds}
                       onChange={e => setForm({ ...form, answerRevealSeconds: e.target.value })} />
                   </div>
-                  {form.playMode !== 'SINGLE' && (
-                    <div className="space-y-1.5">
-                      <Label>Response time after buzz (seconds)</Label>
-                      <Input type="number" min="5" max="30" value={form.responseSeconds}
-                        onChange={e => setForm({ ...form, responseSeconds: e.target.value })} />
-                    </div>
-                  )}
                 </div>
               )}
             </TabsContent>
@@ -863,6 +927,26 @@ export default function GameshowsPage() {
                       <span className="text-xs text-gray-400 font-mono">{session.roomCode}</span>
                       <span className={`text-xs px-2 py-0.5 rounded-full ${session.status === 'FINISHED' ? 'bg-gray-100 text-gray-500' : 'bg-green-100 text-green-700'}`}>{session.status}</span>
                       <span className="text-xs text-gray-400 ml-auto">{new Date(session.createdAt).toLocaleDateString('vi-VN')}</span>
+                      {session.status !== 'FINISHED' && (
+                        <Button
+                          size="sm" variant="ghost"
+                          className="h-6 text-xs text-orange-500 hover:text-orange-700 hover:bg-orange-50 ml-1"
+                          disabled={endingSessionId === session.sessionId}
+                          onClick={() => endAnalyticsSession(session)}
+                        >
+                          {endingSessionId === session.sessionId ? <Loader2 className="h-3 w-3 animate-spin" /> : <Square className="h-3 w-3" />}
+                          <span className="ml-1">End</span>
+                        </Button>
+                      )}
+                      <Button
+                        size="sm" variant="ghost"
+                        className="h-6 text-xs text-blue-500 hover:text-blue-700 hover:bg-blue-50"
+                        disabled={exportingSessionId === session.sessionId}
+                        onClick={() => exportSession(session)}
+                      >
+                        {exportingSessionId === session.sessionId ? <Loader2 className="h-3 w-3 animate-spin" /> : <Download className="h-3 w-3" />}
+                        <span className="ml-1">Export</span>
+                      </Button>
                       <Button
                         size="sm" variant="ghost"
                         className="h-6 text-xs text-red-500 hover:text-red-700 hover:bg-red-50 ml-1"
@@ -917,8 +1001,8 @@ export default function GameshowsPage() {
                                           <td className="py-1 pr-2 text-gray-400">Q{ai + 1}</td>
                                           <td className="py-1 pr-2 max-w-[120px] truncate" title={ans.answer ?? ''}>{ans.answer ?? '—'}</td>
                                           <td className="py-1 pr-2 text-center">{ans.correct ? <span className="text-green-600 font-bold">✓</span> : <span className="text-red-500 font-bold">✗</span>}</td>
-                                          <td className="py-1 pr-2 text-right text-[#028a39] font-medium">+{ans.points ?? 0}</td>
-                                          <td className="py-1 text-right text-gray-400">{ans.elapsedMs ? `${(ans.elapsedMs / 1000).toFixed(1)}s` : '—'}</td>
+                                          <td className="py-1 pr-2 text-right text-[#028a39] font-medium">+{ans.pointsEarned ?? ans.points ?? 0}</td>
+                                          <td className="py-1 text-right text-gray-400">{(ans.responseTimeMs || ans.elapsedMs) ? `${((ans.responseTimeMs || ans.elapsedMs) / 1000).toFixed(1)}s` : '—'}</td>
                                         </tr>
                                       ))}
                                     </tbody>

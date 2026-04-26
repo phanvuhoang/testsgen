@@ -537,17 +537,18 @@ export default function JeopardyPage() {
       audio.playBg('wait', 0.5)
       setPhase('linear_question')
     } else {
-      if (activeConfig?.playMode !== 'SINGLE') {
-        setTimerRunning(false)
-        setPhase('linear_question')
-        openBuzzerPhase()
+      if (activeConfig?.playMode === 'LOCAL') {
+        setRespondingPlayerIdx(currentPlayerIdx)
+        setResponseTimeLeft(activeConfig?.timeLimitSeconds ?? 30)
+        setPhase('respond')
+        startResponseTimer()
       } else {
         audio.playBg('game-play', 0.55)
         setTimerRunning(true)
         setPhase('linear_question')
       }
     }
-  }, [config, tierPoints])
+  }, [config, tierPoints, currentPlayerIdx])
 
   const selectBoardTile = (catIdx: number, tierIdx: number) => {
     const tile = board[catIdx]?.[tierIdx]
@@ -598,12 +599,13 @@ export default function JeopardyPage() {
     if (config?.clickStartToCount) {
       setTimerRunning(false)
       audio.playBg('wait', 0.5)
-      setPhase(config?.playMode === 'SINGLE' ? 'question' : 'question')
+      setPhase('question')
     } else {
-      if (config?.playMode !== 'SINGLE') {
-        setTimerRunning(false)
-        setPhase('question')
-        openBuzzerPhase()
+      if (config?.playMode === 'LOCAL') {
+        setRespondingPlayerIdx(currentPlayerIdx)
+        setResponseTimeLeft(config?.timeLimitSeconds ?? 30)
+        setPhase('respond')
+        startResponseTimer()
       } else {
         audio.playBg('game-play', 0.55)
         setTimerRunning(true)
@@ -886,6 +888,10 @@ export default function JeopardyPage() {
     }
 
     markTileDone()
+    // Rotate player turn in LOCAL mode
+    if (config?.playMode === 'LOCAL' && players.length > 1) {
+      setCurrentPlayerIdx(prev => (prev + 1) % players.length)
+    }
     // LOCAL + manualScoring
     if (config?.playMode === 'LOCAL' && players.length > 1 && config?.manualScoring) {
       setScoringAdjustments({})
@@ -1104,7 +1110,6 @@ export default function JeopardyPage() {
             <div className="text-xs text-blue-400 mb-4 space-y-1">
               <div>📊 {config?.questionsCount ?? config?.questions?.length ?? 0} questions</div>
               <div>📋 {config?.categoriesCount} categories × {config?.tiersPerCategory} tiers</div>
-              {config?.playMode !== 'SINGLE' && <div>🔔 Buzzer mode: first to buzz in answers</div>}
             </div>
             {config?.playMode !== 'SINGLE' && (
               <div className="mb-4 p-3 bg-[#0a0a2e] rounded-xl border border-blue-500/20">
@@ -1328,60 +1333,6 @@ export default function JeopardyPage() {
     )
   }
 
-  // ─── BUZZER PHASE (Multiplayer local) ─────────────────────────────────────
-  if (phase === 'buzzer' && currentQuestion) {
-    return (
-      <div className="relative min-h-screen bg-[#060b2e] text-white flex flex-col p-4">
-        <MusicBtn />
-        <div className="max-w-2xl mx-auto w-full">
-          <div className="bg-[#0d1b5e] border-2 border-blue-500/50 rounded-2xl p-5 mb-6 text-center">
-            <div className="flex items-center justify-between mb-3">
-              {currentTileCategory && <Badge className="bg-blue-900 text-blue-300">{currentTileCategory}</Badge>}
-              <span className="text-yellow-400 font-bold">${currentTilePoints}</span>
-            </div>
-            {currentQuestion.imageUrl && <img src={currentQuestion.imageUrl} alt="" className="max-h-40 mx-auto mb-3 rounded-xl" />}
-            <p className="text-lg font-semibold">{currentQuestion.stem}</p>
-          </div>
-
-          <div className="text-center mb-6">
-            <p className="text-blue-300 mb-4 font-medium">
-              {buzzerOpen ? '🔔 BUZZ IN — First to answer!' : '⏳ Waiting...'}
-            </p>
-            <div className="flex flex-wrap justify-center gap-6">
-              {players.map((p, idx) => {
-                const hasBuzzed = buzzOrder.some(b => b.playerIdx === idx)
-                const buzzPos = buzzOrder.findIndex(b => b.playerIdx === idx)
-                return (
-                  <div key={p.id} className="flex flex-col items-center gap-2">
-                    <BuzzerButton
-                      onClick={() => handleBuzzIn(idx)}
-                      disabled={!buzzerOpen || hasBuzzed}
-                      label={hasBuzzed ? `#${buzzPos + 1}` : 'BUZZ'}
-                    />
-                    <div className="text-sm font-bold" style={{ color: p.avatarColor }}>{p.nickname}</div>
-                    <div className="text-xs text-gray-400">{p.score} pts</div>
-                  </div>
-                )
-              })}
-            </div>
-          </div>
-
-          {buzzOrder.length > 0 && (
-            <div className="bg-[#0d1b5e] rounded-xl p-3 border border-blue-500/30">
-              <p className="text-xs text-blue-400 uppercase mb-2">Buzz Order</p>
-              {buzzOrder.map((b, i) => (
-                <div key={i} className="flex items-center justify-between py-1 text-sm">
-                  <span>{i + 1}. {players[b.playerIdx]?.nickname}</span>
-                  <span className="text-yellow-400">{(b.timeMs / 1000).toFixed(2)}s</span>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      </div>
-    )
-  }
-
   // ─── RESPOND PHASE (local multiplayer) ────────────────────────────────────
   if (phase === 'respond' && currentQuestion && respondingPlayerIdx !== null) {
     const responder = players[respondingPlayerIdx]
@@ -1496,16 +1447,27 @@ export default function JeopardyPage() {
           ) : (
             /* Admin / local reveal */
             <>
-              <div className={`text-center p-6 rounded-2xl mb-6 border-2 ${isCorrect ? 'bg-green-900/40 border-green-500' : 'bg-red-900/40 border-red-500'}`}>
-                {isCorrect
-                  ? <><CheckCircle2 className="h-12 w-12 text-green-400 mx-auto mb-2" /><p className="text-2xl font-black text-green-300">Correct! +${currentTilePoints}</p></>
-                  : <><XCircle className="h-12 w-12 text-red-400 mx-auto mb-2" /><p className="text-2xl font-black text-red-300">Wrong!</p></>
-                }
-                <div className="mt-3 bg-black/20 rounded-xl p-3">
-                  <p className="text-xs text-gray-400 mb-1">Correct answer:</p>
-                  <p className="text-yellow-300 font-bold">{corrects.join(' / ')}</p>
+              {isOnlineAdmin ? (
+                <div className="text-center p-6 rounded-2xl mb-6 border-2 bg-[#0d1b5e] border-blue-500/40">
+                  <CheckCircle2 className="h-12 w-12 text-blue-400 mx-auto mb-2" />
+                  <p className="text-2xl font-black text-blue-200">Answer Revealed</p>
+                  <div className="mt-3 bg-black/30 rounded-xl p-3 text-sm">
+                    <p className="text-gray-400 text-xs mb-1">Correct answer:</p>
+                    <p className="text-yellow-300 font-bold">{corrects.join(' / ')}</p>
+                  </div>
                 </div>
-              </div>
+              ) : (
+                <div className={`text-center p-6 rounded-2xl mb-6 border-2 ${isCorrect ? 'bg-green-900/40 border-green-500' : 'bg-red-900/40 border-red-500'}`}>
+                  {isCorrect
+                    ? <><CheckCircle2 className="h-12 w-12 text-green-400 mx-auto mb-2" /><p className="text-2xl font-black text-green-300">Correct! +${currentTilePoints}</p></>
+                    : <><XCircle className="h-12 w-12 text-red-400 mx-auto mb-2" /><p className="text-2xl font-black text-red-300">Wrong!</p></>
+                  }
+                  <div className="mt-3 bg-black/20 rounded-xl p-3">
+                    <p className="text-xs text-gray-400 mb-1">Correct answer:</p>
+                    <p className="text-yellow-300 font-bold">{corrects.join(' / ')}</p>
+                  </div>
+                </div>
+              )}
 
               {currentQuestion.explanation && (
                 <div className="bg-blue-900/30 border border-blue-500/30 rounded-xl p-3 mb-5 text-sm text-blue-200">
@@ -1671,10 +1633,12 @@ export default function JeopardyPage() {
             ))}
           </div>
           <div className="flex gap-3">
-            <Button onClick={() => { audio.stopAll(); setPhase('setup'); setSetupNames([setupNames[0] || '']); audio.playBg('opening', 0.5) }}
-              variant="outline" className="flex-1 border-blue-500/30 text-blue-300 hover:bg-blue-900/30 rounded-2xl">
-              <RotateCcw className="h-4 w-4 mr-2" /> Play Again
-            </Button>
+            {!joinRoomCode && (
+              <Button onClick={() => { audio.stopAll(); setPhase('setup'); setSetupNames([setupNames[0] || '']); audio.playBg('opening', 0.5) }}
+                variant="outline" className="flex-1 border-blue-500/30 text-blue-300 hover:bg-blue-900/30 rounded-2xl">
+                <RotateCcw className="h-4 w-4 mr-2" /> Play Again
+              </Button>
+            )}
             <Button onClick={() => window.close()}
               variant="outline" className="flex-1 border-blue-500/30 text-blue-300 hover:bg-blue-900/30 rounded-2xl">
               <Home className="h-4 w-4 mr-2" /> Exit
