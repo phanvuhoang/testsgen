@@ -335,6 +335,17 @@ export default function KahootPage() {
             setTimeLeft(remaining)
             setQuestionStartTime(startTime)
             setPhase('question')
+            // In BUZZ mode: admin broadcasts timerStarted:true to start all players' timers
+            if (gs.timerStarted === true && cfg?.playMode === 'BUZZ') {
+              const actualStart = gs.questionStartTime ?? Date.now()
+              const actualElapsed = (Date.now() - actualStart) / 1000
+              const actualRemaining = Math.max(1, Math.round((cfg?.timeLimitSeconds ?? 30) - actualElapsed))
+              setTimeLeft(actualRemaining)
+              setTimerRunning(true)
+            } else if (gs.timerStarted === false && cfg?.playMode === 'BUZZ') {
+              clearInterval(timerRef.current!)
+              setTimerRunning(false)
+            }
           } else if (gs.phase === 'reveal') {
             clearInterval(timerRef.current!)
             setPhase('reveal')
@@ -368,7 +379,14 @@ export default function KahootPage() {
         if (msg.type !== 'state') return
         const gs = msg.gameState
         if (gs) {
-          if (gs.buzzState !== undefined) setBuzzState(gs.buzzState ?? null)
+          if (gs.buzzState !== undefined) {
+            setBuzzState(gs.buzzState ?? null)
+            // Stop admin timer when a player has answered
+            if (gs.buzzState?.answer != null) {
+              clearInterval(timerRef.current!)
+              setTimerRunning(false)
+            }
+          }
           if (gs.disabledOptions !== undefined) setDisabledOptions(gs.disabledOptions ?? [])
           if (gs.disabledPlayerIds !== undefined) setDisabledPlayerIds(gs.disabledPlayerIds ?? [])
         }
@@ -628,7 +646,7 @@ export default function KahootPage() {
       try {
         await fetch(`/api/gameshow/${shareCode}/session/${roomCode}`, {
           method:'PATCH', headers:{'Content-Type':'application/json'},
-          body: JSON.stringify({ gameState: { phase: 'question', currentQuestionIndex: 0, questionStartTime: startTime, buzzState: null, disabledOptions: [], disabledPlayerIds: [] }, status: 'ACTIVE' })
+          body: JSON.stringify({ gameState: { phase: 'question', currentQuestionIndex: 0, questionStartTime: startTime, buzzState: null, disabledOptions: [], disabledPlayerIds: [], timerStarted: false }, status: 'ACTIVE' })
         })
       } catch {}
       beginQuestion(0)
@@ -724,7 +742,8 @@ export default function KahootPage() {
   const handleStartCount=()=>{
     audio.stop('wait')
     audio.playBg('kahoot-play',0.55)
-    setQuestionStartTime(Date.now())
+    const startTime = Date.now()
+    setQuestionStartTime(startTime)
     setTimerRunning(true)
     clearInterval(timerRef.current!)
     timerRef.current = setInterval(() => {
@@ -734,6 +753,14 @@ export default function KahootPage() {
         return prev-1
       })
     }, 1000)
+    // In BUZZ mode: broadcast timer start to players
+    const rc = roomCodeRef.current
+    if (rc && configRef.current?.playMode === 'BUZZ') {
+      fetch(`/api/gameshow/${shareCode}/session/${rc}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ gameState: { timerStarted: true, questionStartTime: startTime } })
+      }).catch(() => {})
+    }
   }
 
   // BUZZ play mode: player presses the dedicated Buzz button
@@ -771,7 +798,7 @@ export default function KahootPage() {
     if (rc) {
       fetch(`/api/gameshow/${shareCode}/session/${rc}`, {
         method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ gameState: { phase: 'question', currentQuestionIndex: currentIdx, questionStartTime: resumeStartTime, buzzState: null, disabledOptions: newDisabledOpts, disabledPlayerIds: newDisabledPlayers, buzzContinue: true } })
+        body: JSON.stringify({ gameState: { phase: 'question', currentQuestionIndex: currentIdx, questionStartTime: resumeStartTime, buzzState: null, disabledOptions: newDisabledOpts, disabledPlayerIds: newDisabledPlayers, buzzContinue: true, timerStarted: true } })
       }).catch(() => {})
     }
     setTimerRunning(true)
@@ -793,7 +820,7 @@ export default function KahootPage() {
       }
       const nextIdx = currentIdx+1
       const startTime = Date.now()
-      fetch(`/api/gameshow/${shareCode}/session/${rc}`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({gameState:{phase:'question',currentQuestionIndex:nextIdx,questionStartTime:startTime,buzzState:null,disabledOptions:[],disabledPlayerIds:[]}})}).catch(()=>{})
+      fetch(`/api/gameshow/${shareCode}/session/${rc}`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({gameState:{phase:'question',currentQuestionIndex:nextIdx,questionStartTime:startTime,buzzState:null,disabledOptions:[],disabledPlayerIds:[],timerStarted:false}})}).catch(()=>{})
       beginQuestion(nextIdx); return
     }
     if(config?.playMode==='LOCAL'&&players.length>1){
@@ -832,7 +859,8 @@ export default function KahootPage() {
         fetch(`/api/gameshow/${shareCode}/session/${rc}`).then(r=>r.json()).then(data=>{
           if(data.players) setPlayers(data.players.map((p:any,i:number)=>({id:p.id,nickname:p.nickname,avatarColor:PLAYER_COLORS[i%PLAYER_COLORS.length],score:p.score??0,correctCount:p.correctCount??0,wrongCount:p.wrongCount??0,streak:p.streak??0,bestStreak:p.bestStreak??0,lastPointsEarned:p.lastPointsEarned??0})))
         }).catch(()=>{})
-        fetch(`/api/gameshow/${shareCode}/session/${rc}`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({gameState:{phase:'leaderboard'}})}).catch(()=>{})
+        fetch(`/api/gameshow/${shareCode}/session/${rc}`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({gameState:{phase:'leaderboard',buzzState:null,disabledOptions:[],disabledPlayerIds:[]}})}).catch(()=>{})
+        setBuzzState(null); setDisabledOptions([]); setDisabledPlayerIds([])
         audio.playBg('leaderboard',0.6); setPhase('leaderboard')
       } else {
         advanceFromLeaderboard(isLast)
@@ -1165,8 +1193,8 @@ export default function KahootPage() {
           </div>
         )}
 
-        {/* Start button (clickStartToCount mode) */}
-        {waitingForStart&&!isBuzzerMode&&(
+        {/* Start button (clickStartToCount mode) — in BUZZ mode only admin sees this */}
+        {waitingForStart&&!isBuzzerMode&&(config?.playMode!=='BUZZ'||!joinRoomCode)&&(
           <div className="flex justify-center py-4 bg-[#1a1a2e]">
             <Button onClick={handleStartCount}
               className="bg-[#6366f1] hover:bg-[#4f46e5] text-white font-black text-lg px-10 py-5 rounded-2xl shadow-lg">
@@ -1199,43 +1227,45 @@ export default function KahootPage() {
           </div>
         )}
 
-        {/* BUZZ play mode: admin overlay — shows who buzzed/answered */}
+        {/* BUZZ play mode: admin notification box — shows who buzzed/answered */}
         {config?.playMode === 'BUZZ' && !joinRoomCode && !!roomCode && (
-          <div className="bg-[#0f0f1e] border-t border-yellow-500/30 p-4">
-            {buzzState?.answer !== null && buzzState?.answer !== undefined ? (
-              <div className="flex items-center justify-between gap-3">
-                <div>
-                  <p className="text-yellow-300 font-black text-lg flex items-center gap-2">
-                    <Zap className="h-5 w-5"/>{buzzState.playerNickname}
-                  </p>
-                  <p className="text-white text-sm">answered: <span className="font-bold">{buzzState.answer}</span></p>
+          <div className="px-4 pb-4">
+            <div className={`rounded-2xl p-4 border-2 ${buzzState?.answer != null ? 'bg-yellow-900/20 border-yellow-500/50' : 'bg-[#0f0f1e] border-indigo-500/20'}`}>
+              {buzzState?.answer !== null && buzzState?.answer !== undefined ? (
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-yellow-300 font-black text-lg flex items-center gap-2">
+                      <Zap className="h-5 w-5"/>{buzzState.playerNickname}
+                    </p>
+                    <p className="text-white text-sm">answered: <span className="font-bold">{buzzState.answer}</span></p>
+                  </div>
+                  <Button onClick={() => {
+                    setBuzzTimeRemaining(timeLeft)
+                    clearInterval(timerRef.current!)
+                    setTimerRunning(false)
+                    const rc = roomCodeRef.current
+                    if (rc) fetch(`/api/gameshow/${shareCode}/session/${rc}`, {
+                      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ gameState: { phase: 'reveal' } })
+                    }).catch(() => {})
+                    setPhase('reveal')
+                  }} className="bg-yellow-400 hover:bg-yellow-300 text-black font-black px-6 py-3 rounded-2xl">
+                    Result
+                  </Button>
                 </div>
-                <Button onClick={() => {
-                  setBuzzTimeRemaining(timeLeft)
-                  clearInterval(timerRef.current!)
-                  setTimerRunning(false)
-                  const rc = roomCodeRef.current
-                  if (rc) fetch(`/api/gameshow/${shareCode}/session/${rc}`, {
-                    method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ gameState: { phase: 'reveal' } })
-                  }).catch(() => {})
-                  setPhase('reveal')
-                }} className="bg-yellow-400 hover:bg-yellow-300 text-black font-black px-6 py-3 rounded-2xl">
-                  Result
-                </Button>
-              </div>
-            ) : buzzState?.isBuzzing ? (
-              <p className="text-yellow-300 font-bold text-center animate-pulse">
-                <Zap className="h-4 w-4 inline mr-1"/>{buzzState.playerNickname} buzzed in! Waiting for answer…
-              </p>
-            ) : (
-              <p className="text-indigo-400 text-sm text-center">Waiting for a player to answer…</p>
-            )}
+              ) : buzzState?.isBuzzing ? (
+                <p className="text-yellow-300 font-bold text-center animate-pulse">
+                  <Zap className="h-4 w-4 inline mr-1"/>{buzzState.playerNickname} buzzed in! Waiting for answer…
+                </p>
+              ) : (
+                <p className="text-indigo-400 text-sm text-center">Waiting for a player to answer…</p>
+              )}
+            </div>
           </div>
         )}
 
-        {/* BUZZ play mode: Buzz button for player (buzzButton setting) */}
-        {config?.playMode === 'BUZZ' && !!joinRoomCode && config?.buzzButton && !buzzState && !submitted && !disabledPlayerIds.includes(myPlayerId || '') && (
+        {/* BUZZ play mode: Buzz button for player (buzzButton setting) — only when timer is running */}
+        {config?.playMode === 'BUZZ' && !!joinRoomCode && config?.buzzButton && timerRunning && !buzzState && !submitted && !disabledPlayerIds.includes(myPlayerId || '') && (
           <div className="flex justify-center py-4 bg-[#0f0f1e]">
             <button onClick={handleBuzzButton} disabled={hasBuzzed}
               className="px-10 py-5 rounded-2xl bg-red-500 hover:bg-red-400 active:scale-95 border-4 border-red-700 text-white font-black text-2xl shadow-[0_8px_0_#991b1b] active:shadow-[0_2px_0_#991b1b] active:translate-y-1.5 transition-all disabled:opacity-50 disabled:cursor-not-allowed">

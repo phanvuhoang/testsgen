@@ -353,6 +353,17 @@ export default function JeopardyPage() {
             if (gs.disabledPlayerIds !== undefined) setDisabledPlayerIds(gs.disabledPlayerIds ?? [])
             setQuestionTimeLeft(remaining)
             setPhase('question')
+            // In BUZZ mode: admin broadcasts timerStarted:true to start all players' timers
+            if (gs.timerStarted === true && cfg?.playMode === 'BUZZ') {
+              const actualStart = gs.questionStartTime ?? Date.now()
+              const actualElapsed = (Date.now() - actualStart) / 1000
+              const actualRemaining = Math.max(1, Math.round((cfg?.timeLimitSeconds ?? 30) - actualElapsed))
+              setQuestionTimeLeft(actualRemaining)
+              setTimerRunning(true)
+            } else if (gs.timerStarted === false && cfg?.playMode === 'BUZZ') {
+              clearInterval(timerRef.current!)
+              setTimerRunning(false)
+            }
             // Look up question by id — use functional update to access latest questions
             setQuestions(prev => {
               const q = prev.find(q => q.id === qId)
@@ -388,7 +399,14 @@ export default function JeopardyPage() {
         if (msg.type !== 'state') return
         const gs = msg.gameState
         if (gs) {
-          if (gs.buzzState !== undefined) setBuzzState(gs.buzzState ?? null)
+          if (gs.buzzState !== undefined) {
+            setBuzzState(gs.buzzState ?? null)
+            // Stop admin timer when a player has answered
+            if (gs.buzzState?.answer != null) {
+              clearInterval(timerRef.current!)
+              setTimerRunning(false)
+            }
+          }
           if (gs.disabledOptions !== undefined) setDisabledOptions(gs.disabledOptions ?? [])
           if (gs.disabledPlayerIds !== undefined) setDisabledPlayerIds(gs.disabledPlayerIds ?? [])
         }
@@ -637,28 +655,49 @@ export default function JeopardyPage() {
     setQuestionTimeLeft(timeLimit)
 
     if (isOnlineAdmin) {
-      // Broadcast question to all players via PATCH
       const startTime = Date.now()
-      fetch(`/api/gameshow/${shareCode}/session/${rc}`, {
-        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          gameState: {
-            phase: 'question',
-            currentQuestionId: q.id,
-            currentTilePoints: tile.points,
-            questionStartTime: startTime,
-            buzzState: null,
-            disabledOptions: [],
-            disabledPlayerIds: [],
-          }
-        })
-      }).catch(() => {})
-      // Admin sees the question but cannot answer — start timer
       setSubmitted(false)
-      isAnsweredRef.current = true // admin can't answer - mark as answered to prevent answer UI
+      isAnsweredRef.current = true // admin can't answer
       setQuestionTimeLeft(timeLimit)
-      audio.playBg('game-play', 0.55)
-      setTimerRunning(true)
+
+      if (config?.clickStartToCount) {
+        // Wait for admin to click Start Timer before timer begins
+        audio.playBg('wait', 0.5)
+        setTimerRunning(false)
+        fetch(`/api/gameshow/${shareCode}/session/${rc}`, {
+          method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            gameState: {
+              phase: 'question',
+              currentQuestionId: q.id,
+              currentTilePoints: tile.points,
+              questionStartTime: startTime,
+              buzzState: null,
+              disabledOptions: [],
+              disabledPlayerIds: [],
+              timerStarted: false,
+            }
+          })
+        }).catch(() => {})
+      } else {
+        // Start timer immediately
+        audio.playBg('game-play', 0.55)
+        setTimerRunning(true)
+        fetch(`/api/gameshow/${shareCode}/session/${rc}`, {
+          method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            gameState: {
+              phase: 'question',
+              currentQuestionId: q.id,
+              currentTilePoints: tile.points,
+              questionStartTime: startTime,
+              buzzState: null,
+              disabledOptions: [],
+              disabledPlayerIds: [],
+            }
+          })
+        }).catch(() => {})
+      }
       setPhase('question')
       return
     }
@@ -706,7 +745,16 @@ export default function JeopardyPage() {
   const handleStartTimer = () => {
     audio.stop('wait')
     audio.playBg('game-play', 0.55)
+    const startTime = Date.now()
     setTimerRunning(true)
+    // In BUZZ mode: broadcast timer start to players
+    const rc = roomCodeRef.current
+    if (rc && configRef.current?.playMode === 'BUZZ') {
+      fetch(`/api/gameshow/${shareCode}/session/${rc}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ gameState: { timerStarted: true, questionStartTime: startTime } })
+      }).catch(() => {})
+    }
   }
 
   const handleQuestionTimeout = useCallback(() => {
@@ -936,6 +984,7 @@ export default function JeopardyPage() {
             disabledOptions: newDisabledOpts,
             disabledPlayerIds: newDisabledPlayers,
             buzzContinue: true,
+            timerStarted: true,
           }
         })
       }).catch(() => {})
@@ -1015,7 +1064,8 @@ export default function JeopardyPage() {
             lastPointsEarned: p.lastPointsEarned ?? 0,
           })))
         }).catch(() => {})
-        fetch(`/api/gameshow/${shareCode}/session/${rc}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ gameState: { phase: 'leaderboard' } }) }).catch(() => {})
+        fetch(`/api/gameshow/${shareCode}/session/${rc}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ gameState: { phase: 'leaderboard', buzzState: null, disabledOptions: [], disabledPlayerIds: [] } }) }).catch(() => {})
+        setBuzzState(null); setDisabledOptions([]); setDisabledPlayerIds([])
         audio.playBg('leaderboard', 0.6)
         setPhase('leaderboard')
       } else {
@@ -1454,8 +1504,8 @@ export default function JeopardyPage() {
             </div>
           )}
 
-          {/* BUZZ play mode: Buzz button for player */}
-          {config?.playMode === 'BUZZ' && !!joinRoomCode && config?.buzzButton && !buzzState && !submitted && !disabledPlayerIds.includes(myPlayerId || '') && (
+          {/* BUZZ play mode: Buzz button for player — only when timer is running */}
+          {config?.playMode === 'BUZZ' && !!joinRoomCode && config?.buzzButton && timerRunning && !buzzState && !submitted && !disabledPlayerIds.includes(myPlayerId || '') && (
             <div className="flex justify-center mb-4">
               <button onClick={handleBuzzButton} disabled={hasBuzzed}
                 className="px-10 py-5 rounded-2xl bg-red-500 hover:bg-red-400 active:scale-95 border-4 border-red-700 text-white font-black text-2xl shadow-[0_8px_0_#991b1b] active:shadow-[0_2px_0_#991b1b] active:translate-y-1.5 transition-all disabled:opacity-50 disabled:cursor-not-allowed">
@@ -1506,7 +1556,8 @@ export default function JeopardyPage() {
             </div>
           )}
 
-          {waiting && !isOnlineAdmin ? (
+          {/* In BUZZ mode, admin sees Start Timer; in other modes, players see it */}
+          {waiting && (config?.playMode === 'BUZZ' ? isOnlineAdmin : !isOnlineAdmin) ? (
             <div className="flex flex-col items-center gap-4">
               <p className="text-blue-300 text-sm">Press Start when ready to begin the timer</p>
               <Button onClick={handleStartTimer}
@@ -1516,12 +1567,12 @@ export default function JeopardyPage() {
             </div>
           ) : isMCQ ? (
             /* MCQ options — disabled and view-only for online admin */
-            <div className={`grid grid-cols-1 sm:grid-cols-2 gap-3 ${config?.playMode === 'BUZZ' && !!joinRoomCode && ((config?.buzzButton && !hasBuzzed && !buzzState) || (!!buzzState && buzzState.playerId !== myPlayerId) || disabledPlayerIds.includes(myPlayerId || '')) ? 'opacity-60 pointer-events-none' : ''}`}>
+            <div className={`grid grid-cols-1 sm:grid-cols-2 gap-3 ${config?.playMode === 'BUZZ' && !!joinRoomCode && ((config?.buzzButton && !hasBuzzed && !buzzState) || (!!buzzState && buzzState.playerId !== myPlayerId) || disabledPlayerIds.includes(myPlayerId || '') || waiting) ? 'opacity-60 pointer-events-none' : ''}`}>
               {options.map((opt, i) => {
                 const isDisabledOpt = disabledOptions.includes(opt)
                 return (
                   <button key={opt} onClick={() => !isOnlineAdmin && !isDisabledOpt && handleSingleAnswer(opt)}
-                    disabled={submitted || isOnlineAdmin || isDisabledOpt || (!!joinRoomCode && disabledPlayerIds.includes(myPlayerId || ''))}
+                    disabled={submitted || isOnlineAdmin || isDisabledOpt || (!!joinRoomCode && disabledPlayerIds.includes(myPlayerId || '')) || (!!joinRoomCode && waiting)}
                     className={`flex items-center gap-3 p-4 rounded-xl border-2 text-left font-medium transition-all
                       ${isOnlineAdmin ? 'bg-[#0d1b5e] border-blue-500/30 opacity-80 cursor-default'
                       : isDisabledOpt ? 'bg-gray-900 border-gray-700 opacity-30 cursor-not-allowed line-through'
@@ -1543,7 +1594,7 @@ export default function JeopardyPage() {
               <p className="text-sm">Players are answering…</p>
             </div>
           ) : !isOnlineAdmin ? (
-            <div className={`flex gap-3 ${config?.playMode === 'BUZZ' && !!joinRoomCode && ((config?.buzzButton && !hasBuzzed && !buzzState) || (!!buzzState && buzzState.playerId !== myPlayerId) || disabledPlayerIds.includes(myPlayerId || '')) ? 'opacity-60 pointer-events-none' : ''}`}>
+            <div className={`flex gap-3 ${config?.playMode === 'BUZZ' && !!joinRoomCode && ((config?.buzzButton && !hasBuzzed && !buzzState) || (!!buzzState && buzzState.playerId !== myPlayerId) || disabledPlayerIds.includes(myPlayerId || '') || waiting) ? 'opacity-60 pointer-events-none' : ''}`}>
               <Input value={textAnswer} onChange={e => setTextAnswer(e.target.value)}
                 onKeyDown={e => e.key === 'Enter' && textAnswer.trim() && handleSingleAnswer(textAnswer)}
                 placeholder="Type your answer..." autoFocus disabled={submitted}

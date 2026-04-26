@@ -315,6 +315,17 @@ export default function WwtbamPage() {
             setTimeLeft(remaining)
             setQuestionStartTime(startTime)
             setPhase('question')
+            // In BUZZ mode: admin broadcasts timerStarted:true to start all players' timers
+            if (gs.timerStarted === true && cfg?.playMode === 'BUZZ') {
+              const actualStart = gs.questionStartTime ?? Date.now()
+              const actualElapsed = (Date.now() - actualStart) / 1000
+              const actualRemaining = Math.max(1, Math.round((cfg?.timeLimitSeconds ?? 30) - actualElapsed))
+              setTimeLeft(actualRemaining)
+              setTimerRunning(true)
+            } else if (gs.timerStarted === false && cfg?.playMode === 'BUZZ') {
+              clearInterval(timerRef.current!)
+              setTimerRunning(false)
+            }
           } else if (gs.phase === 'reveal') {
             clearInterval(timerRef.current!)
             setPhase('reveal')
@@ -348,7 +359,14 @@ export default function WwtbamPage() {
         if (msg.type !== 'state') return
         const gs = msg.gameState
         if (gs) {
-          if (gs.buzzState !== undefined) setBuzzState(gs.buzzState ?? null)
+          if (gs.buzzState !== undefined) {
+            setBuzzState(gs.buzzState ?? null)
+            // Stop admin timer when a player has answered
+            if (gs.buzzState?.answer != null) {
+              clearInterval(timerRef.current!)
+              setTimerRunning(false)
+            }
+          }
           if (gs.disabledOptions !== undefined) setDisabledOptions(gs.disabledOptions ?? [])
           if (gs.disabledPlayerIds !== undefined) setDisabledPlayerIds(gs.disabledPlayerIds ?? [])
         }
@@ -485,8 +503,17 @@ export default function WwtbamPage() {
   const handleStartCount = () => {
     audio.stop('wait')
     audio.playBg('game-play', 0.55)
-    setQuestionStartTime(Date.now())
+    const startTime = Date.now()
+    setQuestionStartTime(startTime)
     setTimerRunning(true)
+    // In BUZZ mode: broadcast timer start to players
+    const rc = roomCodeRef.current
+    if (rc && configRef.current?.playMode === 'BUZZ') {
+      fetch(`/api/gameshow/${shareCode}/session/${rc}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ gameState: { timerStarted: true, questionStartTime: startTime } })
+      }).catch(() => {})
+    }
   }
 
   const handleAnswer = (answer: string) => {
@@ -586,7 +613,7 @@ export default function WwtbamPage() {
     if (rc) {
       fetch(`/api/gameshow/${shareCode}/session/${rc}`, {
         method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ gameState: { phase: 'question', currentQuestionIndex: currentIdx, questionStartTime: resumeStartTime, buzzState: null, disabledOptions: newDisabledOpts, disabledPlayerIds: newDisabledPlayers, buzzContinue: true } })
+        body: JSON.stringify({ gameState: { phase: 'question', currentQuestionIndex: currentIdx, questionStartTime: resumeStartTime, buzzState: null, disabledOptions: newDisabledOpts, disabledPlayerIds: newDisabledPlayers, buzzContinue: true, timerStarted: true } })
       }).catch(() => {})
     }
     setTimerRunning(true)
@@ -611,7 +638,7 @@ export default function WwtbamPage() {
       const startTime = Date.now()
       fetch(`/api/gameshow/${shareCode}/session/${rc}`, {
         method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ gameState: { phase: 'question', currentQuestionIndex: nextIdx, questionStartTime: startTime, buzzState: null, disabledOptions: [], disabledPlayerIds: [] } })
+        body: JSON.stringify({ gameState: { phase: 'question', currentQuestionIndex: nextIdx, questionStartTime: startTime, buzzState: null, disabledOptions: [], disabledPlayerIds: [], timerStarted: false } })
       }).catch(() => {})
       beginQuestion(nextIdx); return
     }
@@ -653,7 +680,8 @@ export default function WwtbamPage() {
             streak: p.streak ?? 0, usedLifelines: [], lastPointsEarned: p.lastPointsEarned ?? 0,
           })))
         }).catch(() => {})
-        fetch(`/api/gameshow/${shareCode}/session/${rc}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ gameState: { phase: 'leaderboard' } }) }).catch(() => {})
+        fetch(`/api/gameshow/${shareCode}/session/${rc}`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ gameState: { phase: 'leaderboard', buzzState: null, disabledOptions: [], disabledPlayerIds: [] } }) }).catch(() => {})
+        setBuzzState(null); setDisabledOptions([]); setDisabledPlayerIds([])
         audio.playBg('leaderboard', 0.6); setPhase('leaderboard')
       } else {
         advanceFromLeaderboard(isLastQ)
@@ -772,7 +800,7 @@ export default function WwtbamPage() {
       try {
         await fetch(`/api/gameshow/${shareCode}/session/${roomCode}`, {
           method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ gameState: { phase: 'question', currentQuestionIndex: 0, questionStartTime: startTime, questionOrder: questions.map(q => q.id), buzzState: null, disabledOptions: [], disabledPlayerIds: [] }, status: 'ACTIVE' })
+          body: JSON.stringify({ gameState: { phase: 'question', currentQuestionIndex: 0, questionStartTime: startTime, questionOrder: questions.map(q => q.id), buzzState: null, disabledOptions: [], disabledPlayerIds: [], timerStarted: false }, status: 'ACTIVE' })
         })
       } catch {}
       beginQuestion(0)
@@ -1180,8 +1208,8 @@ export default function WwtbamPage() {
               </div>
             )}
 
-            {/* Start button overlay */}
-            {waitingForStart && !isOnlineAdmin && (
+            {/* Start button overlay — in BUZZ mode only admin sees this */}
+            {waitingForStart && (config?.playMode === 'BUZZ' ? isOnlineAdmin : !isOnlineAdmin) && (
               <div className="flex justify-center mb-6">
                 <Button onClick={handleStartCount}
                   className="bg-yellow-400 hover:bg-yellow-300 text-black font-black text-lg px-10 py-5 rounded-2xl shadow-lg">
@@ -1225,8 +1253,8 @@ export default function WwtbamPage() {
               </div>
             )}
 
-            {/* BUZZ play mode: Buzz button for player */}
-            {config?.playMode === 'BUZZ' && !!joinRoomCode && config?.buzzButton && !buzzState && !submitted && !disabledPlayerIds.includes(myPlayerId || '') && (
+            {/* BUZZ play mode: Buzz button for player — only when timer is running */}
+            {config?.playMode === 'BUZZ' && !!joinRoomCode && config?.buzzButton && timerRunning && !buzzState && !submitted && !disabledPlayerIds.includes(myPlayerId || '') && (
               <div className="flex justify-center mb-4">
                 <button onClick={handleBuzzButton} disabled={hasBuzzed}
                   className="px-10 py-5 rounded-2xl bg-red-500 hover:bg-red-400 active:scale-95 border-4 border-red-700 text-white font-black text-2xl shadow-[0_8px_0_#991b1b] active:shadow-[0_2px_0_#991b1b] active:translate-y-1.5 transition-all disabled:opacity-50 disabled:cursor-not-allowed">

@@ -563,7 +563,7 @@ export default function GameshowsPage() {
               </div>
               <div className="space-y-1.5">
                 <Label>Play Mode</Label>
-                <Select value={form.playMode} onValueChange={v => setForm({ ...form, playMode: v as PlayMode })}>
+                <Select value={form.playMode} onValueChange={v => { const m = v as PlayMode; setForm({ ...form, playMode: m, ...(m === 'BUZZ' ? { clickStartToCount: 'true' } : {}) }) }}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="SINGLE">👤 Single Player — Solo quiz experience</SelectItem>
