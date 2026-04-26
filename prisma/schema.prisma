@@ -655,6 +655,7 @@ enum GameshowPlayMode {
   SINGLE      // Solo player
   LOCAL       // Multiple players, same device
   ONLINE      // Real-time multiplayer via different devices
+  BUZZ        // Real-time multiplayer — first to buzz/answer wins the question
 }
 
 // SelectionMode: question ordering
@@ -702,7 +703,14 @@ model Gameshow {
   showLeaderboard   Boolean    @default(true)
   clickStartToCount Boolean    @default(false)
   buzzerMode        Boolean    @default(false)  // Online: players buzz in to answer
+  buzzButton        Boolean    @default(false)  // BUZZ mode: show explicit Buzz button (vs click-to-answer)
   manualScoring     Boolean    @default(false)  // Local: host manually adjusts scores after each question
+
+  // Bet mechanism (requires clickStartToCount = true)
+  betEnabled        Boolean    @default(false)
+  betTimes          Int        @default(1)      // Number of bets allowed per player per session
+  betMultiple       Float      @default(2.0)    // Points multiplier on a correct bet
+  betWrongAnswer    String     @default("NO_DEDUCTION")  // NO_DEDUCTION | ONE_X | MULTIPLE
   shortLink         String?    // Custom short URL for the gameshow
   coverImage        String?    // optional cover image for the lobby/starting screen
 
@@ -782,6 +790,7 @@ model GameshowPlayer {
   wrongCount    Int      @default(0)
   streak        Int      @default(0)  // Current consecutive correct streak
   bestStreak    Int      @default(0)
+  lastPointsEarned Int   @default(0)
 
   // Answers (JSON array of {questionId, answer, correct, pointsEarned, responseTimeMs})
   answers       String?  // JSON

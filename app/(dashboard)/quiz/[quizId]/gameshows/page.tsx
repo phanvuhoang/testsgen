@@ -18,7 +18,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { ImagePicker } from '@/components/ui/image-picker'
 
 type GameshowType = 'WWTBAM' | 'KAHOOT' | 'JEOPARDY'
-type PlayMode = 'SINGLE' | 'LOCAL' | 'ONLINE'
+type PlayMode = 'SINGLE' | 'LOCAL' | 'ONLINE' | 'BUZZ'
 type SelectionMode = 'LINEAR' | 'FREE_CHOICE'
 type ScoringMode = 'SPEED_ACCURACY' | 'ACCURACY_ONLY'
 
@@ -45,7 +45,12 @@ type Gameshow = {
   showLeaderboard: boolean
   clickStartToCount: boolean
   buzzerMode: boolean
+  buzzButton: boolean
   manualScoring: boolean
+  betEnabled: boolean
+  betTimes: number
+  betMultiple: number
+  betWrongAnswer: string
   shortLink: string | null
   coverImage?: string | null
   categoryNames?: string | null
@@ -78,6 +83,7 @@ const PLAY_MODE_LABELS: Record<PlayMode, string> = {
   SINGLE: 'Single Player',
   LOCAL: 'Local Multiplayer',
   ONLINE: 'Online Multiplayer',
+  BUZZ: 'Buzz — First to Answer',
 }
 
 const emptyForm = {
@@ -103,7 +109,12 @@ const emptyForm = {
   showLeaderboard: 'true',
   clickStartToCount: 'false',
   buzzerMode: 'false',
+  buzzButton: 'false',
   manualScoring: 'false',
+  betEnabled: 'false',
+  betTimes: '1',
+  betMultiple: '2',
+  betWrongAnswer: 'NO_DEDUCTION',
   shortLink: '',
   coverImage: '',
   categoryNames: '[]',
@@ -197,7 +208,12 @@ export default function GameshowsPage() {
       showLeaderboard: String((g as any).showLeaderboard ?? true),
       clickStartToCount: String(g.clickStartToCount ?? false),
       buzzerMode: String(g.buzzerMode ?? false),
-        manualScoring: String(g.manualScoring ?? false),
+      buzzButton: String((g as any).buzzButton ?? false),
+      manualScoring: String(g.manualScoring ?? false),
+      betEnabled: String((g as any).betEnabled ?? false),
+      betTimes: String((g as any).betTimes ?? 1),
+      betMultiple: String((g as any).betMultiple ?? 2),
+      betWrongAnswer: (g as any).betWrongAnswer ?? 'NO_DEDUCTION',
       shortLink: g.shortLink ?? '',
       coverImage: g.coverImage ?? '',
       categoryNames: g.categoryNames ?? '[]',
@@ -239,7 +255,12 @@ export default function GameshowsPage() {
         showLeaderboard: form.showLeaderboard === 'true',
         clickStartToCount: form.clickStartToCount === 'true',
         buzzerMode: (form as any).buzzerMode === 'true',
+        buzzButton: (form as any).buzzButton === 'true',
         manualScoring: (form as any).manualScoring === 'true',
+        betEnabled: (form as any).betEnabled === 'true',
+        betTimes: parseInt((form as any).betTimes) || 1,
+        betMultiple: parseFloat((form as any).betMultiple) || 2.0,
+        betWrongAnswer: (form as any).betWrongAnswer || 'NO_DEDUCTION',
         shortLink: (form as any).shortLink?.trim() || null,
         coverImage: (form as any).coverImage?.trim() || null,
         categoryNames: (form as any).categoryNames || '[]',
@@ -548,6 +569,7 @@ export default function GameshowsPage() {
                     <SelectItem value="SINGLE">👤 Single Player — Solo quiz experience</SelectItem>
                     <SelectItem value="LOCAL">👥 Local Multiplayer — Multiple players, same device</SelectItem>
                     <SelectItem value="ONLINE">🌐 Online Multiplayer — Real-time, different devices</SelectItem>
+                    <SelectItem value="BUZZ">⚡ Buzz — First to answer wins the question</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -597,8 +619,41 @@ export default function GameshowsPage() {
                 <BoolCheckbox k="shuffleQuestions" label="Shuffle question order" />
                 <BoolCheckbox k="showLeaderboard" label="Show leaderboard after each question (top 10 players)" />
                 <BoolCheckbox k="clickStartToCount" label="Click Start button to begin timer (wait before timing starts)" />
+                {form.clickStartToCount === 'true' && (
+                  <div className="ml-4 pl-3 border-l-2 border-gray-200 space-y-3">
+                    <BoolCheckbox k="betEnabled" label="Bet — players can wager on questions" />
+                    {(form as any).betEnabled === 'true' && (
+                      <div className="space-y-3 pl-3 border-l-2 border-yellow-200">
+                        <div className="space-y-1.5">
+                          <Label className="text-xs">Times — bets per player per session (≥ 1)</Label>
+                          <Input type="number" min="1" value={(form as any).betTimes}
+                            onChange={e => setForm({ ...form, betTimes: e.target.value } as any)}
+                            className="h-7 text-xs w-24" />
+                        </div>
+                        <div className="space-y-1.5">
+                          <Label className="text-xs">Multiple — points multiplier when correct (e.g. 2 = double)</Label>
+                          <Input type="number" min="1.1" step="0.5" value={(form as any).betMultiple}
+                            onChange={e => setForm({ ...form, betMultiple: e.target.value } as any)}
+                            className="h-7 text-xs w-24" />
+                        </div>
+                        <div className="space-y-1.5">
+                          <Label className="text-xs">Wrong answer penalty</Label>
+                          <Select value={(form as any).betWrongAnswer} onValueChange={v => setForm({ ...form, betWrongAnswer: v } as any)}>
+                            <SelectTrigger className="h-7 text-xs"><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="NO_DEDUCTION" className="text-xs">No deduction — wrong bet costs nothing</SelectItem>
+                              <SelectItem value="ONE_X" className="text-xs">1× deduction — lose base points</SelectItem>
+                              <SelectItem value="MULTIPLE" className="text-xs">Multiple deduction — lose multiplied points</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
+                {form.playMode === 'BUZZ' && <BoolCheckbox k="buzzButton" label="Buzz button — players press a dedicated Buzz button before choosing their answer" />}
                 {form.playMode === 'LOCAL' && <BoolCheckbox k="manualScoring" label="Manual score adjustment — host adjusts points after each question" />}
-                {form.playMode !== 'SINGLE' && (
+                {(form.playMode === 'ONLINE' || form.playMode === 'BUZZ' || form.playMode === 'LOCAL') && (
                   <div className="space-y-1.5">
                     <Label>Max players (up to 100)</Label>
                     <Input

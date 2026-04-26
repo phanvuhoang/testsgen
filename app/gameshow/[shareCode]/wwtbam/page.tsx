@@ -5,7 +5,7 @@ import { useParams, useSearchParams } from 'next/navigation'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
-import { Loader2, Trophy, Phone, Users, CheckCircle2, XCircle, ChevronRight, RotateCcw, Home, Volume2, VolumeX, QrCode, LogOut, Wifi } from 'lucide-react'
+import { Loader2, Trophy, Phone, Users, CheckCircle2, XCircle, ChevronRight, RotateCcw, Home, Volume2, VolumeX, QrCode, LogOut, Wifi, Zap } from 'lucide-react'
 import { useAudio } from '../../useAudio'
 import QRCode from 'qrcode'
 
@@ -19,11 +19,13 @@ type Question = {
 }
 type GameshowConfig = {
   id: string; shareCode: string; name: string; type: string
-  playMode: 'SINGLE' | 'LOCAL' | 'ONLINE'; selectionMode: 'LINEAR' | 'FREE_CHOICE'
+  playMode: 'SINGLE' | 'LOCAL' | 'ONLINE' | 'BUZZ'; selectionMode: 'LINEAR' | 'FREE_CHOICE'
   scoringMode: 'SPEED_ACCURACY' | 'ACCURACY_ONLY'; questionsCount: number | null
   timeLimitSeconds: number; enableLifelines: boolean; lifelines: string | null
   shuffleQuestions: boolean; showLeaderboard: boolean; clickStartToCount: boolean
-  maxPlayers: number; manualScoring: boolean; shortLink: string | null; quizSetTitle: string; questions: Question[]
+  buzzerMode: boolean; manualScoring: boolean; buzzButton: boolean
+  betEnabled: boolean; betTimes: number; betMultiple: number; betWrongAnswer: string
+  maxPlayers: number; shortLink: string | null; quizSetTitle: string; questions: Question[]
 }
 type Player = {
   id: string; nickname: string; avatarColor: string
@@ -137,6 +139,15 @@ export default function WwtbamPage() {
   // Online player submitted overlay state (separate from answeredRef)
   const [submitted, setSubmitted] = useState(false)
 
+  // BUZZ play mode (online) state
+  type BuzzState = { playerId: string; playerNickname: string; answer: string | null; isCorrect: boolean | null; isBuzzing?: boolean }
+  const [buzzState, setBuzzState] = useState<BuzzState | null>(null)
+  const [disabledOptions, setDisabledOptions] = useState<string[]>([])
+  const [hasBuzzed, setHasBuzzed] = useState(false)
+  // Bet mechanism
+  const [betsRemaining, setBetsRemaining] = useState(0)
+  const [isBetting, setIsBetting] = useState(false)
+
   const timerRef = useRef<NodeJS.Timeout | null>(null)
   const timeCountPlayedRef = useRef(false)
   // answeredRef: guards timeout / double-answer for all modes
@@ -166,11 +177,12 @@ export default function WwtbamPage() {
         if (data.error) { setError(data.error); setLoading(false); return }
         if (data.type !== 'WWTBAM') { setError('This gameshow is not a WWTBAM game'); setLoading(false); return }
         setConfig(data)
-        if (data.playMode === 'ONLINE' && joinRoomCode) {
+        if (data.betEnabled && data.betTimes) setBetsRemaining(data.betTimes)
+        if ((data.playMode === 'ONLINE' || data.playMode === 'BUZZ') && joinRoomCode) {
           // Player joining existing room
           setLoading(false)
           setPhase('join')
-        } else if (data.playMode === 'ONLINE' && !joinRoomCode) {
+        } else if ((data.playMode === 'ONLINE' || data.playMode === 'BUZZ') && !joinRoomCode) {
           // Admin: auto-create online session
           try {
             const res = await fetch(`/api/gameshow/${shareCode}/session`, {
@@ -285,7 +297,11 @@ export default function WwtbamPage() {
               setMyLastPts(0)
               answeredRef.current = false
               timeCountPlayedRef.current = false
+              setBuzzState(null); setHasBuzzed(false); setIsBetting(false)
             }
+            // Always sync buzz state (someone may buzz mid-question)
+            if (gs.buzzState !== undefined) setBuzzState(gs.buzzState ?? null)
+            if (gs.disabledOptions !== undefined) setDisabledOptions(gs.disabledOptions ?? [])
             setTimeLeft(remaining)
             setQuestionStartTime(startTime)
             setPhase('question')
@@ -311,6 +327,31 @@ export default function WwtbamPage() {
     init()
     return () => { cancelled = true; evsRef.current?.close(); evsRef.current = null }
   }, [myPlayerId, joinRoomCode, shareCode])
+
+  // BUZZ play mode: admin subscribes to SSE for real-time player buzz/answer notifications
+  useEffect(() => {
+    if (!roomCode || joinRoomCode || config?.playMode !== 'BUZZ') return
+    const es = new EventSource(`/api/gameshow/${shareCode}/session/${roomCode}/events`)
+    es.onmessage = (event) => {
+      try {
+        const msg = JSON.parse(event.data)
+        if (msg.type !== 'state') return
+        const gs = msg.gameState
+        if (gs) {
+          if (gs.buzzState !== undefined) setBuzzState(gs.buzzState ?? null)
+          if (gs.disabledOptions !== undefined) setDisabledOptions(gs.disabledOptions ?? [])
+        }
+        if (msg.players) {
+          setPlayers(msg.players.map((p: any, i: number) => ({
+            id: p.id, nickname: p.nickname, avatarColor: PLAYER_COLORS[i % PLAYER_COLORS.length],
+            score: p.score ?? 0, correctCount: p.correctCount ?? 0, wrongCount: p.wrongCount ?? 0,
+            streak: p.streak ?? 0, usedLifelines: [], lastPointsEarned: p.lastPointsEarned ?? 0,
+          })))
+        }
+      } catch {}
+    }
+    return () => es.close()
+  }, [roomCode, config?.playMode, shareCode, joinRoomCode])
 
   // ─── Timer effect ────────────────────────────────────────────────────────
   useEffect(() => {
@@ -405,6 +446,7 @@ export default function WwtbamPage() {
     timeCountPlayedRef.current = false
     answeredRef.current = false
     setSubmitted(false)
+    setBuzzState(null); setDisabledOptions([]); setHasBuzzed(false); setIsBetting(false)
     setPhase('question')
 
     if (config?.clickStartToCount) {
@@ -428,6 +470,10 @@ export default function WwtbamPage() {
     if (config?.clickStartToCount && !timerRunning) return
     // Online admin cannot answer
     if (!!roomCodeRef.current && !joinRoomCode) return
+    const isBuzzMode = config?.playMode === 'BUZZ'
+    if (isBuzzMode && buzzState && buzzState.playerId !== myPlayerId) return
+    if (isBuzzMode && config?.buzzButton && !hasBuzzed) return
+    if (disabledOptions.includes(answer)) return
     answeredRef.current = true
     clearInterval(timerRef.current!)
     audio.stopAll()
@@ -440,9 +486,15 @@ export default function WwtbamPage() {
     const totalTime = config?.timeLimitSeconds ?? 30
     const timePct = Math.max(0, (totalTime - elapsed) / totalTime)
     const base = getPoints(q.difficulty)
-    const pts = config?.scoringMode === 'ACCURACY_ONLY'
+    let pts = config?.scoringMode === 'ACCURACY_ONLY'
       ? (correct ? base : 0)
       : (correct ? Math.round(base * (0.3 + 0.7 * timePct)) : 0)
+    // Apply bet multiplier
+    if (isBetting) {
+      if (correct) pts = Math.round(pts * (config?.betMultiple ?? 2))
+      else { const wa = config?.betWrongAnswer ?? 'NO_DEDUCTION'; pts = wa === '1x' ? -base : wa === 'Multiple' ? -Math.round(base * (config?.betMultiple ?? 2)) : 0 }
+      setBetsRemaining(prev => Math.max(0, prev - 1)); setIsBetting(false)
+    }
 
     setSelectedAnswer(answer); setIsCorrect(correct)
 
@@ -455,7 +507,12 @@ export default function WwtbamPage() {
       else audio.playOnce('lost', 0.9)
       fetch(`/api/gameshow/${shareCode}/session/${joinRoomCode}/answer`, {
         method: 'POST', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ playerId: myPlayerId, questionId: currentQuestion.id, answer, responseTimeMs: Math.round(elapsed * 1000), isCorrect: correct, pointsEarned: pts })
+        body: JSON.stringify({ playerId: myPlayerId, questionId: currentQuestion.id, answer, responseTimeMs: Math.round(elapsed * 1000), isCorrect: correct, pointsEarned: pts, bet: isBetting })
+      }).then(r => r.json()).then(data => {
+        if (isBuzzMode && data.ok === false && data.reason === 'already_buzzed') {
+          answeredRef.current = false
+          setSubmitted(false); setSelectedAnswer(null); setIsCorrect(null)
+        }
       }).catch(() => {})
       return
     }
@@ -472,6 +529,41 @@ export default function WwtbamPage() {
     if (correct) audio.playOnce('win', 0.9)
     else audio.playOnce('lost', 0.9)
     setTimeout(() => setPhase('reveal'), 1500)
+  }
+
+  // BUZZ play mode: player presses the dedicated Buzz button
+  const handleBuzzButton = async () => {
+    if (!myPlayerId || !joinRoomCode || buzzState) return
+    setHasBuzzed(true)
+    try {
+      const res = await fetch(`/api/gameshow/${shareCode}/session/${joinRoomCode}/buzz`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ playerId: myPlayerId })
+      })
+      const data = await res.json()
+      if (data.ok === false) setHasBuzzed(false)
+    } catch { setHasBuzzed(false) }
+  }
+
+  // BUZZ play mode: admin clicks Continue (wrong answer → others can try)
+  const handleBuzzContinue = () => {
+    const rc = roomCodeRef.current
+    const wrongAnswer = buzzState?.answer
+    const newDisabled = wrongAnswer ? [...disabledOptions, wrongAnswer] : disabledOptions
+    setDisabledOptions(newDisabled)
+    setBuzzState(null)
+    setSelectedAnswer(null); setIsCorrect(null)
+    setTimerRunning(false)
+    setTimeLeft(config?.timeLimitSeconds ?? 30)
+    timeCountPlayedRef.current = false
+    answeredRef.current = false
+    if (rc) {
+      fetch(`/api/gameshow/${shareCode}/session/${rc}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ gameState: { phase: 'question', currentQuestionIndex: currentIdx, questionStartTime: Date.now(), buzzState: null, disabledOptions: newDisabled } })
+      }).catch(() => {})
+    }
+    setPhase('question')
   }
 
   const advanceFromLeaderboard = (isLastQ: boolean) => {
@@ -492,7 +584,7 @@ export default function WwtbamPage() {
       const startTime = Date.now()
       fetch(`/api/gameshow/${shareCode}/session/${rc}`, {
         method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ gameState: { phase: 'question', currentQuestionIndex: nextIdx, questionStartTime: startTime } })
+        body: JSON.stringify({ gameState: { phase: 'question', currentQuestionIndex: nextIdx, questionStartTime: startTime, buzzState: null, disabledOptions: [] } })
       }).catch(() => {})
       beginQuestion(nextIdx); return
     }
@@ -653,7 +745,7 @@ export default function WwtbamPage() {
       try {
         await fetch(`/api/gameshow/${shareCode}/session/${roomCode}`, {
           method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ gameState: { phase: 'question', currentQuestionIndex: 0, questionStartTime: startTime, questionOrder: questions.map(q => q.id) }, status: 'ACTIVE' })
+          body: JSON.stringify({ gameState: { phase: 'question', currentQuestionIndex: 0, questionStartTime: startTime, questionOrder: questions.map(q => q.id), buzzState: null, disabledOptions: [] }, status: 'ACTIVE' })
         })
       } catch {}
       beginQuestion(0)
@@ -1047,6 +1139,20 @@ export default function WwtbamPage() {
               <p className="text-lg sm:text-xl font-semibold leading-relaxed">{currentQuestion.stem}</p>
             </div>
 
+            {/* Bet stars (before Start button, for players) */}
+            {waitingForStart && config?.betEnabled && betsRemaining > 0 && !isOnlineAdmin && (
+              <div className="flex items-center justify-center gap-2 mb-3">
+                <div className="flex gap-1">
+                  {Array.from({length: betsRemaining}).map((_, i) => (
+                    <button key={i} onClick={() => { if (i === 0) setIsBetting(v => !v) }}
+                      className={`text-2xl transition-all ${isBetting && i === 0 ? 'scale-125' : 'opacity-50 hover:opacity-80'}`}
+                      title={i === 0 ? (isBetting ? 'Cancel bet' : 'Bet on this question!') : 'Available for later'}>⭐</button>
+                  ))}
+                </div>
+                {isBetting && <span className="text-yellow-300 text-sm font-bold">×{config.betMultiple} if correct!</span>}
+              </div>
+            )}
+
             {/* Start button overlay */}
             {waitingForStart && !isOnlineAdmin && (
               <div className="flex justify-center mb-6">
@@ -1054,6 +1160,61 @@ export default function WwtbamPage() {
                   className="bg-yellow-400 hover:bg-yellow-300 text-black font-black text-lg px-10 py-5 rounded-2xl shadow-lg">
                   ▶ Start Timer
                 </Button>
+              </div>
+            )}
+
+            {/* BUZZ play mode: admin panel — shows who buzzed/answered */}
+            {config?.playMode === 'BUZZ' && isOnlineAdmin && (
+              <div className="bg-[#0d1b5e] border border-yellow-500/30 rounded-2xl p-4 mb-4">
+                {buzzState?.answer !== null && buzzState?.answer !== undefined ? (
+                  <div className="flex items-center justify-between gap-3">
+                    <div>
+                      <p className="text-yellow-300 font-black text-lg flex items-center gap-2">
+                        <Zap className="h-5 w-5"/>{buzzState.playerNickname}
+                      </p>
+                      <p className="text-white text-sm">answered: <span className="font-bold">{buzzState.answer}</span></p>
+                    </div>
+                    <Button onClick={() => {
+                      clearInterval(timerRef.current!)
+                      const rc = roomCodeRef.current
+                      if (rc) fetch(`/api/gameshow/${shareCode}/session/${rc}`, {
+                        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ gameState: { phase: 'reveal' } })
+                      }).catch(() => {})
+                      setPhase('reveal')
+                    }} className="bg-yellow-400 hover:bg-yellow-300 text-black font-black px-6 py-3 rounded-2xl">
+                      Result
+                    </Button>
+                  </div>
+                ) : buzzState?.isBuzzing ? (
+                  <p className="text-yellow-300 font-bold text-center animate-pulse">
+                    <Zap className="h-4 w-4 inline mr-1"/>{buzzState.playerNickname} buzzed in! Waiting for answer…
+                  </p>
+                ) : (
+                  <p className="text-blue-400 text-sm text-center">Waiting for a player to answer…</p>
+                )}
+              </div>
+            )}
+
+            {/* BUZZ play mode: Buzz button for player */}
+            {config?.playMode === 'BUZZ' && !!joinRoomCode && config?.buzzButton && !buzzState && !submitted && (
+              <div className="flex justify-center mb-4">
+                <button onClick={handleBuzzButton} disabled={hasBuzzed}
+                  className="px-10 py-5 rounded-2xl bg-red-500 hover:bg-red-400 active:scale-95 border-4 border-red-700 text-white font-black text-2xl shadow-[0_8px_0_#991b1b] active:shadow-[0_2px_0_#991b1b] active:translate-y-1.5 transition-all disabled:opacity-50 disabled:cursor-not-allowed">
+                  <Zap className="h-6 w-6 inline mr-2"/>BUZZ!
+                </button>
+              </div>
+            )}
+
+            {/* BUZZ play mode: player overlay — someone else answered */}
+            {config?.playMode === 'BUZZ' && !!joinRoomCode && buzzState && buzzState.playerId !== myPlayerId && !submitted && (
+              <div className="fixed inset-0 bg-[#0a0a2e]/85 flex items-center justify-center z-40">
+                <div className="text-center p-6 rounded-2xl bg-[#0d1b5e] border-2 border-yellow-500/40 max-w-xs w-full mx-4">
+                  <Zap className="h-10 w-10 text-yellow-400 mx-auto mb-2 animate-pulse"/>
+                  <p className="text-yellow-300 font-black text-xl mb-1">{buzzState.playerNickname}</p>
+                  <p className="text-blue-300 text-sm">answered first!</p>
+                  <p className="text-xs text-blue-400 mt-3">Waiting for host to reveal result…</p>
+                </div>
               </div>
             )}
 
@@ -1076,24 +1237,25 @@ export default function WwtbamPage() {
             )}
 
             {/* Options — visible to all; disabled for online admin */}
-            <div className={`grid grid-cols-1 sm:grid-cols-2 gap-3 ${(waitingForStart && !isOnlineAdmin) ? 'opacity-60 pointer-events-none' : ''}`}>
+            <div className={`grid grid-cols-1 sm:grid-cols-2 gap-3 ${(waitingForStart && !isOnlineAdmin) || (config?.playMode === 'BUZZ' && !!joinRoomCode && config?.buzzButton && !hasBuzzed && !buzzState) || (config?.playMode === 'BUZZ' && !!joinRoomCode && !!buzzState && buzzState.playerId !== myPlayerId) ? 'opacity-60 pointer-events-none' : ''}`}>
               {options.map((option, i) => {
                 const letter = ['A', 'B', 'C', 'D'][i]
                 const isElim = eliminatedOptions.includes(option)
+                const isDisabledOpt = disabledOptions.includes(option)
                 return (
-                  <button key={option} disabled={isElim || !!selectedAnswer || (waitingForStart && !isOnlineAdmin) || isOnlineAdmin}
-                    onClick={() => !isElim && !isOnlineAdmin && handleAnswer(option)}
+                  <button key={option} disabled={isElim || isDisabledOpt || !!selectedAnswer || (waitingForStart && !isOnlineAdmin) || isOnlineAdmin}
+                    onClick={() => !isElim && !isDisabledOpt && !isOnlineAdmin && handleAnswer(option)}
                     className={`flex items-center gap-3 p-3 sm:p-4 rounded-xl border-2 text-left font-medium transition-all duration-200
-                      ${isElim ? 'opacity-20 cursor-not-allowed bg-gray-800 border-gray-700'
+                      ${isElim || isDisabledOpt ? 'opacity-20 cursor-not-allowed bg-gray-800 border-gray-700 line-through'
                       : isOnlineAdmin ? 'bg-[#0d1b5e] border-blue-500/30 opacity-75 cursor-default'
                                : 'bg-[#0d1b5e] border-blue-500/50 hover:bg-[#1a2f7e] hover:border-yellow-400 hover:scale-[1.02] cursor-pointer active:scale-[0.98]'}`}>
-                    <span className="flex-shrink-0 w-8 h-8 rounded-full bg-yellow-400 text-black font-black text-sm flex items-center justify-center">{letter}</span>
+                    <span className="flex-shrink-0 w-8 h-8 rounded-full bg-yellow-400 text-black font-black text-sm flex items-center justify-center">{isDisabledOpt ? '✗' : letter}</span>
                     <span className="text-sm sm:text-base">{option}</span>
                   </button>
                 )
               })}
             </div>
-            {isOnlineAdmin && (
+            {isOnlineAdmin && config?.playMode !== 'BUZZ' && (
               <p className="text-center text-blue-400 text-xs mt-3">Players are answering — options shown for reference</p>
             )}
 
@@ -1222,6 +1384,24 @@ export default function WwtbamPage() {
                 </div>
               )}
 
+              {/* BUZZ mode: who answered and their result */}
+              {config?.playMode === 'BUZZ' && !joinRoomCode && buzzState && (
+                <div className={`rounded-2xl p-4 mb-4 border-2 ${buzzState.isCorrect ? 'bg-green-900/30 border-green-500/50' : 'bg-red-900/30 border-red-500/50'}`}>
+                  <div className="flex items-center gap-3">
+                    <Zap className="h-5 w-5 text-yellow-400 flex-shrink-0"/>
+                    <div>
+                      <p className="font-bold text-white">{buzzState.playerNickname}</p>
+                      <p className="text-sm text-gray-300">answered: <span className="font-bold">{buzzState.answer}</span></p>
+                    </div>
+                    <div className="ml-auto">
+                      {buzzState.isCorrect
+                        ? <CheckCircle2 className="h-6 w-6 text-green-400"/>
+                        : <XCircle className="h-6 w-6 text-red-400"/>}
+                    </div>
+                  </div>
+                </div>
+              )}
+
               {/* Online admin: top players */}
               {isOnlineAdmin && players.length > 0 && (
                 <div className="bg-[#0d1b5e] rounded-xl p-4 mb-6">
@@ -1255,16 +1435,23 @@ export default function WwtbamPage() {
               )}
 
               <div className="flex gap-3">
+                {/* BUZZ mode: Continue lets others try after a wrong answer */}
+                {config?.playMode === 'BUZZ' && buzzState?.isCorrect === false && (
+                  <Button onClick={handleBuzzContinue}
+                    className="bg-orange-500 hover:bg-orange-400 text-white font-bold px-4 rounded-2xl">
+                    Continue
+                  </Button>
+                )}
                 {isFreeChoice ? (
                   <Button onClick={goToSelect}
-                    className="w-full bg-yellow-400 hover:bg-yellow-300 text-black font-bold text-lg py-6">
+                    className="flex-1 bg-yellow-400 hover:bg-yellow-300 text-black font-bold text-lg py-6">
                     {answeredQuestions.size >= questions.length
                       ? <><Trophy className="h-5 w-5 mr-2" />Final Results</>
                       : <>Back to Board <ChevronRight className="h-5 w-5 ml-1" /></>}
                   </Button>
                 ) : (
                   <Button onClick={handleNext}
-                    className="w-full bg-yellow-400 hover:bg-yellow-300 text-black font-bold text-lg py-6">
+                    className="flex-1 bg-yellow-400 hover:bg-yellow-300 text-black font-bold text-lg py-6">
                     {currentIdx >= questions.length - 1 ? 'See Final Results' : 'Next Question'}
                     <ChevronRight className="h-5 w-5 ml-1" />
                   </Button>

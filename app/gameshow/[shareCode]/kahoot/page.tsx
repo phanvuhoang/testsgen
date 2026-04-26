@@ -16,12 +16,12 @@ type Question = {
 }
 type GameshowConfig = {
   id: string; shareCode: string; name: string; type: string
-  playMode: 'SINGLE' | 'LOCAL' | 'ONLINE'; selectionMode: 'LINEAR' | 'FREE_CHOICE'
+  playMode: 'SINGLE' | 'LOCAL' | 'ONLINE' | 'BUZZ'; selectionMode: 'LINEAR' | 'FREE_CHOICE'
   scoringMode: 'SPEED_ACCURACY' | 'ACCURACY_ONLY'; questionsCount: number | null
   timeLimitSeconds: number; enableStreak: boolean; streakBonus: number
   shuffleQuestions: boolean; showLeaderboard: boolean; clickStartToCount: boolean
-  buzzerMode: boolean
-  manualScoring: boolean
+  buzzerMode: boolean; manualScoring: boolean; buzzButton: boolean
+  betEnabled: boolean; betTimes: number; betMultiple: number; betWrongAnswer: string
   maxPlayers: number; shortLink: string | null; coverImage: string | null; quizSetTitle: string; questions: Question[]
 }
 type Player = {
@@ -160,10 +160,18 @@ export default function KahootPage() {
   // Exit game confirm
   const [exitConfirm, setExitConfirm] = useState(false)
 
-  // Buzz mode state
-  const [buzzedPlayer, setBuzzedPlayer] = useState<number|null>(null) // which player buzzed
-  const [buzzerOpen, setBuzzerOpen] = useState(false) // can players buzz right now?
-  const [showBuzz, setShowBuzz] = useState(false) // show the buzzer phase UI
+  // Buzz mode state (local multiplayer legacy)
+  const [buzzedPlayer, setBuzzedPlayer] = useState<number|null>(null)
+  const [buzzerOpen, setBuzzerOpen] = useState(false)
+  const [showBuzz, setShowBuzz] = useState(false)
+  // BUZZ play mode (online) state
+  type BuzzState = { playerId: string; playerNickname: string; answer: string | null; isCorrect: boolean | null; isBuzzing?: boolean }
+  const [buzzState, setBuzzState] = useState<BuzzState|null>(null)
+  const [disabledOptions, setDisabledOptions] = useState<string[]>([])
+  const [hasBuzzed, setHasBuzzed] = useState(false) // player pressed buzz button
+  // Bet mechanism
+  const [betsRemaining, setBetsRemaining] = useState(0)
+  const [isBetting, setIsBetting] = useState(false)
 
   const timerRef = useRef<NodeJS.Timeout|null>(null)
   const revealTimeoutRef = useRef<NodeJS.Timeout|null>(null)
@@ -196,11 +204,12 @@ export default function KahootPage() {
       if (data.error){setError(data.error);setLoading(false);return}
       if (data.type!=='KAHOOT'){setError('This gameshow is not a Kahoot game');setLoading(false);return}
       setConfig(data)
-      if (data.playMode==='ONLINE' && joinRoomCode) {
+      if (data.betEnabled && data.betTimes) setBetsRemaining(data.betTimes)
+      if ((data.playMode==='ONLINE' || data.playMode==='BUZZ') && joinRoomCode) {
         // Player joining existing room
         setLoading(false)
         setPhase('join')
-      } else if (data.playMode==='ONLINE' && !joinRoomCode) {
+      } else if ((data.playMode==='ONLINE' || data.playMode==='BUZZ') && !joinRoomCode) {
         // Admin: auto-create online session, skip name entry screen
         try {
           const res = await fetch(`/api/gameshow/${shareCode}/session`, {
@@ -308,7 +317,11 @@ export default function KahootPage() {
               setSubmitted(false); setIsCorrect(null); setDistribution({})
               setMyLastPts(0)
               timeCountPlayedRef.current = false
+              setBuzzState(null); setHasBuzzed(false); setIsBetting(false)
             }
+            // Always sync buzz state (someone may buzz mid-question)
+            if (gs.buzzState !== undefined) setBuzzState(gs.buzzState ?? null)
+            if (gs.disabledOptions !== undefined) setDisabledOptions(gs.disabledOptions ?? [])
             setTimeLeft(remaining)
             setQuestionStartTime(startTime)
             setPhase('question')
@@ -334,6 +347,31 @@ export default function KahootPage() {
     init()
     return () => { cancelled = true; evsRef.current?.close(); evsRef.current = null }
   }, [myPlayerId, joinRoomCode, shareCode])
+
+  // BUZZ play mode: admin subscribes to SSE to receive real-time player buzz/answer notifications
+  useEffect(() => {
+    if (!roomCode || joinRoomCode || config?.playMode !== 'BUZZ') return
+    const es = new EventSource(`/api/gameshow/${shareCode}/session/${roomCode}/events`)
+    es.onmessage = (event) => {
+      try {
+        const msg = JSON.parse(event.data)
+        if (msg.type !== 'state') return
+        const gs = msg.gameState
+        if (gs) {
+          if (gs.buzzState !== undefined) setBuzzState(gs.buzzState ?? null)
+          if (gs.disabledOptions !== undefined) setDisabledOptions(gs.disabledOptions ?? [])
+        }
+        if (msg.players) {
+          setPlayers(msg.players.map((p: any, i: number) => ({
+            id: p.id, nickname: p.nickname, avatarColor: PLAYER_COLORS[i % PLAYER_COLORS.length],
+            score: p.score ?? 0, correctCount: p.correctCount ?? 0, wrongCount: p.wrongCount ?? 0,
+            streak: p.streak ?? 0, bestStreak: p.bestStreak ?? 0, lastPointsEarned: p.lastPointsEarned ?? 0,
+          })))
+        }
+      } catch {}
+    }
+    return () => es.close()
+  }, [roomCode, config?.playMode, shareCode, joinRoomCode])
 
   // Timer for normal mode — auto-starts when question begins
   useEffect(() => {
@@ -422,13 +460,33 @@ export default function KahootPage() {
 
   const handleAnswer=(answer:string)=>{
     if(submitted||phase!=='question'||waitingForStart)return
+    const isBuzzMode = config?.playMode === 'BUZZ'
+    // BUZZ mode: if another player already has buzzState, block answer
+    if(isBuzzMode && buzzState && buzzState.playerId !== myPlayerId) return
+    // BUZZ mode with buzzButton: player must buzz first
+    if(isBuzzMode && config?.buzzButton && !hasBuzzed) return
+    // Disable options check
+    if(disabledOptions.includes(answer)) return
     clearInterval(timerRef.current!)
     audio.stopAll(); audio.stopTimeCount()
     const elapsed=(Date.now()-questionStartTime)/1000
     const corrects=getCorrectAnswers(currentQuestion)
     const correct=corrects.some(c=>normalize(c)===normalize(answer))
     const streakBonus=config?.enableStreak&&correct?(currentPlayer?.streak??0)*(config?.streakBonus??50):0
-    const pts=computePoints(correct,elapsed)+streakBonus
+    let pts=computePoints(correct,elapsed)+streakBonus
+    // Apply bet multiplier
+    if(isBetting) {
+      if(correct) {
+        pts = Math.round(pts * (config?.betMultiple ?? 2))
+      } else {
+        const wa = config?.betWrongAnswer ?? 'NO_DEDUCTION'
+        if(wa === '1x') pts = -1000
+        else if(wa === 'Multiple') pts = -Math.round(1000 * (config?.betMultiple ?? 2))
+        else pts = 0
+      }
+      setBetsRemaining(prev => Math.max(0, prev - 1))
+      setIsBetting(false)
+    }
     setSelectedAnswer(answer); setIsCorrect(correct); setSubmitted(true)
     setAnsweredQuestions(prev=>new Set(Array.from(prev).concat(currentQuestion.id)))
     buildDistribution()
@@ -442,7 +500,12 @@ export default function KahootPage() {
       setMyStreak(prev => correct ? prev + 1 : 0)
       fetch(`/api/gameshow/${shareCode}/session/${joinRoomCode}/answer`, {
         method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({ playerId: myPlayerId, questionId: currentQuestion.id, answer, responseTimeMs: Math.round(elapsed*1000), isCorrect: correct, pointsEarned: pts })
+        body: JSON.stringify({ playerId: myPlayerId, questionId: currentQuestion.id, answer, responseTimeMs: Math.round(elapsed*1000), isCorrect: correct, pointsEarned: pts, bet: isBetting })
+      }).then(r=>r.json()).then(data=>{
+        if(isBuzzMode && data.ok === false && data.reason === 'already_buzzed') {
+          // Race: another player was first — revert our answer
+          setSubmitted(false); setSelectedAnswer(null); setIsCorrect(null)
+        }
       }).catch(()=>{})
       return
     }
@@ -456,7 +519,12 @@ export default function KahootPage() {
     const elapsed=(Date.now()-questionStartTime)/1000
     const corrects=getCorrectAnswers(currentQuestion)
     const correct=corrects.length===selectedMultiple.length&&corrects.every(c=>selectedMultiple.some(s=>normalize(s)===normalize(c)))
-    const pts=computePoints(correct,elapsed)
+    let pts=computePoints(correct,elapsed)
+    if(isBetting) {
+      if(correct) pts = Math.round(pts * (config?.betMultiple ?? 2))
+      else { const wa=config?.betWrongAnswer??'NO_DEDUCTION'; pts = wa==='1x'?-1000:wa==='Multiple'?-Math.round(1000*(config?.betMultiple??2)):0 }
+      setBetsRemaining(prev=>Math.max(0,prev-1)); setIsBetting(false)
+    }
     const answerStr=selectedMultiple.join('||')
     setIsCorrect(correct); setSubmitted(true)
     setAnsweredQuestions(prev=>new Set(Array.from(prev).concat(currentQuestion.id)))
@@ -483,7 +551,12 @@ export default function KahootPage() {
     const elapsed=(Date.now()-questionStartTime)/1000
     const corrects=getCorrectAnswers(currentQuestion)
     const correct=corrects.some(c=>normalize(c)===normalize(fillAnswer))
-    const pts=computePoints(correct,elapsed)
+    let pts=computePoints(correct,elapsed)
+    if(isBetting) {
+      if(correct) pts = Math.round(pts * (config?.betMultiple ?? 2))
+      else { const wa=config?.betWrongAnswer??'NO_DEDUCTION'; pts = wa==='1x'?-1000:wa==='Multiple'?-Math.round(1000*(config?.betMultiple??2)):0 }
+      setBetsRemaining(prev=>Math.max(0,prev-1)); setIsBetting(false)
+    }
     setIsCorrect(correct); setSubmitted(true)
     setAnsweredQuestions(prev=>new Set(Array.from(prev).concat(currentQuestion.id)))
     buildDistribution(); updatePlayer(correct,pts)
@@ -544,7 +617,7 @@ export default function KahootPage() {
       try {
         await fetch(`/api/gameshow/${shareCode}/session/${roomCode}`, {
           method:'PATCH', headers:{'Content-Type':'application/json'},
-          body: JSON.stringify({ gameState: { phase: 'question', currentQuestionIndex: 0, questionStartTime: startTime }, status: 'ACTIVE' })
+          body: JSON.stringify({ gameState: { phase: 'question', currentQuestionIndex: 0, questionStartTime: startTime, buzzState: null, disabledOptions: [] }, status: 'ACTIVE' })
         })
       } catch {}
       beginQuestion(0)
@@ -597,8 +670,9 @@ export default function KahootPage() {
     setTimeLeft(config?.timeLimitSeconds??30)
     setQuestionStartTime(Date.now())
     timeCountPlayedRef.current=false
-    // Reset buzz state
+    // Reset buzz state (local multiplayer legacy + BUZZ play mode)
     setBuzzedPlayer(null); setBuzzerOpen(false); setShowBuzz(false)
+    setBuzzState(null); setDisabledOptions([]); setHasBuzzed(false); setIsBetting(false)
     setPhase('question')
 
     if(config?.clickStartToCount){
@@ -651,6 +725,40 @@ export default function KahootPage() {
     }, 1000)
   }
 
+  // BUZZ play mode: player presses the dedicated Buzz button
+  const handleBuzzButton = async () => {
+    if (!myPlayerId || !joinRoomCode || buzzState) return
+    setHasBuzzed(true)
+    try {
+      const res = await fetch(`/api/gameshow/${shareCode}/session/${joinRoomCode}/buzz`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ playerId: myPlayerId })
+      })
+      const data = await res.json()
+      if (data.ok === false) setHasBuzzed(false) // someone else was faster
+    } catch { setHasBuzzed(false) }
+  }
+
+  // BUZZ play mode: admin clicks Continue (wrong answer → others can try)
+  const handleBuzzContinue = () => {
+    const rc = roomCodeRef.current
+    const wrongAnswer = buzzState?.answer
+    const newDisabled = wrongAnswer ? [...disabledOptions, wrongAnswer] : disabledOptions
+    setDisabledOptions(newDisabled)
+    setBuzzState(null)
+    setSubmitted(false); setSelectedAnswer(null); setIsCorrect(null)
+    setTimerRunning(false)
+    setTimeLeft(config?.timeLimitSeconds ?? 30)
+    timeCountPlayedRef.current = false
+    if (rc) {
+      fetch(`/api/gameshow/${shareCode}/session/${rc}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ gameState: { phase: 'question', currentQuestionIndex: currentIdx, questionStartTime: Date.now(), buzzState: null, disabledOptions: newDisabled } })
+      }).catch(() => {})
+    }
+    setPhase('question')
+  }
+
   const advanceFromLeaderboard=(isLast:boolean)=>{
     audio.stop('leaderboard')
     const rc = roomCodeRef.current
@@ -666,7 +774,7 @@ export default function KahootPage() {
       }
       const nextIdx = currentIdx+1
       const startTime = Date.now()
-      fetch(`/api/gameshow/${shareCode}/session/${rc}`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({gameState:{phase:'question',currentQuestionIndex:nextIdx,questionStartTime:startTime}})}).catch(()=>{})
+      fetch(`/api/gameshow/${shareCode}/session/${rc}`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({gameState:{phase:'question',currentQuestionIndex:nextIdx,questionStartTime:startTime,buzzState:null,disabledOptions:[]}})}).catch(()=>{})
       beginQuestion(nextIdx); return
     }
     if(config?.playMode==='LOCAL'&&players.length>1){
@@ -1024,6 +1132,20 @@ export default function KahootPage() {
           </div>
         </div>
 
+        {/* Bet stars (before Start button, for players who can answer) */}
+        {waitingForStart && config?.betEnabled && betsRemaining > 0 && !(!!roomCode && !joinRoomCode) && (
+          <div className="flex items-center justify-center gap-2 py-2 bg-[#1a1a2e]">
+            <div className="flex gap-1">
+              {Array.from({length: betsRemaining}).map((_,i) => (
+                <button key={i} onClick={() => { if(i === 0) setIsBetting(v => !v) }}
+                  className={`text-2xl transition-all ${isBetting && i === 0 ? 'scale-125' : 'opacity-50 hover:opacity-80'}`}
+                  title={i === 0 ? (isBetting ? 'Cancel bet' : 'Bet on this question!') : 'Available for later'}>⭐</button>
+              ))}
+            </div>
+            {isBetting && <span className="text-yellow-300 text-sm font-bold">×{config.betMultiple} if correct!</span>}
+          </div>
+        )}
+
         {/* Start button (clickStartToCount mode) */}
         {waitingForStart&&!isBuzzerMode&&(
           <div className="flex justify-center py-4 bg-[#1a1a2e]">
@@ -1054,6 +1176,61 @@ export default function KahootPage() {
                   <Zap className="h-5 w-5 inline mr-1"/>{p.nickname}
                 </button>
               ))}
+            </div>
+          </div>
+        )}
+
+        {/* BUZZ play mode: admin overlay — shows who buzzed/answered */}
+        {config?.playMode === 'BUZZ' && !joinRoomCode && !!roomCode && (
+          <div className="bg-[#0f0f1e] border-t border-yellow-500/30 p-4">
+            {buzzState?.answer !== null && buzzState?.answer !== undefined ? (
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-yellow-300 font-black text-lg flex items-center gap-2">
+                    <Zap className="h-5 w-5"/>{buzzState.playerNickname}
+                  </p>
+                  <p className="text-white text-sm">answered: <span className="font-bold">{buzzState.answer}</span></p>
+                </div>
+                <Button onClick={() => {
+                  clearInterval(timerRef.current!)
+                  const rc = roomCodeRef.current
+                  if (rc) fetch(`/api/gameshow/${shareCode}/session/${rc}`, {
+                    method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ gameState: { phase: 'reveal' } })
+                  }).catch(() => {})
+                  setPhase('reveal')
+                }} className="bg-yellow-400 hover:bg-yellow-300 text-black font-black px-6 py-3 rounded-2xl">
+                  Result
+                </Button>
+              </div>
+            ) : buzzState?.isBuzzing ? (
+              <p className="text-yellow-300 font-bold text-center animate-pulse">
+                <Zap className="h-4 w-4 inline mr-1"/>{buzzState.playerNickname} buzzed in! Waiting for answer…
+              </p>
+            ) : (
+              <p className="text-indigo-400 text-sm text-center">Waiting for a player to answer…</p>
+            )}
+          </div>
+        )}
+
+        {/* BUZZ play mode: Buzz button for player (buzzButton setting) */}
+        {config?.playMode === 'BUZZ' && !!joinRoomCode && config?.buzzButton && !buzzState && !submitted && (
+          <div className="flex justify-center py-4 bg-[#0f0f1e]">
+            <button onClick={handleBuzzButton} disabled={hasBuzzed}
+              className="px-10 py-5 rounded-2xl bg-red-500 hover:bg-red-400 active:scale-95 border-4 border-red-700 text-white font-black text-2xl shadow-[0_8px_0_#991b1b] active:shadow-[0_2px_0_#991b1b] active:translate-y-1.5 transition-all disabled:opacity-50 disabled:cursor-not-allowed">
+              <Zap className="h-6 w-6 inline mr-2"/>BUZZ!
+            </button>
+          </div>
+        )}
+
+        {/* BUZZ play mode: player overlay — someone else answered */}
+        {config?.playMode === 'BUZZ' && !!joinRoomCode && buzzState && buzzState.playerId !== myPlayerId && !submitted && (
+          <div className="fixed inset-0 bg-[#0f0f1e]/85 flex items-center justify-center z-40">
+            <div className="text-center p-6 rounded-2xl bg-[#16213e] border-2 border-yellow-500/40 max-w-xs w-full mx-4">
+              <Zap className="h-10 w-10 text-yellow-400 mx-auto mb-2 animate-pulse"/>
+              <p className="text-yellow-300 font-black text-xl mb-1">{buzzState.playerNickname}</p>
+              <p className="text-indigo-300 text-sm">answered first!</p>
+              <p className="text-xs text-indigo-400 mt-3">Waiting for host to reveal result…</p>
             </div>
           </div>
         )}
@@ -1095,7 +1272,7 @@ export default function KahootPage() {
         {/* Answers */}
         <div className="flex-1 p-4">
           <div className="max-w-2xl mx-auto h-full flex flex-col justify-center">
-            <div className={(waitingForStart||showBuzz&&buzzedPlayer===null||(!joinRoomCode&&!!roomCodeRef.current))?'opacity-60 pointer-events-none':''}>
+            <div className={(waitingForStart||showBuzz&&buzzedPlayer===null||(!joinRoomCode&&!!roomCodeRef.current)||(config?.playMode==='BUZZ'&&!!joinRoomCode&&config?.buzzButton&&!hasBuzzed&&!buzzState)||(config?.playMode==='BUZZ'&&!!joinRoomCode&&!!buzzState&&buzzState.playerId!==myPlayerId))?'opacity-60 pointer-events-none':''}>
               {isFillBlank?(
                 <div className="space-y-4">
                   <Input value={fillAnswer} onChange={e=>setFillAnswer(e.target.value)}
@@ -1128,14 +1305,16 @@ export default function KahootPage() {
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   {options.map((opt,i)=>{
                     const col=KAHOOT_COLORS[i%4];const isSel=selectedAnswer===opt
+                    const isDisabledOpt = disabledOptions.includes(opt)
                     return(
-                      <button key={opt} disabled={submitted} onClick={()=>handleAnswer(opt)}
+                      <button key={opt} disabled={submitted||isDisabledOpt} onClick={()=>handleAnswer(opt)}
                         className={`flex items-center gap-3 p-4 sm:p-5 rounded-2xl border-4 text-left font-bold transition-all active:scale-95
                           ${submitted&&isSel?'opacity-90 scale-[0.97]':''}
                           ${submitted&&!isSel?'opacity-50':''}
-                          ${!submitted?'hover:scale-[1.02] cursor-pointer':'cursor-not-allowed'}
+                          ${isDisabledOpt?'opacity-30 cursor-not-allowed line-through':''}
+                          ${!submitted&&!isDisabledOpt?'hover:scale-[1.02] cursor-pointer':'cursor-not-allowed'}
                           ${col.bg} ${col.border}`}>
-                        <span className="text-2xl flex-shrink-0">{col.icon}</span>
+                        <span className="text-2xl flex-shrink-0">{isDisabledOpt?'❌':col.icon}</span>
                         <span className={`text-sm sm:text-base ${col.text}`}>{opt}</span>
                       </button>
                     )
@@ -1253,6 +1432,24 @@ export default function KahootPage() {
           </div>
           )}
 
+          {/* BUZZ mode reveal: show who answered and their result */}
+          {config?.playMode === 'BUZZ' && !joinRoomCode && buzzState && (
+            <div className={`rounded-2xl p-4 mb-3 border-2 ${buzzState.isCorrect ? 'bg-green-900/30 border-green-500/50' : 'bg-red-900/30 border-red-500/50'}`}>
+              <div className="flex items-center gap-3">
+                <Zap className="h-5 w-5 text-yellow-400 flex-shrink-0"/>
+                <div>
+                  <p className="font-bold text-white">{buzzState.playerNickname}</p>
+                  <p className="text-sm text-gray-300">answered: <span className="font-bold">{buzzState.answer}</span></p>
+                </div>
+                <div className="ml-auto">
+                  {buzzState.isCorrect
+                    ? <CheckCircle2 className="h-6 w-6 text-green-400"/>
+                    : <XCircle className="h-6 w-6 text-red-400"/>}
+                </div>
+              </div>
+            </div>
+          )}
+
           {joinRoomCode ? (
             // Player: no next button, just waiting
             null
@@ -1288,6 +1485,13 @@ export default function KahootPage() {
                   }}
                     variant="outline" className="border-indigo-500/30 text-indigo-300 hover:bg-indigo-900/20">
                     Board
+                  </Button>
+                )}
+                {/* BUZZ mode: Continue lets others try after a wrong answer */}
+                {config?.playMode === 'BUZZ' && buzzState?.isCorrect === false && (
+                  <Button onClick={handleBuzzContinue}
+                    className="bg-orange-500 hover:bg-orange-400 text-white font-bold px-4 rounded-2xl">
+                    Continue
                   </Button>
                 )}
                 <Button onClick={() => setExitConfirm(true)}

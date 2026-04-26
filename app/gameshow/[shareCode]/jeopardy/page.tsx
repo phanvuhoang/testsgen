@@ -20,7 +20,7 @@ type Question = {
 }
 type GameshowConfig = {
   id: string; shareCode: string; name: string; type: string
-  playMode: 'SINGLE' | 'LOCAL' | 'ONLINE'; selectionMode: 'LINEAR' | 'FREE_CHOICE'
+  playMode: 'SINGLE' | 'LOCAL' | 'ONLINE' | 'BUZZ'; selectionMode: 'LINEAR' | 'FREE_CHOICE'
   scoringMode: 'SPEED_ACCURACY' | 'ACCURACY_ONLY'; questionsCount: number | null
   timeLimitSeconds: number; responseSeconds: number; answerRevealSeconds: number
   shuffleQuestions: boolean; showLeaderboard: boolean; maxPlayers: number
@@ -28,6 +28,8 @@ type GameshowConfig = {
   categoryNames?: string | null
   quizSetTitle: string; questions: Question[]
   clickStartToCount: boolean; manualScoring: boolean; shortLink: string | null
+  buzzerMode: boolean; buzzButton: boolean
+  betEnabled: boolean; betTimes: number; betMultiple: number; betWrongAnswer: string
 }
 type Player = {
   id: string; nickname: string; avatarColor: string; score: number; correctCount: number; wrongCount: number
@@ -170,6 +172,15 @@ export default function JeopardyPage() {
   // Online player submitted overlay state
   const [submitted, setSubmitted] = useState(false)
 
+  // BUZZ play mode (online) state
+  type BuzzState = { playerId: string; playerNickname: string; answer: string | null; isCorrect: boolean | null; isBuzzing?: boolean }
+  const [buzzState, setBuzzState] = useState<BuzzState | null>(null)
+  const [disabledOptions, setDisabledOptions] = useState<string[]>([])
+  const [hasBuzzed, setHasBuzzed] = useState(false)
+  // Bet mechanism
+  const [betsRemaining, setBetsRemaining] = useState(0)
+  const [isBetting, setIsBetting] = useState(false)
+
   // Refs for stale closure safety
   const roomCodeRef = useRef<string | null>(null)
   const evsRef = useRef<EventSource | null>(null)
@@ -205,12 +216,13 @@ export default function JeopardyPage() {
         if (data.error) { setError(data.error); setLoading(false); return }
         if (data.type !== 'JEOPARDY') { setError('This gameshow is not a Jeopardy game'); setLoading(false); return }
         setConfig(data)
+        if (data.betEnabled && data.betTimes) setBetsRemaining(data.betTimes)
 
-        if (data.playMode === 'ONLINE' && joinRoomCode) {
+        if ((data.playMode === 'ONLINE' || data.playMode === 'BUZZ') && joinRoomCode) {
           // Player joining existing room
           setLoading(false)
           setPhase('join')
-        } else if (data.playMode === 'ONLINE' && !joinRoomCode) {
+        } else if ((data.playMode === 'ONLINE' || data.playMode === 'BUZZ') && !joinRoomCode) {
           // Admin: auto-create online session
           try {
             const res = await fetch(`/api/gameshow/${shareCode}/session`, {
@@ -327,7 +339,11 @@ export default function JeopardyPage() {
               setMyLastPts(0)
               isAnsweredRef.current = false
               timeCountPlayedRef.current = false
+              setBuzzState(null); setHasBuzzed(false); setIsBetting(false)
             }
+            // Always sync buzz state (someone may buzz mid-question)
+            if (gs.buzzState !== undefined) setBuzzState(gs.buzzState ?? null)
+            if (gs.disabledOptions !== undefined) setDisabledOptions(gs.disabledOptions ?? [])
             setQuestionTimeLeft(remaining)
             setPhase('question')
             // Look up question by id — use functional update to access latest questions
@@ -354,6 +370,31 @@ export default function JeopardyPage() {
     init()
     return () => { cancelled = true; evsRef.current?.close(); evsRef.current = null }
   }, [myPlayerId, joinRoomCode, shareCode])
+
+  // BUZZ play mode: admin subscribes to SSE for real-time player buzz/answer notifications
+  useEffect(() => {
+    if (!roomCode || joinRoomCode || config?.playMode !== 'BUZZ') return
+    const es = new EventSource(`/api/gameshow/${shareCode}/session/${roomCode}/events`)
+    es.onmessage = (event) => {
+      try {
+        const msg = JSON.parse(event.data)
+        if (msg.type !== 'state') return
+        const gs = msg.gameState
+        if (gs) {
+          if (gs.buzzState !== undefined) setBuzzState(gs.buzzState ?? null)
+          if (gs.disabledOptions !== undefined) setDisabledOptions(gs.disabledOptions ?? [])
+        }
+        if (msg.players) {
+          setPlayers(msg.players.map((p: any, i: number) => ({
+            id: p.id, nickname: p.nickname, avatarColor: PLAYER_COLORS[i % PLAYER_COLORS.length],
+            score: p.score ?? 0, correctCount: p.correctCount ?? 0, wrongCount: p.wrongCount ?? 0,
+            lastPointsEarned: p.lastPointsEarned ?? 0,
+          })))
+        }
+      } catch {}
+    }
+    return () => es.close()
+  }, [roomCode, config?.playMode, shareCode, joinRoomCode])
 
   // ─── Build board from questions ──────────────────────────────────────────
   const buildBoard = (qs: Question[], cfg: GameshowConfig) => {
@@ -528,6 +569,7 @@ export default function JeopardyPage() {
     setIsCorrect(null)
     setBuzzOrder([])
     setRespondingPlayerIdx(null)
+    setBuzzState(null); setDisabledOptions([]); setHasBuzzed(false); setIsBetting(false)
     timeCountPlayedRef.current = false
     const timeLimit = activeConfig?.timeLimitSeconds ?? 30
     setQuestionTimeLeft(timeLimit)
@@ -568,6 +610,7 @@ export default function JeopardyPage() {
     setIsCorrect(null)
     setBuzzOrder([])
     setRespondingPlayerIdx(null)
+    setBuzzState(null); setDisabledOptions([]); setHasBuzzed(false); setIsBetting(false)
     timeCountPlayedRef.current = false
     const timeLimit = config?.timeLimitSeconds ?? 30
     setQuestionTimeLeft(timeLimit)
@@ -583,6 +626,8 @@ export default function JeopardyPage() {
             currentQuestionId: q.id,
             currentTilePoints: tile.points,
             questionStartTime: startTime,
+            buzzState: null,
+            disabledOptions: [],
           }
         })
       }).catch(() => {})
@@ -750,6 +795,10 @@ export default function JeopardyPage() {
 
   const handleSingleAnswer = (answer: string) => {
     if (!currentQuestion) return
+    const isBuzzMode = config?.playMode === 'BUZZ'
+    if (isBuzzMode && buzzState && buzzState.playerId !== myPlayerId) return
+    if (isBuzzMode && config?.buzzButton && !hasBuzzed) return
+    if (disabledOptions.includes(answer)) return
     // Online player: submit via API
     if (joinRoomCode && myPlayerId) {
       isAnsweredRef.current = true
@@ -762,9 +811,14 @@ export default function JeopardyPage() {
       setIsCorrect(correct)
       const elapsed = (config!.timeLimitSeconds - questionTimeLeft)
       const basePoints = currentTilePoints
-      const pts = config?.scoringMode === 'ACCURACY_ONLY'
+      let pts = config?.scoringMode === 'ACCURACY_ONLY'
         ? (correct ? basePoints : 0)
         : correct ? Math.round(basePoints * (0.5 + 0.5 * (1 - elapsed / config!.timeLimitSeconds))) : 0
+      if (isBetting) {
+        if (correct) pts = Math.round(pts * (config?.betMultiple ?? 2))
+        else { const wa = config?.betWrongAnswer ?? 'NO_DEDUCTION'; pts = wa === '1x' ? -basePoints : wa === 'Multiple' ? -Math.round(basePoints * (config?.betMultiple ?? 2)) : 0 }
+        setBetsRemaining(prev => Math.max(0, prev - 1)); setIsBetting(false)
+      }
       setMyLastPts(pts)
       setMyTotalScore(prev => prev + pts)
       setSubmitted(true)
@@ -778,8 +832,14 @@ export default function JeopardyPage() {
           answer,
           responseTimeMs: Math.round(elapsed * 1000),
           isCorrect: correct,
-          pointsEarned: pts
+          pointsEarned: pts,
+          bet: isBetting
         })
+      }).then(r => r.json()).then(data => {
+        if (isBuzzMode && data.ok === false && data.reason === 'already_buzzed') {
+          isAnsweredRef.current = false
+          setSubmitted(false); setIsCorrect(null)
+        }
       }).catch(() => {})
       return
     }
@@ -795,9 +855,14 @@ export default function JeopardyPage() {
     setIsCorrect(correct)
     const elapsed = (config!.timeLimitSeconds - questionTimeLeft)
     const basePoints = currentTilePoints
-    const pts = config?.scoringMode === 'ACCURACY_ONLY'
+    let pts = config?.scoringMode === 'ACCURACY_ONLY'
       ? (correct ? basePoints : 0)
       : correct ? Math.round(basePoints * (0.5 + 0.5 * (1 - elapsed / config!.timeLimitSeconds))) : 0
+    if (isBetting) {
+      if (correct) pts = Math.round(pts * (config?.betMultiple ?? 2))
+      else { const wa = config?.betWrongAnswer ?? 'NO_DEDUCTION'; pts = wa === '1x' ? -basePoints : wa === 'Multiple' ? -Math.round(basePoints * (config?.betMultiple ?? 2)) : 0 }
+      setBetsRemaining(prev => Math.max(0, prev - 1)); setIsBetting(false)
+    }
     setPlayers(prev => prev.map((p, i) => {
       if (i !== currentPlayerIdx) return p
       return { ...p, score: p.score + pts, correctCount: correct ? p.correctCount + 1 : p.correctCount, wrongCount: !correct ? p.wrongCount + 1 : p.wrongCount }
@@ -805,6 +870,50 @@ export default function JeopardyPage() {
     if (correct) audio.playOnce('win', 0.9)
     else audio.playOnce('lost', 0.9)
     setPhase('reveal')
+  }
+
+  // BUZZ play mode: player presses the dedicated Buzz button
+  const handleBuzzButton = async () => {
+    if (!myPlayerId || !joinRoomCode || buzzState) return
+    setHasBuzzed(true)
+    try {
+      const res = await fetch(`/api/gameshow/${shareCode}/session/${joinRoomCode}/buzz`, {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ playerId: myPlayerId })
+      })
+      const data = await res.json()
+      if (data.ok === false) setHasBuzzed(false)
+    } catch { setHasBuzzed(false) }
+  }
+
+  // BUZZ play mode: admin clicks Continue (wrong answer → others can try)
+  const handleBuzzContinue = () => {
+    const rc = roomCodeRef.current
+    const wrongAnswer = buzzState?.answer
+    const newDisabled = wrongAnswer ? [...disabledOptions, wrongAnswer] : disabledOptions
+    setDisabledOptions(newDisabled)
+    setBuzzState(null)
+    setIsCorrect(null)
+    setTimerRunning(false)
+    setQuestionTimeLeft(config?.timeLimitSeconds ?? 30)
+    timeCountPlayedRef.current = false
+    isAnsweredRef.current = true // admin still can't answer
+    if (rc && currentQuestion) {
+      fetch(`/api/gameshow/${shareCode}/session/${rc}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          gameState: {
+            phase: 'question',
+            currentQuestionId: currentQuestion.id,
+            currentTilePoints,
+            questionStartTime: Date.now(),
+            buzzState: null,
+            disabledOptions: newDisabled,
+          }
+        })
+      }).catch(() => {})
+    }
+    setPhase('question')
   }
 
   const markTileDone = () => {
@@ -1253,7 +1362,7 @@ export default function JeopardyPage() {
           </div>
 
           {/* Online admin: skip time / waiting indicator */}
-          {isOnlineAdmin && (
+          {isOnlineAdmin && config?.playMode !== 'BUZZ' && (
             <div className="flex justify-center mb-4">
               <button
                 onClick={() => { clearInterval(timerRef.current!); setQuestionTimeLeft(0); handleQuestionTimeout() }}
@@ -1261,6 +1370,79 @@ export default function JeopardyPage() {
               >
                 ⏭ End Question Early
               </button>
+            </div>
+          )}
+
+          {/* BUZZ play mode: admin panel */}
+          {config?.playMode === 'BUZZ' && isOnlineAdmin && (
+            <div className="bg-[#0d1b5e] border border-yellow-500/30 rounded-2xl p-4 mb-4">
+              {buzzState?.answer !== null && buzzState?.answer !== undefined ? (
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="text-yellow-300 font-black text-lg flex items-center gap-2">
+                      <Zap className="h-5 w-5"/>{buzzState.playerNickname}
+                    </p>
+                    <p className="text-white text-sm">answered: <span className="font-bold">{buzzState.answer}</span></p>
+                  </div>
+                  <Button onClick={() => {
+                    clearInterval(timerRef.current!)
+                    const rc = roomCodeRef.current
+                    if (rc) fetch(`/api/gameshow/${shareCode}/session/${rc}`, {
+                      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ gameState: { phase: 'reveal' } })
+                    }).catch(() => {})
+                    setPhase('reveal')
+                  }} className="bg-yellow-400 hover:bg-yellow-300 text-black font-black px-6 py-3 rounded-2xl">
+                    Result
+                  </Button>
+                </div>
+              ) : buzzState?.isBuzzing ? (
+                <p className="text-yellow-300 font-bold text-center animate-pulse">
+                  <Zap className="h-4 w-4 inline mr-1"/>{buzzState.playerNickname} buzzed in! Waiting for answer…
+                </p>
+              ) : (
+                <div className="flex items-center justify-between">
+                  <p className="text-blue-400 text-sm">Waiting for a player to answer…</p>
+                  <button onClick={() => { clearInterval(timerRef.current!); setQuestionTimeLeft(0); handleQuestionTimeout() }}
+                    className="text-xs text-blue-400 hover:text-blue-200 underline">Skip</button>
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Bet stars (before Start button, for players) */}
+          {waiting && config?.betEnabled && betsRemaining > 0 && !isOnlineAdmin && (
+            <div className="flex items-center justify-center gap-2 mb-3">
+              <div className="flex gap-1">
+                {Array.from({length: betsRemaining}).map((_, i) => (
+                  <button key={i} onClick={() => { if (i === 0) setIsBetting(v => !v) }}
+                    className={`text-2xl transition-all ${isBetting && i === 0 ? 'scale-125' : 'opacity-50 hover:opacity-80'}`}
+                    title={i === 0 ? (isBetting ? 'Cancel bet' : 'Bet on this question!') : 'Available for later'}>⭐</button>
+                ))}
+              </div>
+              {isBetting && <span className="text-yellow-300 text-sm font-bold">×{config.betMultiple} if correct!</span>}
+            </div>
+          )}
+
+          {/* BUZZ play mode: Buzz button for player */}
+          {config?.playMode === 'BUZZ' && !!joinRoomCode && config?.buzzButton && !buzzState && !submitted && (
+            <div className="flex justify-center mb-4">
+              <button onClick={handleBuzzButton} disabled={hasBuzzed}
+                className="px-10 py-5 rounded-2xl bg-red-500 hover:bg-red-400 active:scale-95 border-4 border-red-700 text-white font-black text-2xl shadow-[0_8px_0_#991b1b] active:shadow-[0_2px_0_#991b1b] active:translate-y-1.5 transition-all disabled:opacity-50 disabled:cursor-not-allowed">
+                <Zap className="h-6 w-6 inline mr-2"/>BUZZ!
+              </button>
+            </div>
+          )}
+
+          {/* BUZZ play mode: player overlay — someone else answered */}
+          {config?.playMode === 'BUZZ' && !!joinRoomCode && buzzState && buzzState.playerId !== myPlayerId && !submitted && (
+            <div className="fixed inset-0 bg-[#060b2e]/85 flex items-center justify-center z-40">
+              <div className="text-center p-6 rounded-2xl bg-[#0d1b5e] border-2 border-yellow-500/40 max-w-xs w-full mx-4">
+                <Zap className="h-10 w-10 text-yellow-400 mx-auto mb-2 animate-pulse"/>
+                <p className="text-yellow-300 font-black text-xl mb-1">{buzzState.playerNickname}</p>
+                <p className="text-blue-300 text-sm">answered first!</p>
+                <p className="text-xs text-blue-400 mt-3">Waiting for host to reveal result…</p>
+              </div>
             </div>
           )}
 
@@ -1292,31 +1474,34 @@ export default function JeopardyPage() {
             </div>
           ) : isMCQ ? (
             /* MCQ options — disabled and view-only for online admin */
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              {options.map((opt, i) => (
-                <button key={opt} onClick={() => !isOnlineAdmin && handleSingleAnswer(opt)}
-                  disabled={submitted || isOnlineAdmin}
-                  className={`flex items-center gap-3 p-4 rounded-xl border-2 text-left font-medium transition-all
-                    ${isOnlineAdmin
-                      ? 'bg-[#0d1b5e] border-blue-500/30 opacity-80 cursor-default'
+            <div className={`grid grid-cols-1 sm:grid-cols-2 gap-3 ${config?.playMode === 'BUZZ' && !!joinRoomCode && ((config?.buzzButton && !hasBuzzed && !buzzState) || (!!buzzState && buzzState.playerId !== myPlayerId)) ? 'opacity-60 pointer-events-none' : ''}`}>
+              {options.map((opt, i) => {
+                const isDisabledOpt = disabledOptions.includes(opt)
+                return (
+                  <button key={opt} onClick={() => !isOnlineAdmin && !isDisabledOpt && handleSingleAnswer(opt)}
+                    disabled={submitted || isOnlineAdmin || isDisabledOpt}
+                    className={`flex items-center gap-3 p-4 rounded-xl border-2 text-left font-medium transition-all
+                      ${isOnlineAdmin ? 'bg-[#0d1b5e] border-blue-500/30 opacity-80 cursor-default'
+                      : isDisabledOpt ? 'bg-gray-900 border-gray-700 opacity-30 cursor-not-allowed line-through'
                       : 'bg-[#0d1b5e] border-blue-500/50 hover:bg-[#1a2f8e] hover:border-yellow-400 hover:scale-[1.02] active:scale-95 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed'}`}>
-                  <span className="w-7 h-7 rounded-full bg-yellow-400 text-black font-black text-xs flex items-center justify-center flex-shrink-0">
-                    {['A', 'B', 'C', 'D'][i]}
-                  </span>
-                  <span className="text-sm">{opt}</span>
-                </button>
-              ))}
-              {isOnlineAdmin && (
+                    <span className="w-7 h-7 rounded-full bg-yellow-400 text-black font-black text-xs flex items-center justify-center flex-shrink-0">
+                      {isDisabledOpt ? '✗' : ['A', 'B', 'C', 'D'][i]}
+                    </span>
+                    <span className="text-sm">{opt}</span>
+                  </button>
+                )
+              })}
+              {isOnlineAdmin && config?.playMode !== 'BUZZ' && (
                 <p className="col-span-2 text-center text-blue-400 text-xs mt-1">Players are answering — options shown for reference</p>
               )}
             </div>
-          ) : isOnlineAdmin ? (
+          ) : isOnlineAdmin && config?.playMode !== 'BUZZ' ? (
             <div className="text-center text-blue-300 py-8">
               <Loader2 className="h-6 w-6 animate-spin mx-auto mb-2" />
               <p className="text-sm">Players are answering…</p>
             </div>
-          ) : (
-            <div className="flex gap-3">
+          ) : !isOnlineAdmin ? (
+            <div className={`flex gap-3 ${config?.playMode === 'BUZZ' && !!joinRoomCode && ((config?.buzzButton && !hasBuzzed && !buzzState) || (!!buzzState && buzzState.playerId !== myPlayerId)) ? 'opacity-60 pointer-events-none' : ''}`}>
               <Input value={textAnswer} onChange={e => setTextAnswer(e.target.value)}
                 onKeyDown={e => e.key === 'Enter' && textAnswer.trim() && handleSingleAnswer(textAnswer)}
                 placeholder="Type your answer..." autoFocus disabled={submitted}
@@ -1327,7 +1512,7 @@ export default function JeopardyPage() {
                 Submit
               </Button>
             </div>
-          )}
+          ) : null}
         </div>
       </div>
     )
@@ -1488,9 +1673,35 @@ export default function JeopardyPage() {
                 ))}
               </div>
 
-              <Button onClick={handleNext} className="w-full bg-yellow-400 hover:bg-yellow-300 text-black font-bold py-5 rounded-2xl text-lg">
-                {isFreeChoice ? 'Back to Board' : 'Next Question'} <ChevronRight className="h-5 w-5 ml-1" />
-              </Button>
+              {/* BUZZ mode: who answered and their result */}
+              {config?.playMode === 'BUZZ' && !joinRoomCode && buzzState && (
+                <div className={`rounded-2xl p-4 mb-4 border-2 ${buzzState.isCorrect ? 'bg-green-900/30 border-green-500/50' : 'bg-red-900/30 border-red-500/50'}`}>
+                  <div className="flex items-center gap-3">
+                    <Zap className="h-5 w-5 text-yellow-400 flex-shrink-0"/>
+                    <div>
+                      <p className="font-bold text-white">{buzzState.playerNickname}</p>
+                      <p className="text-sm text-gray-300">answered: <span className="font-bold">{buzzState.answer}</span></p>
+                    </div>
+                    <div className="ml-auto">
+                      {buzzState.isCorrect
+                        ? <CheckCircle2 className="h-6 w-6 text-green-400"/>
+                        : <XCircle className="h-6 w-6 text-red-400"/>}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              <div className="flex gap-3">
+                {config?.playMode === 'BUZZ' && buzzState?.isCorrect === false && (
+                  <Button onClick={handleBuzzContinue}
+                    className="bg-orange-500 hover:bg-orange-400 text-white font-bold px-4 rounded-2xl">
+                    Continue
+                  </Button>
+                )}
+                <Button onClick={handleNext} className="flex-1 bg-yellow-400 hover:bg-yellow-300 text-black font-bold py-5 rounded-2xl text-lg">
+                  {isFreeChoice ? 'Back to Board' : 'Next Question'} <ChevronRight className="h-5 w-5 ml-1" />
+                </Button>
+              </div>
             </>
           )}
         </div>
