@@ -401,8 +401,8 @@ export default function JeopardyPage() {
         if (gs) {
           if (gs.buzzState !== undefined) {
             setBuzzState(gs.buzzState ?? null)
-            // Stop admin timer when a player has answered
-            if (gs.buzzState?.answer != null) {
+            // Stop admin timer when a player has answered — only if DB says question phase
+            if (gs.buzzState?.answer != null && gs.phase === 'question') {
               clearInterval(timerRef.current!)
               setTimerRunning(false)
             }
@@ -1466,11 +1466,14 @@ export default function JeopardyPage() {
                     clearInterval(timerRef.current!)
                     setBuzzTimeRemaining(questionTimeLeft)
                     setTimerRunning(false)
-                    const rc = roomCodeRef.current
-                    if (rc) fetch(`/api/gameshow/${shareCode}/session/${rc}`, {
-                      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ gameState: { phase: 'reveal' } })
-                    }).catch(() => {})
+                    // Only broadcast reveal to players if answer was correct
+                    if (buzzState?.isCorrect !== false) {
+                      const rc = roomCodeRef.current
+                      if (rc) fetch(`/api/gameshow/${shareCode}/session/${rc}`, {
+                        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ gameState: { phase: 'reveal' } })
+                      }).catch(() => {})
+                    }
                     setPhase('reveal')
                   }} className="bg-yellow-400 hover:bg-yellow-300 text-black font-black px-6 py-3 rounded-2xl">
                     Result
@@ -1556,17 +1559,19 @@ export default function JeopardyPage() {
             </div>
           )}
 
-          {/* In BUZZ mode, admin sees Start Timer; in other modes, players see it */}
-          {waiting && (config?.playMode === 'BUZZ' ? isOnlineAdmin : !isOnlineAdmin) ? (
-            <div className="flex flex-col items-center gap-4">
+          {/* Start Timer: BUZZ mode→admin sees it; non-BUZZ→players see it. Always above options. */}
+          {waiting && (config?.playMode === 'BUZZ' ? isOnlineAdmin : !isOnlineAdmin) && (
+            <div className="flex flex-col items-center gap-4 mb-4">
               <p className="text-blue-300 text-sm">Press Start when ready to begin the timer</p>
               <Button onClick={handleStartTimer}
                 className="bg-yellow-400 hover:bg-yellow-300 text-black font-black text-lg px-10 py-5 rounded-2xl gap-2">
                 <Play className="h-5 w-5" /> Start Timer
               </Button>
             </div>
-          ) : isMCQ ? (
-            /* MCQ options — disabled and view-only for online admin */
+          )}
+
+          {isMCQ ? (
+            /* MCQ options — always shown; disabled for online admin (click-only blocked) */
             <div className={`grid grid-cols-1 sm:grid-cols-2 gap-3 ${config?.playMode === 'BUZZ' && !!joinRoomCode && ((config?.buzzButton && !hasBuzzed && !buzzState) || (!!buzzState && buzzState.playerId !== myPlayerId) || disabledPlayerIds.includes(myPlayerId || '') || waiting) ? 'opacity-60 pointer-events-none' : ''}`}>
               {options.map((opt, i) => {
                 const isDisabledOpt = disabledOptions.includes(opt)
@@ -1574,8 +1579,8 @@ export default function JeopardyPage() {
                   <button key={opt} onClick={() => !isOnlineAdmin && !isDisabledOpt && handleSingleAnswer(opt)}
                     disabled={submitted || isOnlineAdmin || isDisabledOpt || (!!joinRoomCode && disabledPlayerIds.includes(myPlayerId || '')) || (!!joinRoomCode && waiting)}
                     className={`flex items-center gap-3 p-4 rounded-xl border-2 text-left font-medium transition-all
-                      ${isOnlineAdmin ? 'bg-[#0d1b5e] border-blue-500/30 opacity-80 cursor-default'
-                      : isDisabledOpt ? 'bg-gray-900 border-gray-700 opacity-30 cursor-not-allowed line-through'
+                      ${isDisabledOpt ? 'bg-gray-900 border-gray-700 opacity-30 cursor-not-allowed line-through'
+                      : isOnlineAdmin ? 'bg-[#0d1b5e] border-blue-500/30 opacity-80 cursor-default'
                       : 'bg-[#0d1b5e] border-blue-500/50 hover:bg-[#1a2f8e] hover:border-yellow-400 hover:scale-[1.02] active:scale-95 cursor-pointer disabled:opacity-50 disabled:cursor-not-allowed'}`}>
                     <span className="w-7 h-7 rounded-full bg-yellow-400 text-black font-black text-xs flex items-center justify-center flex-shrink-0">
                       {isDisabledOpt ? '✗' : ['A', 'B', 'C', 'D'][i]}

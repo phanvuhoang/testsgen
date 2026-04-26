@@ -186,6 +186,8 @@ export default function KahootPage() {
   const submittedRef = useRef(false)
   // Ref to always read current question index (avoids stale closure in SSE handler)
   const currentIdxRef = useRef(0)
+  // Wall-clock sync: keep questionStartTime in a ref for timer effect closure
+  const questionStartTimeRef = useRef(0)
   const currentQuestion = questions[currentIdx]
   const currentPlayer = players[currentPlayerIdx]
   const isMultiple = currentQuestion?.questionType === 'MULTIPLE_RESPONSE'
@@ -199,6 +201,7 @@ export default function KahootPage() {
   useEffect(() => { configRef.current = config }, [config])
   useEffect(() => { submittedRef.current = submitted }, [submitted])
   useEffect(() => { currentIdxRef.current = currentIdx }, [currentIdx])
+  useEffect(() => { questionStartTimeRef.current = questionStartTime }, [questionStartTime])
 
   // Fetch config — detect join vs admin flow
   useEffect(() => {
@@ -381,8 +384,8 @@ export default function KahootPage() {
         if (gs) {
           if (gs.buzzState !== undefined) {
             setBuzzState(gs.buzzState ?? null)
-            // Stop admin timer when a player has answered
-            if (gs.buzzState?.answer != null) {
+            // Stop admin timer when a player has answered — only if DB says question phase
+            if (gs.buzzState?.answer != null && gs.phase === 'question') {
               clearInterval(timerRef.current!)
               setTimerRunning(false)
             }
@@ -422,16 +425,18 @@ export default function KahootPage() {
   }, [phase, currentIdx])
 
   // Timer for clickStartToCount / buzz mode — starts when timerRunning becomes true
+  // Uses wall-clock (questionStartTimeRef) so host and player displays stay in sync
   useEffect(() => {
     if (!timerRunning) return
     clearInterval(timerRef.current!)
     timerRef.current = setInterval(() => {
-      setTimeLeft(prev => {
-        if (prev<=5&&!timeCountPlayedRef.current){timeCountPlayedRef.current=true;audio.playTimeCount()}
-        if (prev<=1){clearInterval(timerRef.current!);handleTimeout();return 0}
-        return prev-1
-      })
-    }, 1000)
+      const maxTime = configRef.current?.timeLimitSeconds ?? 30
+      const elapsed = (Date.now() - questionStartTimeRef.current) / 1000
+      const remaining = Math.max(0, Math.round(maxTime - elapsed))
+      if (remaining <= 5 && !timeCountPlayedRef.current) { timeCountPlayedRef.current = true; audio.playTimeCount() }
+      if (remaining <= 0) { clearInterval(timerRef.current!); setTimeLeft(0); handleTimeout(); return }
+      setTimeLeft(remaining)
+    }, 500)
     return ()=>clearInterval(timerRef.current!)
   }, [timerRunning])
 
@@ -744,15 +749,18 @@ export default function KahootPage() {
     audio.playBg('kahoot-play',0.55)
     const startTime = Date.now()
     setQuestionStartTime(startTime)
+    questionStartTimeRef.current = startTime
     setTimerRunning(true)
     clearInterval(timerRef.current!)
+    timeCountPlayedRef.current = false
     timerRef.current = setInterval(() => {
-      setTimeLeft(prev => {
-        if (prev<=5&&!timeCountPlayedRef.current){timeCountPlayedRef.current=true;audio.playTimeCount()}
-        if (prev<=1){clearInterval(timerRef.current!);handleTimeout();return 0}
-        return prev-1
-      })
-    }, 1000)
+      const maxTime = configRef.current?.timeLimitSeconds ?? 30
+      const elapsed = (Date.now() - questionStartTimeRef.current) / 1000
+      const remaining = Math.max(0, Math.round(maxTime - elapsed))
+      if (remaining <= 5 && !timeCountPlayedRef.current) { timeCountPlayedRef.current = true; audio.playTimeCount() }
+      if (remaining <= 0) { clearInterval(timerRef.current!); setTimeLeft(0); handleTimeout(); return }
+      setTimeLeft(remaining)
+    }, 500)
     // In BUZZ mode: broadcast timer start to players
     const rc = roomCodeRef.current
     if (rc && configRef.current?.playMode === 'BUZZ') {
@@ -1115,7 +1123,7 @@ export default function KahootPage() {
                       const rc = roomCodeRef.current
                       if(rc && !joinRoomCode) {
                         const startTime = Date.now()
-                        fetch(`/api/gameshow/${shareCode}/session/${rc}`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({gameState:{phase:'question',currentQuestionIndex:idx,questionStartTime:startTime}})}).catch(()=>{})
+                        fetch(`/api/gameshow/${shareCode}/session/${rc}`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({gameState:{phase:'question',currentQuestionIndex:idx,questionStartTime:startTime,timerStarted:false,buzzState:null,disabledOptions:[],disabledPlayerIds:[]}})}).catch(()=>{})
                       }
                       beginQuestion(idx)
                     }
@@ -1243,11 +1251,14 @@ export default function KahootPage() {
                     setBuzzTimeRemaining(timeLeft)
                     clearInterval(timerRef.current!)
                     setTimerRunning(false)
-                    const rc = roomCodeRef.current
-                    if (rc) fetch(`/api/gameshow/${shareCode}/session/${rc}`, {
-                      method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ gameState: { phase: 'reveal' } })
-                    }).catch(() => {})
+                    // Only broadcast reveal to players if answer was correct
+                    if (buzzState?.isCorrect !== false) {
+                      const rc = roomCodeRef.current
+                      if (rc) fetch(`/api/gameshow/${shareCode}/session/${rc}`, {
+                        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ gameState: { phase: 'reveal' } })
+                      }).catch(() => {})
+                    }
                     setPhase('reveal')
                   }} className="bg-yellow-400 hover:bg-yellow-300 text-black font-black px-6 py-3 rounded-2xl">
                     Result

@@ -161,6 +161,8 @@ export default function WwtbamPage() {
   const roomCodeRef = useRef<string | null>(null)
   const evsRef = useRef<EventSource | null>(null)
   const configRef = useRef<GameshowConfig | null>(null)
+  // Wall-clock sync for timer effects
+  const questionStartTimeRef = useRef(0)
 
   const currentQuestion = questions[currentIdx]
   const currentPlayer = players[currentPlayerIdx]
@@ -170,6 +172,7 @@ export default function WwtbamPage() {
   useEffect(() => { configRef.current = config }, [config])
   useEffect(() => { submittedRef.current = submitted }, [submitted])
   useEffect(() => { currentIdxRef.current = currentIdx }, [currentIdx])
+  useEffect(() => { questionStartTimeRef.current = questionStartTime }, [questionStartTime])
 
   // ─── Fetch config — detect join vs admin flow ────────────────────────────
   useEffect(() => {
@@ -361,8 +364,8 @@ export default function WwtbamPage() {
         if (gs) {
           if (gs.buzzState !== undefined) {
             setBuzzState(gs.buzzState ?? null)
-            // Stop admin timer when a player has answered
-            if (gs.buzzState?.answer != null) {
+            // Stop admin timer when a player has answered — only if DB says question phase
+            if (gs.buzzState?.answer != null && gs.phase === 'question') {
               clearInterval(timerRef.current!)
               setTimerRunning(false)
             }
@@ -382,15 +385,16 @@ export default function WwtbamPage() {
     return () => es.close()
   }, [roomCode, config?.playMode, shareCode, joinRoomCode])
 
-  // ─── Timer effect ────────────────────────────────────────────────────────
+  // ─── Timer effect 1: auto-start (non-clickStartToCount modes) ───────────
   useEffect(() => {
-    if (!timerRunning || phase !== 'question' || !config) return
+    if (phase !== 'question' || !config) return
+    if (config.clickStartToCount || config.playMode === 'BUZZ') return
+    clearInterval(timerRef.current!)
     timeCountPlayedRef.current = false
     timerRef.current = setInterval(() => {
       setTimeLeft(prev => {
         if (prev <= 5 && !timeCountPlayedRef.current) {
-          timeCountPlayedRef.current = true
-          audio.playTimeCount()
+          timeCountPlayedRef.current = true; audio.playTimeCount()
         }
         if (prev <= 1) { clearInterval(timerRef.current!); handleTimeout(); return 0 }
         TONE.tick()
@@ -398,7 +402,27 @@ export default function WwtbamPage() {
       })
     }, 1000)
     return () => clearInterval(timerRef.current!)
-  }, [timerRunning, phase, currentIdx, config])
+  }, [phase, currentIdx])
+
+  // ─── Timer effect 2: starts when timerRunning→true (clickStartToCount / BUZZ) ─
+  // Uses wall-clock so host and player stay in sync regardless of SSE delay
+  useEffect(() => {
+    if (!timerRunning) return
+    clearInterval(timerRef.current!)
+    timeCountPlayedRef.current = false
+    timerRef.current = setInterval(() => {
+      const maxTime = configRef.current?.timeLimitSeconds ?? 30
+      const elapsed = (Date.now() - questionStartTimeRef.current) / 1000
+      const remaining = Math.max(0, Math.round(maxTime - elapsed))
+      if (remaining <= 5 && !timeCountPlayedRef.current) {
+        timeCountPlayedRef.current = true; audio.playTimeCount()
+      }
+      if (remaining <= 0) { clearInterval(timerRef.current!); setTimeLeft(0); handleTimeout(); return }
+      TONE.tick()
+      setTimeLeft(remaining)
+    }, 500)
+    return () => clearInterval(timerRef.current!)
+  }, [timerRunning])
 
   // ─── handleTimeout ───────────────────────────────────────────────────────
   const handleTimeout = useCallback(() => {
@@ -506,6 +530,21 @@ export default function WwtbamPage() {
     const startTime = Date.now()
     setQuestionStartTime(startTime)
     setTimerRunning(true)
+    // Create interval directly for immediate start (effect 2 will replace it after render)
+    clearInterval(timerRef.current!)
+    questionStartTimeRef.current = startTime
+    timeCountPlayedRef.current = false
+    timerRef.current = setInterval(() => {
+      const maxTime = configRef.current?.timeLimitSeconds ?? 30
+      const elapsed = (Date.now() - questionStartTimeRef.current) / 1000
+      const remaining = Math.max(0, Math.round(maxTime - elapsed))
+      if (remaining <= 5 && !timeCountPlayedRef.current) {
+        timeCountPlayedRef.current = true; audio.playTimeCount()
+      }
+      if (remaining <= 0) { clearInterval(timerRef.current!); setTimeLeft(0); handleTimeout(); return }
+      TONE.tick()
+      setTimeLeft(remaining)
+    }, 500)
     // In BUZZ mode: broadcast timer start to players
     const rc = roomCodeRef.current
     if (rc && configRef.current?.playMode === 'BUZZ') {
@@ -1083,7 +1122,7 @@ export default function WwtbamPage() {
                         const startTime = Date.now()
                         fetch(`/api/gameshow/${shareCode}/session/${rc}`, {
                           method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-                          body: JSON.stringify({ gameState: { phase: 'question', currentQuestionIndex: idx, questionStartTime: startTime } })
+                          body: JSON.stringify({ gameState: { phase: 'question', currentQuestionIndex: idx, questionStartTime: startTime, timerStarted: false, buzzState: null, disabledOptions: [], disabledPlayerIds: [] } })
                         }).catch(() => {})
                       }
                       beginQuestion(idx)
@@ -1233,11 +1272,15 @@ export default function WwtbamPage() {
                       clearInterval(timerRef.current!)
                       setBuzzTimeRemaining(timeLeft)
                       setTimerRunning(false)
-                      const rc = roomCodeRef.current
-                      if (rc) fetch(`/api/gameshow/${shareCode}/session/${rc}`, {
-                        method: 'PATCH', headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ gameState: { phase: 'reveal' } })
-                      }).catch(() => {})
+                      // Only broadcast reveal to players if answer was correct;
+                      // for wrong answers admin goes to reveal locally so players can still continue
+                      if (buzzState?.isCorrect !== false) {
+                        const rc = roomCodeRef.current
+                        if (rc) fetch(`/api/gameshow/${shareCode}/session/${rc}`, {
+                          method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ gameState: { phase: 'reveal' } })
+                        }).catch(() => {})
+                      }
                       setPhase('reveal')
                     }} className="bg-yellow-400 hover:bg-yellow-300 text-black font-black px-6 py-3 rounded-2xl">
                       Result
