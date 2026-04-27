@@ -205,7 +205,7 @@ export default function WwtbamPage() {
             setRoomCode(sData.roomCode)
             setOnlineLobbyPlayers([])
             setPhase('lobby')
-            audio.playBg('opening', 0.5)
+            audio.playBg('wwtbam-opening', 0.5)
           } catch {
             setError('Failed to create game session')
           }
@@ -219,7 +219,7 @@ export default function WwtbamPage() {
 
   // Play opening music on setup screen (non-online)
   useEffect(() => {
-    if (phase === 'setup' && !loading && !joinRoomCode) audio.playBg('opening', 0.5)
+    if (phase === 'setup' && !loading && !joinRoomCode) audio.playBg('wwtbam-opening', 0.5)
   }, [phase, loading])
 
   // ─── Stop audio on gameover, play podium music ───────────────────────────
@@ -481,7 +481,9 @@ export default function WwtbamPage() {
       } catch { setError('Failed to create game session') }
       return
     }
-    const names = setupNames.filter(n => n.trim())
+    const names = config.playMode === 'SINGLE'
+      ? setupNames.filter(n => n.trim())
+      : setupNames.map((n, i) => n.trim() || `Player ${i + 1}`)
     if (names.length === 0) return
     let qs = [...config.questions]
     if (config.shuffleQuestions) qs = shuffle(qs)
@@ -494,7 +496,7 @@ export default function WwtbamPage() {
     })))
     setCurrentPlayerIdx(0); setCurrentIdx(0)
     setAnsweredQuestions(new Set())
-    audio.stop('opening')
+    audio.stop('wwtbam-opening')
     if (config.selectionMode === 'FREE_CHOICE') {
       audio.playBg('selecting', 0.5)
       setPhase('select')
@@ -584,7 +586,7 @@ export default function WwtbamPage() {
     // Apply bet multiplier
     if (isBetting) {
       if (correct) pts = Math.round(pts * (config?.betMultiple ?? 2))
-      else { const wa = config?.betWrongAnswer ?? 'NO_DEDUCTION'; pts = wa === '1x' ? -base : wa === 'Multiple' ? -Math.round(base * (config?.betMultiple ?? 2)) : 0 }
+      else { const wa = config?.betWrongAnswer ?? 'NO_DEDUCTION'; pts = wa === 'ONE_X' ? -base : wa === 'MULTIPLE' ? -Math.round(base * (config?.betMultiple ?? 2)) : 0 }
       setBetsRemaining(prev => Math.max(0, prev - 1)); setIsBetting(false)
     }
 
@@ -688,11 +690,14 @@ export default function WwtbamPage() {
     const isLocal = config?.playMode === 'LOCAL'
     const isFreeChoice = config?.selectionMode === 'FREE_CHOICE'
     if (isLocal) {
+      const allDone = isFreeChoice
+        ? answeredQuestions.size >= questions.length
+        : currentIdx >= questions.length - 1
+      if (allDone) { setPhase('gameover'); return }
       const next = (currentPlayerIdx + 1) % players.length
-      if (isLastQ && next === 0) { setPhase('gameover'); return }
       setCurrentPlayerIdx(next)
       if (isFreeChoice) { audio.playBg('selecting', 0.5); setPhase('select') }
-      else beginQuestion(isLastQ ? 0 : currentIdx + 1)
+      else beginQuestion(currentIdx + 1)
     } else {
       if (isLastQ) { setPhase('gameover'); return }
       if (isFreeChoice) { audio.playBg('selecting', 0.5); setPhase('select') }

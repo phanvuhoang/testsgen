@@ -981,7 +981,7 @@ export default function GameshowsPage() {
                       <span className="font-semibold text-sm">Session {si + 1}</span>
                       <span className="text-xs text-gray-400 font-mono">{session.roomCode}</span>
                       <span className={`text-xs px-2 py-0.5 rounded-full ${session.status === 'FINISHED' ? 'bg-gray-100 text-gray-500' : 'bg-green-100 text-green-700'}`}>{session.status}</span>
-                      <span className="text-xs text-gray-400 ml-auto">{new Date(session.createdAt).toLocaleDateString('vi-VN')}</span>
+                      <span className="text-xs text-gray-400 ml-auto">{new Date(session.createdAt).toLocaleDateString('vi-VN')} {new Date(session.createdAt).toLocaleTimeString('vi-VN', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false })}</span>
                       {session.status !== 'FINISHED' && (
                         <Button
                           size="sm" variant="ghost"

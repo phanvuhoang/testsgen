@@ -844,6 +844,21 @@ export default function JeopardyPage() {
     }, 1000)
   }
 
+  const saveAnalytics = (questionId: string, answer: string, correct: boolean, pts: number, elapsedMs: number) => {
+    try {
+      fetch('/api/gameshow/analytics', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          gameshowId: config?.id,
+          gameType: 'JEOPARDY',
+          playerNickname: players[currentPlayerIdx]?.nickname,
+          questionId, answer, correct, points: pts, elapsedMs,
+        })
+      }).catch(() => {})
+    } catch {}
+  }
+
   const handleResponse = (correct: boolean) => {
     isAnsweredRef.current = true
     clearInterval(responseTimerRef.current!)
@@ -891,7 +906,7 @@ export default function JeopardyPage() {
         : correct ? Math.round(basePoints * (0.5 + 0.5 * (1 - elapsed / config!.timeLimitSeconds))) : 0
       if (isBetting) {
         if (correct) pts = Math.round(pts * (config?.betMultiple ?? 2))
-        else { const wa = config?.betWrongAnswer ?? 'NO_DEDUCTION'; pts = wa === '1x' ? -basePoints : wa === 'Multiple' ? -Math.round(basePoints * (config?.betMultiple ?? 2)) : 0 }
+        else { const wa = config?.betWrongAnswer ?? 'NO_DEDUCTION'; pts = wa === 'ONE_X' ? -basePoints : wa === 'MULTIPLE' ? -Math.round(basePoints * (config?.betMultiple ?? 2)) : 0 }
         setBetsRemaining(prev => Math.max(0, prev - 1)); setIsBetting(false)
       }
       setMyLastPts(pts)
@@ -935,7 +950,7 @@ export default function JeopardyPage() {
       : correct ? Math.round(basePoints * (0.5 + 0.5 * (1 - elapsed / config!.timeLimitSeconds))) : 0
     if (isBetting) {
       if (correct) pts = Math.round(pts * (config?.betMultiple ?? 2))
-      else { const wa = config?.betWrongAnswer ?? 'NO_DEDUCTION'; pts = wa === '1x' ? -basePoints : wa === 'Multiple' ? -Math.round(basePoints * (config?.betMultiple ?? 2)) : 0 }
+      else { const wa = config?.betWrongAnswer ?? 'NO_DEDUCTION'; pts = wa === 'ONE_X' ? -basePoints : wa === 'MULTIPLE' ? -Math.round(basePoints * (config?.betMultiple ?? 2)) : 0 }
       setBetsRemaining(prev => Math.max(0, prev - 1)); setIsBetting(false)
     }
     setPlayers(prev => prev.map((p, i) => {
@@ -944,6 +959,7 @@ export default function JeopardyPage() {
     }))
     if (correct) audio.playOnce('win', 0.9)
     else audio.playOnce('lost', 0.9)
+    saveAnalytics(currentQuestion.id, answer, correct, pts, elapsed * 1000)
     setPhase('reveal')
   }
 

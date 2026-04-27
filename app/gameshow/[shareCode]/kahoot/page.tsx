@@ -519,8 +519,8 @@ export default function KahootPage() {
         pts = Math.round(pts * (config?.betMultiple ?? 2))
       } else {
         const wa = config?.betWrongAnswer ?? 'NO_DEDUCTION'
-        if(wa === '1x') pts = -1000
-        else if(wa === 'Multiple') pts = -Math.round(1000 * (config?.betMultiple ?? 2))
+        if(wa === 'ONE_X') pts = -1000
+        else if(wa === 'MULTIPLE') pts = -Math.round(1000 * (config?.betMultiple ?? 2))
         else pts = 0
       }
       setBetsRemaining(prev => Math.max(0, prev - 1))
@@ -548,6 +548,7 @@ export default function KahootPage() {
       }).catch(()=>{})
       return
     }
+    saveAnalytics(currentQuestion.id, answer, correct, pts, elapsed * 1000)
     revealTimeoutRef.current = setTimeout(()=>setPhase('reveal'),1200)
   }
 
@@ -561,7 +562,7 @@ export default function KahootPage() {
     let pts=computePoints(correct,elapsed)
     if(isBetting) {
       if(correct) pts = Math.round(pts * (config?.betMultiple ?? 2))
-      else { const wa=config?.betWrongAnswer??'NO_DEDUCTION'; pts = wa==='1x'?-1000:wa==='Multiple'?-Math.round(1000*(config?.betMultiple??2)):0 }
+      else { const wa=config?.betWrongAnswer??'NO_DEDUCTION'; pts = wa==='ONE_X'?-1000:wa==='MULTIPLE'?-Math.round(1000*(config?.betMultiple??2)):0 }
       setBetsRemaining(prev=>Math.max(0,prev-1)); setIsBetting(false)
     }
     const answerStr=selectedMultiple.join('||')
@@ -580,6 +581,7 @@ export default function KahootPage() {
       }).catch(()=>{})
       return
     }
+    saveAnalytics(currentQuestion.id, answerStr, correct, pts, elapsed * 1000)
     revealTimeoutRef.current = setTimeout(()=>setPhase('reveal'),1200)
   }
 
@@ -593,7 +595,7 @@ export default function KahootPage() {
     let pts=computePoints(correct,elapsed)
     if(isBetting) {
       if(correct) pts = Math.round(pts * (config?.betMultiple ?? 2))
-      else { const wa=config?.betWrongAnswer??'NO_DEDUCTION'; pts = wa==='1x'?-1000:wa==='Multiple'?-Math.round(1000*(config?.betMultiple??2)):0 }
+      else { const wa=config?.betWrongAnswer??'NO_DEDUCTION'; pts = wa==='ONE_X'?-1000:wa==='MULTIPLE'?-Math.round(1000*(config?.betMultiple??2)):0 }
       setBetsRemaining(prev=>Math.max(0,prev-1)); setIsBetting(false)
     }
     setIsCorrect(correct); setSubmitted(true)
@@ -611,6 +613,7 @@ export default function KahootPage() {
       }).catch(()=>{})
       return
     }
+    saveAnalytics(currentQuestion.id, fillAnswer, correct, pts, elapsed * 1000)
     revealTimeoutRef.current = setTimeout(()=>setPhase('reveal'),1200)
   }
 
@@ -620,6 +623,21 @@ export default function KahootPage() {
       const newStreak=correct?p.streak+1:0
       return{...p,score:p.score+pts,correctCount:correct?p.correctCount+1:p.correctCount,wrongCount:!correct?p.wrongCount+1:p.wrongCount,streak:newStreak,bestStreak:Math.max(p.bestStreak,newStreak),lastPointsEarned:pts}
     }))
+  }
+
+  const saveAnalytics = (questionId: string, answer: string, correct: boolean, pts: number, elapsedMs: number) => {
+    try {
+      fetch('/api/gameshow/analytics', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          gameshowId: config?.id,
+          gameType: 'KAHOOT',
+          playerNickname: currentPlayer?.nickname,
+          questionId, answer, correct, points: pts, elapsedMs,
+        })
+      }).catch(() => {})
+    } catch {}
   }
 
   // Online: player submits join form
