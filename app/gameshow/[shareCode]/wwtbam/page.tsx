@@ -146,6 +146,7 @@ export default function WwtbamPage() {
   const [disabledPlayerIds, setDisabledPlayerIds] = useState<string[]>([])
   const [hasBuzzed, setHasBuzzed] = useState(false)
   const [buzzTimeRemaining, setBuzzTimeRemaining] = useState(0)
+  const [buzzWrongPending, setBuzzWrongPending] = useState(false)
   // Bet mechanism
   const [betsRemaining, setBetsRemaining] = useState(0)
   const [isBetting, setIsBetting] = useState(false)
@@ -221,9 +222,9 @@ export default function WwtbamPage() {
     if (phase === 'setup' && !loading && !joinRoomCode) audio.playBg('opening', 0.5)
   }, [phase, loading])
 
-  // ─── Stop audio on gameover ──────────────────────────────────────────────
+  // ─── Stop audio on gameover, play podium music ───────────────────────────
   useEffect(() => {
-    if (phase === 'gameover') audio.stopAll()
+    if (phase === 'gameover') { audio.stopAll(); audio.playBg('podium', 0.7) }
   }, [phase])
 
   // ─── Online lobby polling — host polls for players joining ───────────────
@@ -303,7 +304,8 @@ export default function WwtbamPage() {
               setMyLastPts(0)
               answeredRef.current = false
               timeCountPlayedRef.current = false
-              setBuzzState(null); setHasBuzzed(false); setIsBetting(false)
+              setBuzzState(null); setHasBuzzed(false)
+              if (idx !== currentIdxRef.current) setIsBetting(false)
             }
             // Always sync buzz/disabled state
             if (gs.buzzState !== undefined) {
@@ -647,6 +649,7 @@ export default function WwtbamPage() {
     const resumeStartTime = Date.now() - resumeMs
     setDisabledOptions(newDisabledOpts); setDisabledPlayerIds(newDisabledPlayers)
     setBuzzState(null)
+    setBuzzWrongPending(false)
     setSelectedAnswer(null); setIsCorrect(null)
     setTimeLeft(buzzTimeRemaining); timeCountPlayedRef.current = false; answeredRef.current = false
     if (rc) {
@@ -1169,7 +1172,7 @@ export default function WwtbamPage() {
     const maxTime = config?.timeLimitSeconds ?? 30
     const timerPct = (timeLeft / maxTime) * 100
     const timerColor = timerPct > 50 ? 'bg-green-400' : timerPct > 25 ? 'bg-yellow-400' : 'bg-red-500'
-    const waitingForStart = config?.clickStartToCount && !timerRunning
+    const waitingForStart = (config?.clickStartToCount || config?.playMode === 'BUZZ') && !timerRunning
     const rc = roomCodeRef.current
     const isOnlineAdmin = !!rc && !joinRoomCode
 
@@ -1272,16 +1275,18 @@ export default function WwtbamPage() {
                       clearInterval(timerRef.current!)
                       setBuzzTimeRemaining(timeLeft)
                       setTimerRunning(false)
-                      // Only broadcast reveal to players if answer was correct;
-                      // for wrong answers admin goes to reveal locally so players can still continue
                       if (buzzState?.isCorrect !== false) {
+                        // Correct: broadcast reveal to all players
                         const rc = roomCodeRef.current
                         if (rc) fetch(`/api/gameshow/${shareCode}/session/${rc}`, {
                           method: 'PATCH', headers: { 'Content-Type': 'application/json' },
                           body: JSON.stringify({ gameState: { phase: 'reveal' } })
                         }).catch(() => {})
+                        setPhase('reveal')
+                      } else {
+                        // Wrong: show pending overlay — host picks Continue or Reveal Answer
+                        setBuzzWrongPending(true)
                       }
-                      setPhase('reveal')
                     }} className="bg-yellow-400 hover:bg-yellow-300 text-black font-black px-6 py-3 rounded-2xl">
                       Result
                     </Button>
@@ -1415,6 +1420,37 @@ export default function WwtbamPage() {
             )}
           </div>
         </div>
+
+        {/* BUZZ mode: wrong answer pending — host picks Continue or Reveal Answer */}
+        {config?.playMode === 'BUZZ' && isOnlineAdmin && buzzWrongPending && buzzState && (
+          <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50">
+            <div className="bg-[#0d1b5e] border-2 border-red-500/60 rounded-3xl p-8 max-w-sm w-full mx-4 text-center shadow-2xl">
+              <XCircle className="h-14 w-14 text-red-400 mx-auto mb-3"/>
+              <h2 className="text-2xl font-black text-red-300 mb-1">Wrong Answer!</h2>
+              <p className="text-white font-bold mb-1">{buzzState.playerNickname}</p>
+              <p className="text-gray-300 text-sm mb-6">answered: <span className="font-bold text-white">"{buzzState.answer}"</span></p>
+              <div className="flex flex-col gap-3">
+                {options.filter(opt => ![...disabledOptions, buzzState.answer].filter(Boolean).includes(opt)).length > 1 && (
+                  <Button onClick={() => handleBuzzContinue()}
+                    className="bg-orange-500 hover:bg-orange-400 text-white font-bold py-4 rounded-2xl text-lg">
+                    Continue (Resume Timer)
+                  </Button>
+                )}
+                <Button onClick={() => {
+                  setBuzzWrongPending(false)
+                  const rc = roomCodeRef.current
+                  if (rc) fetch(`/api/gameshow/${shareCode}/session/${rc}`, {
+                    method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ gameState: { phase: 'reveal' } })
+                  }).catch(() => {})
+                  setPhase('reveal')
+                }} className="bg-blue-600 hover:bg-blue-500 text-white font-bold py-4 rounded-2xl text-lg">
+                  Reveal Answer
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     )
   }
@@ -1694,29 +1730,37 @@ export default function WwtbamPage() {
 
   // ─── GAME OVER ────────────────────────────────────────────────────────────
   if (phase === 'gameover') {
-    const sorted = [...players].sort((a, b) => b.score - a.score)
+    const sorted = [...players].sort((a, b) => b.score - a.score).slice(0, 10)
     return (
-      <div className="relative min-h-screen bg-[#0a0a2e] text-white flex items-center justify-center p-4">
+      <div className="relative min-h-screen bg-gradient-to-b from-[#0a0a2e] to-[#0d1b5e] text-white flex items-center justify-center p-4 overflow-hidden">
         <MusicBtn />
-        <div className="w-full max-w-lg">
-          <div className="text-center mb-8">
-            <Trophy className="h-16 w-16 text-yellow-400 mx-auto mb-3" />
-            <h1 className="text-3xl font-black text-yellow-300">Game Over!</h1>
+        <style>{`@keyframes slideUp{from{opacity:0;transform:translateY(24px)}to{opacity:1;transform:translateY(0)}}@keyframes popIn{0%{transform:scale(0.5);opacity:0}70%{transform:scale(1.15)}100%{transform:scale(1);opacity:1}}@keyframes fall{to{transform:translateY(100vh) rotate(720deg);opacity:0;}}`}</style>
+        <div className="fixed inset-0 pointer-events-none overflow-hidden z-0">
+          {Array.from({length:24},(_,i)=>({id:i,color:['#ff0','#f0f','#0ff','#0f0','#f60','#60f'][i%6],left:`${Math.random()*100}%`,delay:`${Math.random()*0.5}s`,dur:`${0.8+Math.random()*0.8}s`})).map(p=>(
+            <div key={p.id} className="absolute w-2 h-2 rounded-sm" style={{left:p.left,top:'-8px',backgroundColor:p.color,animation:`fall ${p.dur} ease-in ${p.delay} forwards`}}/>
+          ))}
+        </div>
+        <div className="w-full max-w-lg relative z-10">
+          <div className="text-center mb-6">
+            <Trophy className="h-20 w-20 text-yellow-400 mx-auto mb-3" style={{animation:'popIn 0.6s ease forwards'}}/>
+            <h1 className="text-4xl font-black text-yellow-300" style={{animation:'popIn 0.6s ease 0.1s both'}}>Final Results!</h1>
             {config?.name && <p className="text-blue-300 text-sm mt-1">{config.name}</p>}
           </div>
-          <div className="space-y-3 mb-8">
+          <div className="space-y-3 mb-6">
             {sorted.map((p, rank) => (
-              <div key={p.id} className={`rounded-2xl p-5 border-2 ${rank === 0 ? 'bg-yellow-900/30 border-yellow-400' : rank === 1 ? 'bg-gray-700/30 border-gray-400' : rank === 2 ? 'bg-orange-900/30 border-orange-600' : 'bg-[#0d1b5e] border-blue-500/30'}`}>
+              <div key={p.id}
+                style={{animation:`slideUp 0.4s ease ${0.15+rank*0.07}s both`}}
+                className={`rounded-2xl p-5 border-2 ${rank === 0 ? 'bg-yellow-900/40 border-yellow-400 shadow-lg shadow-yellow-400/20' : rank === 1 ? 'bg-gray-700/20 border-gray-400' : rank === 2 ? 'bg-orange-900/20 border-orange-500/60' : 'bg-[#0d1b5e]/60 border-blue-500/30'}`}>
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
-                    <span className="text-2xl">{rank === 0 ? '🥇' : rank === 1 ? '🥈' : rank === 2 ? '🥉' : `${rank + 1}.`}</span>
+                    <span className="text-3xl">{rank === 0 ? '🥇' : rank === 1 ? '🥈' : rank === 2 ? '🥉' : `${rank + 1}.`}</span>
                     <div>
-                      <div className="font-bold">{p.nickname}</div>
+                      <div className="font-bold text-lg">{p.nickname}</div>
                       <div className="text-xs text-gray-400">{p.correctCount}/{questions.length} correct</div>
                     </div>
                   </div>
                   <div className="text-right">
-                    <div className="text-2xl font-black text-yellow-300">{p.score}</div>
+                    <div className={`font-black ${rank===0?'text-3xl text-yellow-300':rank===1?'text-2xl text-gray-200':'text-xl text-white'}`}>{p.score}</div>
                     <div className="text-xs text-gray-400">pts</div>
                   </div>
                 </div>
@@ -1725,13 +1769,13 @@ export default function WwtbamPage() {
           </div>
           <div className="flex gap-3">
             {!joinRoomCode && (
-              <Button onClick={() => { setPhase('setup'); setSetupNames([setupNames[0] || '']) }}
-                variant="outline" className="flex-1 border-blue-500/30 text-blue-300 hover:bg-blue-900/30">
+              <Button onClick={() => { audio.stop('podium'); setPhase('setup'); setSetupNames([setupNames[0] || '']) }}
+                variant="outline" className="flex-1 border-blue-500/30 text-blue-300 hover:bg-blue-900/30 rounded-2xl">
                 <RotateCcw className="h-4 w-4 mr-2" /> Play Again
               </Button>
             )}
             <Button onClick={() => window.close()} variant="outline"
-              className="flex-1 border-blue-500/30 text-blue-300 hover:bg-blue-900/30">
+              className="flex-1 border-blue-500/30 text-blue-300 hover:bg-blue-900/30 rounded-2xl">
               <Home className="h-4 w-4 mr-2" /> Exit
             </Button>
           </div>

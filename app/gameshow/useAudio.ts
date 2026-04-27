@@ -5,7 +5,7 @@ import { useEffect, useRef, useCallback } from 'react'
 // Manages HTML Audio elements with clean play/stop, loop, and mute support.
 
 export type AudioTrack =
-  | 'opening'       // Opening-screen.mp3
+  | 'opening'       // Kahoot Lobby Music.mp3
   | 'selecting'     // Selecting-question-screen.m4a
   | 'kahoot-play'   // Kahoot-Play.mp3
   | 'game-play'     // WWTBAM-and-Jeopardy-Play.wav
@@ -14,9 +14,11 @@ export type AudioTrack =
   | 'win'           // WIN.mp3
   | 'lost'          // LOST.mp3
   | 'leaderboard'   // LeaderBoard.wav
+  | 'podium'        // Kahoot! Podium Theme Music.mp3
 
 const TRACK_PATHS: Record<AudioTrack, string> = {
-  'opening':    '/sounds/opening-screen.mp3',
+  'opening':    '/sounds/Kahoot Lobby Music.mp3',
+  'podium':     '/sounds/Kahoot! Podium Theme Music.mp3',
   'selecting':  '/sounds/selecting-question.m4a',
   'kahoot-play':'/sounds/kahoot-play.mp3',
   'game-play':  '/sounds/wwtbam-jeopardy-play.wav',

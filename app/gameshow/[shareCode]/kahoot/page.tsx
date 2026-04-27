@@ -171,6 +171,7 @@ export default function KahootPage() {
   const [disabledPlayerIds, setDisabledPlayerIds] = useState<string[]>([])
   const [hasBuzzed, setHasBuzzed] = useState(false) // player pressed buzz button
   const [buzzTimeRemaining, setBuzzTimeRemaining] = useState(0) // admin: time left when Result clicked
+  const [buzzWrongPending, setBuzzWrongPending] = useState(false) // admin: wrong answer, waiting for Continue or Reveal
   // Bet mechanism
   const [betsRemaining, setBetsRemaining] = useState(0)
   const [isBetting, setIsBetting] = useState(false)
@@ -193,7 +194,7 @@ export default function KahootPage() {
   const isMultiple = currentQuestion?.questionType === 'MULTIPLE_RESPONSE'
   const isFillBlank = currentQuestion?.questionType === 'FILL_BLANK' || currentQuestion?.questionType === 'SHORT_ANSWER'
   const isFreeChoice = config?.selectionMode === 'FREE_CHOICE'
-  const waitingForStart = config?.clickStartToCount && !timerRunning && phase === 'question'
+  const waitingForStart = (config?.clickStartToCount || config?.playMode === 'BUZZ') && !timerRunning && phase === 'question'
   const isBuzzerMode = config?.buzzerMode && config?.playMode === 'ONLINE'
 
   // Sync refs
@@ -245,6 +246,9 @@ export default function KahootPage() {
 
   // Opening music
   useEffect(() => { if (phase==='setup'&&!loading&&!joinRoomCode) audio.playBg('opening', 0.5) }, [phase, loading])
+
+  // Podium music on gameover
+  useEffect(() => { if (phase === 'gameover') { audio.stopAll(); audio.playBg('podium', 0.7) } }, [phase])
 
   // Online lobby polling — host polls for players joining the room
   useEffect(() => {
@@ -322,7 +326,8 @@ export default function KahootPage() {
               setSubmitted(false); setIsCorrect(null); setDistribution({})
               setMyLastPts(0)
               timeCountPlayedRef.current = false
-              setBuzzState(null); setHasBuzzed(false); setIsBetting(false)
+              setBuzzState(null); setHasBuzzed(false)
+              if (idx !== currentIdxRef.current) setIsBetting(false)
             }
             // Always sync buzz/disabled state
             if (gs.buzzState !== undefined) {
@@ -800,6 +805,7 @@ export default function KahootPage() {
     setDisabledOptions(newDisabledOpts)
     setDisabledPlayerIds(newDisabledPlayers)
     setBuzzState(null)
+    setBuzzWrongPending(false)
     setSubmitted(false); setSelectedAnswer(null); setIsCorrect(null)
     setTimeLeft(buzzTimeRemaining)
     timeCountPlayedRef.current = false
@@ -1251,15 +1257,18 @@ export default function KahootPage() {
                     setBuzzTimeRemaining(timeLeft)
                     clearInterval(timerRef.current!)
                     setTimerRunning(false)
-                    // Only broadcast reveal to players if answer was correct
                     if (buzzState?.isCorrect !== false) {
+                      // Correct: broadcast reveal to all players then show reveal
                       const rc = roomCodeRef.current
                       if (rc) fetch(`/api/gameshow/${shareCode}/session/${rc}`, {
                         method: 'PATCH', headers: { 'Content-Type': 'application/json' },
                         body: JSON.stringify({ gameState: { phase: 'reveal' } })
                       }).catch(() => {})
+                      setPhase('reveal')
+                    } else {
+                      // Wrong: show pending overlay — host chooses Continue or Reveal Answer
+                      setBuzzWrongPending(true)
                     }
-                    setPhase('reveal')
                   }} className="bg-yellow-400 hover:bg-yellow-300 text-black font-black px-6 py-3 rounded-2xl">
                     Result
                   </Button>
@@ -1405,6 +1414,37 @@ export default function KahootPage() {
             )}
           </div>
         </div>
+
+        {/* BUZZ mode: wrong answer pending — host picks Continue or Reveal Answer */}
+        {config?.playMode === 'BUZZ' && !joinRoomCode && !!roomCode && buzzWrongPending && buzzState && (
+          <div className="fixed inset-0 bg-black/80 flex items-center justify-center z-50">
+            <div className="bg-[#1a1a2e] border-2 border-red-500/60 rounded-3xl p-8 max-w-sm w-full mx-4 text-center shadow-2xl">
+              <XCircle className="h-14 w-14 text-red-400 mx-auto mb-3"/>
+              <h2 className="text-2xl font-black text-red-300 mb-1">Wrong Answer!</h2>
+              <p className="text-white font-bold mb-1">{buzzState.playerNickname}</p>
+              <p className="text-gray-300 text-sm mb-6">answered: <span className="font-bold text-white">"{buzzState.answer}"</span></p>
+              <div className="flex flex-col gap-3">
+                {options.filter(opt => ![...disabledOptions, buzzState.answer].filter(Boolean).includes(opt)).length > 1 && (
+                  <Button onClick={() => handleBuzzContinue()}
+                    className="bg-orange-500 hover:bg-orange-400 text-white font-bold py-4 rounded-2xl text-lg">
+                    Continue (Resume Timer)
+                  </Button>
+                )}
+                <Button onClick={() => {
+                  setBuzzWrongPending(false)
+                  const rc = roomCodeRef.current
+                  if (rc) fetch(`/api/gameshow/${shareCode}/session/${rc}`, {
+                    method: 'PATCH', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ gameState: { phase: 'reveal' } })
+                  }).catch(() => {})
+                  setPhase('reveal')
+                }} className="bg-indigo-600 hover:bg-indigo-500 text-white font-bold py-4 rounded-2xl text-lg">
+                  Reveal Answer
+                </Button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     )
   }
@@ -1705,35 +1745,42 @@ export default function KahootPage() {
 
   // ─── GAME OVER ────────────────────────────────────────────────────────────────
   if(phase==='gameover'){
-    const sorted=[...players].sort((a,b)=>b.score-a.score)
+    const sorted=[...players].sort((a,b)=>b.score-a.score).slice(0,10)
     return(
-      <div className="relative min-h-screen bg-gradient-to-b from-[#6366f1] to-[#4f46e5] flex items-center justify-center p-4">
+      <div className="relative min-h-screen bg-gradient-to-b from-[#6366f1] to-[#4f46e5] flex items-center justify-center p-4 overflow-hidden">
+        <Confetti/>
         <MusicBtn/>
-        <div className="w-full max-w-lg text-white">
+        <style>{`@keyframes slideUp{from{opacity:0;transform:translateY(24px)}to{opacity:1;transform:translateY(0)}}@keyframes popIn{0%{transform:scale(0.5);opacity:0}70%{transform:scale(1.15)}100%{transform:scale(1);opacity:1}}`}</style>
+        <div className="w-full max-w-lg text-white relative z-10">
           <div className="text-center mb-6">
-            <Trophy className="h-16 w-16 text-yellow-300 mx-auto mb-3"/>
-            <h1 className="text-3xl font-black">Game Over!</h1>
+            <Trophy className="h-20 w-20 text-yellow-300 mx-auto mb-3" style={{animation:'popIn 0.6s ease forwards'}}/>
+            <h1 className="text-4xl font-black" style={{animation:'popIn 0.6s ease 0.1s both'}}>Final Results!</h1>
             <p className="text-indigo-200 mt-1">{config?.name}</p>
           </div>
           <div className="space-y-3 mb-6">
             {sorted.map((p,rank)=>(
-              <div key={p.id} className={`rounded-2xl p-4 ${rank===0?'bg-yellow-400/20 border-2 border-yellow-400':rank===1?'bg-white/10':'bg-white/5'}`}>
+              <div key={p.id}
+                style={{animation:`slideUp 0.4s ease ${0.15+rank*0.07}s both`}}
+                className={`rounded-2xl p-4 border-2 ${rank===0?'bg-yellow-400/30 border-yellow-400 shadow-lg shadow-yellow-400/20':rank===1?'bg-white/15 border-white/30':rank===2?'bg-orange-500/20 border-orange-400/50':'bg-white/5 border-white/10'}`}>
                 <div className="flex items-center justify-between">
                   <div className="flex items-center gap-3">
-                    <span className="text-2xl">{['🥇','🥈','🥉'][rank]||`${rank+1}.`}</span>
+                    <span className="text-3xl">{['🥇','🥈','🥉'][rank]||`${rank+1}.`}</span>
                     <div>
-                      <div className="font-bold">{p.nickname}</div>
+                      <div className="font-bold text-lg">{p.nickname}</div>
                       <div className="text-xs opacity-70">{p.correctCount}/{questions.length} correct · best streak {p.bestStreak}🔥</div>
                     </div>
                   </div>
-                  <div className="text-right"><div className="text-2xl font-black text-yellow-300">{p.score}</div><div className="text-xs opacity-60">pts</div></div>
+                  <div className="text-right">
+                    <div className={`font-black ${rank===0?'text-3xl text-yellow-300':rank===1?'text-2xl text-gray-200':'text-xl text-white'}`}>{p.score}</div>
+                    <div className="text-xs opacity-60">pts</div>
+                  </div>
                 </div>
               </div>
             ))}
           </div>
           <div className="flex gap-3">
             {!joinRoomCode && (
-              <Button onClick={()=>{setPhase('setup');setSetupNames([setupNames[0]||''])}}
+              <Button onClick={()=>{audio.stop('podium');setPhase('setup');setSetupNames([setupNames[0]||''])}}
                 variant="outline" className="flex-1 border-white/30 text-white hover:bg-white/10 rounded-2xl">
                 <RotateCcw className="h-4 w-4 mr-2"/>Play Again
               </Button>
