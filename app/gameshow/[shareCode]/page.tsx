@@ -30,6 +30,9 @@ export default function GameshowRouterPage() {
           case 'JEOPARDY':
             router.replace(`/gameshow/${shareCode}/jeopardy${currentSearch}`)
             break
+          case 'SPINWHEEL':
+            router.replace(`/gameshow/${shareCode}/spinwheel${currentSearch}`)
+            break
           default:
             setError(`Unknown game type: ${data.type}`)
         }

@@ -648,6 +648,7 @@ enum GameshowType {
   WWTBAM
   KAHOOT
   JEOPARDY
+  SPINWHEEL
 }
 
 // PlayMode: who is playing
@@ -734,6 +735,12 @@ model Gameshow {
   tierPoints        String?    // JSON array e.g. "[10,25,50,100,200]"
   categoryNames     String?    // JSON array e.g. ["CIT", "PIT", "VAT", "TP", "Other"]
   jeopardyTags      String?    // JSON: {questionId: {category: number, tier: number}}
+
+  // SpinWheel-specific
+  wheelSegments     Int        @default(8)     // Number of wheel segments
+  wheelMinPoints    Int        @default(100)   // Min points a segment can award
+  wheelMaxPoints    Int        @default(1000)  // Max points a segment can award
+  wheelDeductOnWrong Boolean   @default(false) // Deduct the spun points on wrong answer
 
   // Multiplayer settings
   maxPlayers        Int        @default(4)

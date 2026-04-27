@@ -17,7 +17,7 @@ import { Loader2, Plus, Trash2, ExternalLink, Copy, Gamepad2, Pencil, BarChart2,
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs'
 import { ImagePicker } from '@/components/ui/image-picker'
 
-type GameshowType = 'WWTBAM' | 'KAHOOT' | 'JEOPARDY'
+type GameshowType = 'WWTBAM' | 'KAHOOT' | 'JEOPARDY' | 'SPINWHEEL'
 type PlayMode = 'SINGLE' | 'LOCAL' | 'ONLINE' | 'BUZZ'
 type SelectionMode = 'LINEAR' | 'FREE_CHOICE'
 type ScoringMode = 'SPEED_ACCURACY' | 'ACCURACY_ONLY'
@@ -71,12 +71,14 @@ const TYPE_LABELS: Record<GameshowType, string> = {
   WWTBAM: '🏆 Who Wants to be a Millionaire',
   KAHOOT: '🎮 Kahoot',
   JEOPARDY: '📋 Jeopardy',
+  SPINWHEEL: '🎡 Spin Wheel',
 }
 
 const TYPE_COLORS: Record<GameshowType, string> = {
   WWTBAM: 'bg-yellow-50 border-yellow-200 text-yellow-800',
   KAHOOT: 'bg-purple-50 border-purple-200 text-purple-800',
   JEOPARDY: 'bg-blue-50 border-blue-200 text-blue-800',
+  SPINWHEEL: 'bg-pink-50 border-pink-200 text-pink-800',
 }
 
 const PLAY_MODE_LABELS: Record<PlayMode, string> = {
@@ -119,6 +121,11 @@ const emptyForm = {
   coverImage: '',
   categoryNames: '[]',
   jeopardyTags: '{}',
+  // SpinWheel settings
+  wheelSegments: '8',
+  wheelMinPoints: '100',
+  wheelMaxPoints: '1000',
+  wheelDeductOnWrong: 'false',
 }
 
 export default function GameshowsPage() {
@@ -218,6 +225,10 @@ export default function GameshowsPage() {
       coverImage: g.coverImage ?? '',
       categoryNames: g.categoryNames ?? '[]',
       jeopardyTags: g.jeopardyTags ?? '{}',
+      wheelSegments: String((g as any).wheelSegments ?? 8),
+      wheelMinPoints: String((g as any).wheelMinPoints ?? 100),
+      wheelMaxPoints: String((g as any).wheelMaxPoints ?? 1000),
+      wheelDeductOnWrong: String((g as any).wheelDeductOnWrong ?? false),
     })
     setSettingsTab('general')
     setDialogOpen(true)
@@ -265,6 +276,10 @@ export default function GameshowsPage() {
         coverImage: (form as any).coverImage?.trim() || null,
         categoryNames: (form as any).categoryNames || '[]',
         jeopardyTags: (form as any).jeopardyTags || '{}',
+        wheelSegments: parseInt((form as any).wheelSegments) || 8,
+        wheelMinPoints: parseInt((form as any).wheelMinPoints) || 100,
+        wheelMaxPoints: parseInt((form as any).wheelMaxPoints) || 1000,
+        wheelDeductOnWrong: (form as any).wheelDeductOnWrong === 'true',
       }
 
       let res: Response
@@ -558,6 +573,7 @@ export default function GameshowsPage() {
                     <SelectItem value="KAHOOT">🎮 Kahoot — Fast-paced color buttons</SelectItem>
                     <SelectItem value="WWTBAM">🏆 Who Wants to Be a Millionaire</SelectItem>
                     <SelectItem value="JEOPARDY">📋 Jeopardy — Category board</SelectItem>
+                    <SelectItem value="SPINWHEEL">🎡 Spin Wheel — Spin to earn points</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
@@ -686,6 +702,38 @@ export default function GameshowsPage() {
                       <Input type="number" min="10" value={form.streakBonus} onChange={e => setForm({ ...form, streakBonus: e.target.value })} />
                     </div>
                   )}
+                </div>
+              )}
+
+              {/* SpinWheel-specific */}
+              {form.type === 'SPINWHEEL' && (
+                <div className="space-y-3 pt-2 border-t">
+                  <p className="text-xs font-semibold text-gray-500 uppercase tracking-wide">Spin Wheel Settings</p>
+                  <div className="grid grid-cols-3 gap-3">
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">Wheel segments</Label>
+                      <Input type="number" min="4" max="20"
+                        value={(form as any).wheelSegments}
+                        onChange={e => setForm({ ...form, wheelSegments: e.target.value } as any)}
+                        className="h-7 text-xs" />
+                      <p className="text-xs text-gray-400">Default = no. of questions</p>
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">Min points per segment</Label>
+                      <Input type="number" min="10" step="10"
+                        value={(form as any).wheelMinPoints}
+                        onChange={e => setForm({ ...form, wheelMinPoints: e.target.value } as any)}
+                        className="h-7 text-xs" />
+                    </div>
+                    <div className="space-y-1.5">
+                      <Label className="text-xs">Max points per segment</Label>
+                      <Input type="number" min="10" step="50"
+                        value={(form as any).wheelMaxPoints}
+                        onChange={e => setForm({ ...form, wheelMaxPoints: e.target.value } as any)}
+                        className="h-7 text-xs" />
+                    </div>
+                  </div>
+                  <BoolCheckbox k="wheelDeductOnWrong" label="Deduct spun points on wrong answer (players can go negative)" />
                 </div>
               )}
 

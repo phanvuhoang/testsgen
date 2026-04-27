@@ -4,10 +4,17 @@ import { parseModelId, callAI, parseJSONFromResponse } from '@/lib/ai'
 
 export async function POST(req: NextRequest, { params }: { params: { id: string } }) {
   const body = await req.json()
-  const { action, caseText, sectionId, modelId, topicName, regenNumbers, updateYear, updateRegulations } = body
+  const { action, caseText, sampleContents, sectionId, modelId, topicName, regenNumbers, updateYear, updateRegulations, mix } = body
 
-  if (!action || !caseText) {
+  if (!action) {
     return NextResponse.json({ error: 'Missing required fields' }, { status: 400 })
+  }
+
+  // Require either caseText or at least one sampleContent
+  const hasCaseText = typeof caseText === 'string' && caseText.trim()
+  const hasSamples = Array.isArray(sampleContents) && sampleContents.length > 0
+  if (!hasCaseText && !hasSamples) {
+    return NextResponse.json({ error: 'Missing case text or sample contents' }, { status: 400 })
   }
 
   const { provider, model } = parseModelId(modelId || 'claudible:1')
@@ -35,10 +42,39 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     }
 
     const optionsSection = optionLines.length > 0
-      ? `\nAPPLY THESE TRANSFORMATIONS TO THE CASE AND QUESTION:\n${optionLines.join('\n')}\n`
+      ? `\nAPPLY THESE TRANSFORMATIONS:\n${optionLines.join('\n')}\n`
       : ''
 
-    const prompt = `You are an expert tax exam question writer.
+    let prompt: string
+
+    if (hasSamples && mix && (sampleContents as string[]).length >= 2) {
+      // MIX MODE: combine multiple sample cases into one new scenario
+      const samplesBlock = (sampleContents as string[])
+        .map((c, i) => `--- SAMPLE ${i + 1} ---\n${c.trim()}`)
+        .join('\n\n')
+
+      prompt = `You are an expert tax exam question writer.
+You are given ${(sampleContents as string[]).length} sample case scenarios. Your task is to CREATIVELY MIX and COMBINE the factual data, entity types, transaction types, and tax issues from these samples into ONE new, coherent case scenario. Then write a question and full model answer based on the new mixed case.
+
+Do NOT simply concatenate the samples — weave their elements together into a single realistic narrative that tests the combined tax concepts.
+${optionsSection}
+Return ONLY valid JSON (no markdown):
+{
+  "questionPrompt": "Question: ...",
+  "modelAnswer": "<p>...</p> or HTML table with step-by-step working"
+}
+
+SECTION TYPE: ${section?.questionType || 'SCENARIO'}
+TOPIC: ${topicName || 'Tax'}
+
+${samplesBlock}
+${hasCaseText ? `\nADDITIONAL CONTEXT / INSTRUCTIONS FROM USER:\n${caseText}` : ''}
+`
+    } else {
+      // SINGLE or no-mix mode: use caseText (or first sample if no caseText)
+      const effectiveCaseText = hasCaseText ? caseText : (sampleContents as string[])[0]
+
+      prompt = `You are an expert tax exam question writer.
 Given the following case scenario, write one question that tests understanding of the tax issues, and provide a full model answer.
 ${optionsSection}
 Return ONLY valid JSON in this format (no markdown):
@@ -48,11 +84,13 @@ Return ONLY valid JSON in this format (no markdown):
 }
 
 CASE SCENARIO:
-${caseText}
+${effectiveCaseText}
 
 SECTION TYPE: ${section?.questionType || 'SCENARIO'}
 TOPIC: ${topicName || 'Tax'}
 `
+    }
+
     const text = await callAI(provider, model, prompt)
     const parsed = parseJSONFromResponse(text)
     return NextResponse.json({ result: parsed[0] || { questionPrompt: text, modelAnswer: null } })
