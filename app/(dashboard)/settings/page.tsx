@@ -23,10 +23,15 @@ type SettingsMap = {
   openrouter_model2: string
 }
 
+// Default DeepSeek generation/grading model — actual runtime value is read from
+// AI_MODEL_GENERATION / AI_MODEL_GRADING env vars on the server. This is only the
+// client-side fallback shown in the UI before settings load.
+const DEFAULT_DEEPSEEK_MODEL = 'deepseek-v4-pro'
+
 const DEFAULTS: SettingsMap = {
   ai_provider: 'deepseek',
-  ai_model_generation: 'deepseek-reasoner',
-  ai_model_grading: 'deepseek-reasoner',
+  ai_model_generation: DEFAULT_DEEPSEEK_MODEL,
+  ai_model_grading: DEFAULT_DEEPSEEK_MODEL,
   app_name: 'TestsGen',
   openrouter_model1: 'xiaomi/mimo-v2-pro',
   openrouter_model2: 'qwen/qwen3-plus',
@@ -126,7 +131,7 @@ export default function SettingsPage() {
   }
 
   const allModels = [
-    `deepseek:deepseek-reasoner`,
+    `deepseek:${settings.ai_model_generation || DEFAULT_DEEPSEEK_MODEL}`,
     `deepseek:deepseek-chat`,
     `openrouter:${settings.openrouter_model1}`,
     `openrouter:${settings.openrouter_model2}`,

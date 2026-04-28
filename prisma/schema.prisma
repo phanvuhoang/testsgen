@@ -319,7 +319,7 @@ model Question {
   optionExplanations Json?          // {A: "...", B: "...", C: "...", D: "..."}
   syllabusCode       String?        // e.g. "C2d, C2n"
   regulationRefs     String?        // e.g. "Article 9, Decree 320/2025/ND-CP"
-  generatedBy        String?        // AI model used, e.g. "deepseek:deepseek-reasoner"
+  generatedBy        String?        // AI model used, e.g. "deepseek:deepseek-v4-pro" or "openrouter:qwen/qwen3-plus"
   createdAt          DateTime       @default(now())
 
   // Relations

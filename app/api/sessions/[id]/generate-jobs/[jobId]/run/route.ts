@@ -276,7 +276,7 @@ export async function POST(_req: NextRequest, { params }: { params: { id: string
                   if (q.sampleRef) refParts.push(`Sample ref: ${String(q.sampleRef)}`)
                   return refParts.length > 0 ? refParts.join(' | ') : undefined
                 })(),
-                generatedBy: modelId || 'deepseek:deepseek-reasoner',
+                generatedBy: modelId || `deepseek:${process.env.AI_MODEL_GENERATION || 'deepseek-v4-pro'}`,
               },
             })
             progress++

@@ -18,6 +18,9 @@ export type AIModelChoice = {
   isDefault?: boolean
 }
 
+// Default fallback for the DeepSeek generation model when AI_MODEL_GENERATION is unset.
+export const DEFAULT_DEEPSEEK_GENERATION_MODEL = 'deepseek-v4-pro'
+
 export function getAvailableModels(): AIModelChoice[] {
   const openrouterModel1 = process.env.OPENROUTER_MODEL1 || 'xiaomi/mimo-v2-pro'
   const openrouterModel2 = process.env.OPENROUTER_MODEL2 || 'qwen/qwen3-plus'
@@ -30,6 +33,7 @@ export function getAvailableModels(): AIModelChoice[] {
   const openaiModel1     = process.env.OPENAI_MODEL1 || ''
   const openaiModel2     = process.env.OPENAI_MODEL2 || ''
   const hasOpenAI        = !!process.env.OPENAI_API_KEY
+  const deepseekGenerationModel = process.env.AI_MODEL_GENERATION || DEFAULT_DEEPSEEK_GENERATION_MODEL
 
   const models: AIModelChoice[] = [
     {
@@ -94,17 +98,17 @@ export function getAvailableModels(): AIModelChoice[] {
       model: openaiModel2,
     }] : []),
     {
-      id: 'deepseek:deepseek-reasoner',
-      label: 'DeepSeek Reasoner',
+      id: `deepseek:${deepseekGenerationModel}`,
+      label: `DeepSeek — ${deepseekGenerationModel}`,
       provider: 'deepseek',
-      model: 'deepseek-reasoner',
+      model: deepseekGenerationModel,
     },
   ]
 
   return models
 }
 
-/** Parse a model choice id like "deepseek:deepseek-reasoner" → { provider, model } */
+/** Parse a model choice id like "deepseek:deepseek-v4-pro" → { provider, model } */
 export function parseModelId(modelId: string): { provider: string; model: string } {
   const idx = modelId.indexOf(':')
   if (idx === -1) return { provider: 'deepseek', model: modelId }
@@ -127,6 +131,10 @@ export function parseModelId(modelId: string): { provider: string; model: string
     return { provider: 'openai', model: modelPart }
   }
 
+  if (provider === 'deepseek' && modelPart === 'server-default') {
+    return { provider: 'deepseek', model: process.env.AI_MODEL_GENERATION || DEFAULT_DEEPSEEK_GENERATION_MODEL }
+  }
+
   return { provider, model: modelPart }
 }
 
@@ -139,8 +147,8 @@ async function getAISettings() {
   settings.forEach((s) => { map[s.key] = s.value })
   return {
     provider: map.ai_provider || process.env.AI_PROVIDER || 'deepseek',
-    generationModel: map.ai_model_generation || process.env.AI_MODEL_GENERATION || 'deepseek-reasoner',
-    gradingModel: map.ai_model_grading || process.env.AI_MODEL_GRADING || 'deepseek-reasoner',
+    generationModel: map.ai_model_generation || process.env.AI_MODEL_GENERATION || DEFAULT_DEEPSEEK_GENERATION_MODEL,
+    gradingModel: map.ai_model_grading || process.env.AI_MODEL_GRADING || DEFAULT_DEEPSEEK_GENERATION_MODEL,
   }
 }
 

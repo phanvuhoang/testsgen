@@ -47,12 +47,16 @@ type Question = {
 
 function resolveModelLabel(generatedBy: string | null): string {
   if (!generatedBy) return ''
+  // Maps stored generatedBy values (id format "provider:model") to display labels.
+  // The deepseek-reasoner entry is kept for backward-compat with historical questions
+  // that were generated before AI_MODEL_GENERATION env var was introduced.
   const labelMap: Record<string, string> = {
     'claudible:1': 'Claudible (default)',
     'claudible:2': 'Claudible (model2)',
     'anthropic:1': 'Anthropic (model1)',
     'anthropic:2': 'Anthropic (model2)',
     'deepseek:deepseek-reasoner': 'DeepSeek Reasoner',
+    'deepseek:server-default': 'DeepSeek (default)',
   }
   if (labelMap[generatedBy]) return labelMap[generatedBy]
   return generatedBy.split(':').pop() || generatedBy
