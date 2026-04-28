@@ -352,10 +352,12 @@ model MockExam {
 }
 
 model MockExamSection {
-  id                  String @id @default(cuid())
-  mockExamId          String
-  sectionId           String
-  questionsToDrawCount Int    @default(5)
+  id                   String  @id @default(cuid())
+  mockExamId           String
+  sectionId            String
+  questionsToDrawCount Int     @default(5)
+  topicBreakdown       String? // JSON: [{topicName: string, count: number}]
+  questionTypes        String? // JSON: [{type: string, count: number}]
 
   // Relations
   mockExam MockExam    @relation(fields: [mockExamId], references: [id], onDelete: Cascade)

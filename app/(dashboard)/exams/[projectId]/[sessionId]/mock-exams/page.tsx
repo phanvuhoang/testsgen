@@ -12,8 +12,9 @@ import { Badge } from '@/components/ui/badge'
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog'
 import { Checkbox } from '@/components/ui/checkbox'
 import { Skeleton } from '@/components/ui/skeleton'
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useToast } from '@/components/ui/use-toast'
-import { Plus, Play, BarChart2, Loader2, ChevronUp, ChevronDown, ChevronRight, Wand2, ListChecks } from 'lucide-react'
+import { Plus, Play, BarChart2, Loader2, ChevronUp, ChevronDown, ChevronRight, Wand2, ListChecks, Settings2, X } from 'lucide-react'
 
 type MockExam = {
   id: string; name: string; duration: number; passMark: number; status: string
@@ -32,6 +33,17 @@ type DraftSection = {
 
 type BankQ = { id: string; stem: string; questionType: string; topic: string | null; status: string }
 type SampleQ = { id: string; title: string | null; content: string; questionType: string; topicName: string | null; syllabusCode: string | null; sectionId?: string | null }
+type TopicRow = { topicName: string; count: number }
+type TypeRow = { type: string; count: number }
+
+const QUESTION_TYPE_OPTIONS = [
+  { value: 'MCQ_SINGLE', label: 'MCQ (Single)' },
+  { value: 'MCQ_MULTIPLE', label: 'MCQ (Multiple)' },
+  { value: 'SHORT_ANSWER', label: 'Short Answer' },
+  { value: 'SCENARIO', label: 'Scenario' },
+  { value: 'ESSAY', label: 'Essay' },
+  { value: 'FILL_BLANK', label: 'Fill in the Blank' },
+]
 
 function parseSyllabusIssues(sc: string | null) {
   if (!sc) return { code: '', issues: [] as string[] }
@@ -57,6 +69,11 @@ export default function MockExamsPage() {
 
   // Step 1 — editable section draft
   const [draftSections, setDraftSections] = useState<DraftSection[]>([])
+
+  // Step 1 — per-section topic/type breakdown (editable)
+  const [expandedSectionCfg, setExpandedSectionCfg] = useState<string | null>(null)
+  const [sectionTopicRows, setSectionTopicRows] = useState<Record<string, TopicRow[]>>({})
+  const [sectionTypeRows, setSectionTypeRows] = useState<Record<string, TypeRow[]>>({})
 
   // Step 2 Manual — questions per section
   const [bankQsBySection, setBankQsBySection] = useState<Record<string, BankQ[]>>({})
@@ -92,6 +109,16 @@ export default function MockExamsPage() {
       questionTypes: s.questionTypes,
       topicBreakdown: s.topicBreakdown,
     })))
+    // Initialize per-section topic/type rows from existing section config
+    const initTopics: Record<string, TopicRow[]> = {}
+    const initTypes: Record<string, TypeRow[]> = {}
+    for (const s of sections) {
+      try { initTopics[s.id] = s.topicBreakdown ? JSON.parse(s.topicBreakdown).map((t: any) => ({ topicName: t.topicName, count: t.count || 1 })) : [] } catch { initTopics[s.id] = [] }
+      try { initTypes[s.id] = s.questionTypes ? JSON.parse(s.questionTypes).map((t: any) => ({ type: t.type, count: t.count || 1 })) : [] } catch { initTypes[s.id] = [] }
+    }
+    setSectionTopicRows(initTopics)
+    setSectionTypeRows(initTypes)
+    setExpandedSectionCfg(null)
     setForm({ name: '', duration: 120, instructions: '', passMark: 50, passMessage: 'Congratulations! You passed.', failMessage: 'Unfortunately you did not pass. Please try again.' })
     setManualSelected({})
     setCreateStep(1)
@@ -162,13 +189,25 @@ export default function MockExamsPage() {
     return ds.drawCount
   }
 
+  const getEffectiveDraw = (sectionId: string, baseCount: number): number => {
+    const topics = sectionTopicRows[sectionId] || []
+    const types = sectionTypeRows[sectionId] || []
+    if (topics.length > 0) return topics.reduce((s, t) => s + t.count, 0)
+    if (types.length > 0) return types.reduce((s, t) => s + t.count, 0)
+    return baseCount
+  }
+
   const handleCreate = async () => {
     if (!form.name.trim()) { toast({ title: 'Enter exam name', variant: 'destructive' }); return }
     setIsCreating(true)
     try {
       const sectionDraws = draftSections.map(ds => ({
         sectionId: ds.sectionId,
-        questionsToDrawCount: getDrawCount(ds),
+        questionsToDrawCount: createMode === 'manual' ? getDrawCount(ds) : getEffectiveDraw(ds.sectionId, ds.drawCount),
+        topicBreakdown: createMode !== 'manual' && (sectionTopicRows[ds.sectionId]?.length > 0)
+          ? JSON.stringify(sectionTopicRows[ds.sectionId]) : null,
+        questionTypes: createMode !== 'manual' && (sectionTypeRows[ds.sectionId]?.length > 0)
+          ? JSON.stringify(sectionTypeRows[ds.sectionId]) : null,
       }))
       const res = await fetch(`/api/sessions/${sessionId}/mock-exams`, {
         method: 'POST',
@@ -290,45 +329,116 @@ export default function MockExamsPage() {
               {/* Section list */}
               <div>
                 <Label className="mb-2 block text-sm font-semibold">Section Requirements</Label>
-                <p className="text-xs text-gray-400 mb-3">Drag-to-reorder via ↑↓. Adjust the question count to draw per section.</p>
+                <p className="text-xs text-gray-400 mb-3">Reorder via ↑↓. Click <Settings2 className="inline h-3 w-3" /> to set per-topic or per-type question counts.</p>
                 {draftSections.length === 0 ? (
                   <p className="text-sm text-gray-400 text-center py-4">No sections defined. Add sections first.</p>
                 ) : (
                   <div className="space-y-2">
-                    {draftSections.map((ds, idx) => (
-                      <div key={ds.sectionId} className="flex items-center gap-2 p-3 border rounded-lg bg-gray-50">
-                        <div className="flex flex-col gap-0.5">
-                          <button
-                            className="h-5 w-5 flex items-center justify-center rounded hover:bg-gray-200 text-gray-400 disabled:opacity-30"
-                            onClick={() => moveSection(idx, -1)} disabled={idx === 0}
-                          ><ChevronUp className="h-3 w-3"/></button>
-                          <button
-                            className="h-5 w-5 flex items-center justify-center rounded hover:bg-gray-200 text-gray-400 disabled:opacity-30"
-                            onClick={() => moveSection(idx, 1)} disabled={idx === draftSections.length - 1}
-                          ><ChevronDown className="h-3 w-3"/></button>
-                        </div>
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-medium truncate">{ds.name}</p>
-                          <div className="flex flex-wrap gap-1 mt-0.5">
-                            {getSectionTypesBadges(ds)}
+                    {draftSections.map((ds, idx) => {
+                      const isExpanded = expandedSectionCfg === ds.sectionId
+                      const topicRows = sectionTopicRows[ds.sectionId] || []
+                      const typeRows = sectionTypeRows[ds.sectionId] || []
+                      const hasBreakdown = topicRows.length > 0 || typeRows.length > 0
+                      const effectiveDraw = getEffectiveDraw(ds.sectionId, ds.drawCount)
+                      return (
+                        <div key={ds.sectionId} className="border rounded-lg overflow-hidden">
+                          {/* Section header row */}
+                          <div className="flex items-center gap-2 p-3 bg-gray-50">
+                            <div className="flex flex-col gap-0.5">
+                              <button className="h-5 w-5 flex items-center justify-center rounded hover:bg-gray-200 text-gray-400 disabled:opacity-30"
+                                onClick={() => moveSection(idx, -1)} disabled={idx === 0}><ChevronUp className="h-3 w-3"/></button>
+                              <button className="h-5 w-5 flex items-center justify-center rounded hover:bg-gray-200 text-gray-400 disabled:opacity-30"
+                                onClick={() => moveSection(idx, 1)} disabled={idx === draftSections.length - 1}><ChevronDown className="h-3 w-3"/></button>
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-medium truncate">{ds.name}</p>
+                              {hasBreakdown && (
+                                <div className="flex flex-wrap gap-1 mt-0.5">
+                                  {topicRows.map((t, i) => <span key={i} className="text-xs bg-blue-50 text-blue-700 px-1.5 py-0.5 rounded">{t.topicName} ×{t.count}</span>)}
+                                  {typeRows.map((t, i) => <span key={i} className="text-xs bg-purple-50 text-purple-700 px-1.5 py-0.5 rounded">{t.type.replace('MCQ_SINGLE','MCQ').replace('MCQ_MULTIPLE','MCQ-M').replace('SHORT_ANSWER','Short')} ×{t.count}</span>)}
+                                </div>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-1.5 shrink-0">
+                              <Label className="text-xs text-gray-500">Draw:</Label>
+                              {hasBreakdown ? (
+                                <span className="text-sm font-bold text-[#028a39] w-10 text-center">{effectiveDraw}</span>
+                              ) : (
+                                <Input type="number" min={0} value={ds.drawCount}
+                                  onChange={e => setDraftSections(prev => prev.map((s, i) => i === idx ? {...s, drawCount: Number(e.target.value)||0} : s))}
+                                  className="w-14 h-7 text-xs text-center" />
+                              )}
+                              <span className="text-xs text-gray-400">q</span>
+                              <button
+                                onClick={() => setExpandedSectionCfg(isExpanded ? null : ds.sectionId)}
+                                className={`h-6 w-6 flex items-center justify-center rounded transition-colors ${isExpanded ? 'bg-[#028a39] text-white' : 'bg-gray-200 text-gray-500 hover:bg-gray-300'}`}
+                                title="Configure topic/type breakdown"
+                              >
+                                <Settings2 className="h-3.5 w-3.5" />
+                              </button>
+                            </div>
                           </div>
+
+                          {/* Expandable config panel */}
+                          {isExpanded && (
+                            <div className="border-t p-3 bg-white">
+                              <div className="grid grid-cols-2 gap-4">
+                                {/* Topic breakdown */}
+                                <div>
+                                  <p className="text-xs font-semibold text-gray-600 mb-1.5">By Topic</p>
+                                  <div className="space-y-1.5">
+                                    {topicRows.map((row, i) => (
+                                      <div key={i} className="flex items-center gap-1">
+                                        <Input value={row.topicName} placeholder="Topic name"
+                                          onChange={e => setSectionTopicRows(prev => ({ ...prev, [ds.sectionId]: prev[ds.sectionId].map((r, j) => j === i ? {...r, topicName: e.target.value} : r) }))}
+                                          className="flex-1 h-7 text-xs" />
+                                        <Input type="number" value={row.count} min={1}
+                                          onChange={e => setSectionTopicRows(prev => ({ ...prev, [ds.sectionId]: prev[ds.sectionId].map((r, j) => j === i ? {...r, count: Number(e.target.value)||1} : r) }))}
+                                          className="w-12 h-7 text-xs text-center" />
+                                        <button onClick={() => setSectionTopicRows(prev => ({ ...prev, [ds.sectionId]: prev[ds.sectionId].filter((_, j) => j !== i) }))} className="text-gray-300 hover:text-red-400"><X className="h-3.5 w-3.5" /></button>
+                                      </div>
+                                    ))}
+                                    <button onClick={() => setSectionTopicRows(prev => ({ ...prev, [ds.sectionId]: [...(prev[ds.sectionId] || []), {topicName: '', count: 1}] }))}
+                                      className="text-xs text-[#028a39] hover:text-[#026d2d]">+ Add topic</button>
+                                  </div>
+                                </div>
+                                {/* Question type breakdown */}
+                                <div>
+                                  <p className="text-xs font-semibold text-gray-600 mb-1.5">By Question Type</p>
+                                  <div className="space-y-1.5">
+                                    {typeRows.map((row, i) => (
+                                      <div key={i} className="flex items-center gap-1">
+                                        <Select value={row.type} onValueChange={v => setSectionTypeRows(prev => ({ ...prev, [ds.sectionId]: prev[ds.sectionId].map((r, j) => j === i ? {...r, type: v} : r) }))}>
+                                          <SelectTrigger className="flex-1 h-7 text-xs"><SelectValue /></SelectTrigger>
+                                          <SelectContent>
+                                            {QUESTION_TYPE_OPTIONS.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}
+                                          </SelectContent>
+                                        </Select>
+                                        <Input type="number" value={row.count} min={1}
+                                          onChange={e => setSectionTypeRows(prev => ({ ...prev, [ds.sectionId]: prev[ds.sectionId].map((r, j) => j === i ? {...r, count: Number(e.target.value)||1} : r) }))}
+                                          className="w-12 h-7 text-xs text-center" />
+                                        <button onClick={() => setSectionTypeRows(prev => ({ ...prev, [ds.sectionId]: prev[ds.sectionId].filter((_, j) => j !== i) }))} className="text-gray-300 hover:text-red-400"><X className="h-3.5 w-3.5" /></button>
+                                      </div>
+                                    ))}
+                                    <button onClick={() => setSectionTypeRows(prev => ({ ...prev, [ds.sectionId]: [...(prev[ds.sectionId] || []), {type: 'SCENARIO', count: 1}] }))}
+                                      className="text-xs text-[#028a39] hover:text-[#026d2d]">+ Add type</button>
+                                  </div>
+                                </div>
+                              </div>
+                              {hasBreakdown && (
+                                <p className="text-xs text-gray-400 mt-2 text-right">
+                                  Will draw <strong className="text-[#028a39]">{effectiveDraw} questions</strong> from this section
+                                </p>
+                              )}
+                            </div>
+                          )}
                         </div>
-                        <div className="flex items-center gap-2 shrink-0">
-                          <Label className="text-xs text-gray-500 whitespace-nowrap">Draw:</Label>
-                          <Input
-                            type="number" min={0}
-                            value={ds.drawCount}
-                            onChange={e => setDraftSections(prev => prev.map((s, i) => i === idx ? {...s, drawCount: Number(e.target.value)||0} : s))}
-                            className="w-16 h-7 text-xs text-center"
-                          />
-                          <span className="text-xs text-gray-400">q</span>
-                        </div>
-                      </div>
-                    ))}
+                      )
+                    })}
                   </div>
                 )}
                 <p className="text-xs text-gray-400 mt-2">
-                  Total: <strong>{draftSections.reduce((s, d) => s + d.drawCount, 0)} questions</strong>
+                  Total: <strong>{draftSections.reduce((s, d) => s + getEffectiveDraw(d.sectionId, d.drawCount), 0)} questions</strong>
                 </p>
               </div>
 

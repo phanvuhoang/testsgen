@@ -66,7 +66,7 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
   if (!exam) return NextResponse.json({ error: 'Not found' }, { status: 404 })
   if (exam.status !== 'PUBLISHED') return NextResponse.json({ error: 'Exam not published' }, { status: 400 })
 
-  // Draw random approved questions from each section
+  // Draw approved questions from each section, respecting topic/type breakdown if set
   const drawnQuestions: {
     id: string
     stem: string
@@ -75,22 +75,35 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
     marks: number
     sectionName: string
   }[] = []
-  
+
+  function mapQ(q: any) {
+    return { id: q.id, stem: q.stem, questionType: q.questionType, options: q.options, marks: q.marks, sectionName: q.section.name }
+  }
+
   for (const secConfig of exam.sections) {
-    const sectionQuestions = await db.question.findMany({
-      where: { sectionId: secConfig.sectionId, status: 'APPROVED' },
-      include: { section: { select: { name: true } } },
-    })
-    const shuffled = shuffleArray(sectionQuestions)
-    const drawn = shuffled.slice(0, secConfig.questionsToDrawCount)
-    drawnQuestions.push(...drawn.map((q) => ({
-      id: q.id,
-      stem: q.stem,
-      questionType: q.questionType,
-      options: q.options,
-      marks: q.marks,
-      sectionName: q.section.name,
-    })))
+    const baseWhere = { sectionId: secConfig.sectionId, status: 'APPROVED' as const }
+    const topicBreakdown: { topicName: string; count: number }[] | null =
+      (secConfig as any).topicBreakdown ? JSON.parse((secConfig as any).topicBreakdown) : null
+    const questionTypes: { type: string; count: number }[] | null =
+      (secConfig as any).questionTypes ? JSON.parse((secConfig as any).questionTypes) : null
+
+    if (topicBreakdown && topicBreakdown.length > 0) {
+      // Draw per topic
+      for (const tb of topicBreakdown) {
+        const qs = await db.question.findMany({ where: { ...baseWhere, topic: tb.topicName }, include: { section: { select: { name: true } } } })
+        drawnQuestions.push(...shuffleArray(qs).slice(0, tb.count).map(mapQ))
+      }
+    } else if (questionTypes && questionTypes.length > 0) {
+      // Draw per question type
+      for (const qt of questionTypes) {
+        const qs = await db.question.findMany({ where: { ...baseWhere, questionType: qt.type as any }, include: { section: { select: { name: true } } } })
+        drawnQuestions.push(...shuffleArray(qs).slice(0, qt.count).map(mapQ))
+      }
+    } else {
+      // Random draw (default)
+      const qs = await db.question.findMany({ where: baseWhere, include: { section: { select: { name: true } } } })
+      drawnQuestions.push(...shuffleArray(qs).slice(0, secConfig.questionsToDrawCount).map(mapQ))
+    }
   }
 
   const attempt = await db.attempt.create({

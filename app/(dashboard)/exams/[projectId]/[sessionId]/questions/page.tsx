@@ -877,30 +877,32 @@ export default function ExamQuestionsPage() {
                     renderEditPanel(q)
                   ) : (
                     <div className="space-y-3 text-sm">
-                      {/* Full stem */}
-                      <div className="text-sm whitespace-pre-line">
-                        {q.stem.split('\n').map((line, i) => {
-                          const caseMatch = line.match(/^(Case:\s*)(.*)/i)
-                          const questionMatch = line.match(/^(Question:\s*)(.*)/i)
-                          if (caseMatch) {
-                            return (
-                              <p key={i} className="mb-2">
-                                <span className="font-semibold text-gray-500 text-xs uppercase tracking-wide">Case: </span>
-                                <span>{caseMatch[2]}</span>
-                              </p>
-                            )
-                          }
-                          if (questionMatch) {
-                            return (
-                              <p key={i} className="mt-2 font-semibold">
-                                <span className="text-[#028a39] font-bold">Question: </span>
-                                <span className="font-bold">{questionMatch[2]}</span>
-                              </p>
-                            )
-                          }
-                          return <p key={i}>{line || ' '}</p>
-                        })}
-                      </div>
+                      {/* Full stem — HTML-aware, splits Case/Question if present */}
+                      {(() => {
+                        const stem = q.stem
+                        const caseContent = stem.match(/^Case:\s*([\s\S]*?)(?=\n\s*Question:)/i)?.[1]?.trim()
+                        const questionContent = stem.match(/(?:^|\n)\s*Question:\s*([\s\S]*)/i)?.[1]?.trim()
+                        const htmlClass = 'prose prose-sm max-w-none [&_table]:border-collapse [&_table]:w-full [&_th]:border [&_th]:border-gray-300 [&_th]:bg-gray-100 [&_th]:px-2 [&_th]:py-1 [&_td]:border [&_td]:border-gray-200 [&_td]:px-2 [&_td]:py-1 [&_p]:mb-1'
+                        if (caseContent !== undefined || questionContent !== undefined) {
+                          return (
+                            <div className="space-y-3">
+                              {caseContent !== undefined && (
+                                <div>
+                                  <span className="text-xs font-semibold text-gray-400 uppercase tracking-wide">Case</span>
+                                  <div className={`mt-1 ${htmlClass}`} dangerouslySetInnerHTML={{ __html: caseContent || '' }} />
+                                </div>
+                              )}
+                              {questionContent !== undefined && (
+                                <p className="font-semibold text-sm mt-2">
+                                  <span className="text-[#028a39] font-bold">Question: </span>
+                                  <span>{questionContent}</span>
+                                </p>
+                              )}
+                            </div>
+                          )
+                        }
+                        return <div className={htmlClass} dangerouslySetInnerHTML={{ __html: stem }} />
+                      })()}
 
                       {/* Show Answer toggle */}
                       <button

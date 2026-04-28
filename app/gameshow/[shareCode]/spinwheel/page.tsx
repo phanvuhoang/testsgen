@@ -186,6 +186,7 @@ export default function SpinWheelPage() {
   const [wheelSpinning, setWheelSpinning] = useState(false)
   const [spunPoints, setSpunPoints] = useState(0)
   const [spunSegIdx, setSpunSegIdx] = useState(0)
+  const [showCustomWheel, setShowCustomWheel] = useState(false)
 
   // Answer state
   const [selectedAnswer, setSelectedAnswer] = useState<string | null>(null)
@@ -409,7 +410,7 @@ export default function SpinWheelPage() {
     setTimeout(() => {
       const cfg = configRef.current!
       setTimeLeft(cfg.timeLimitSeconds)
-      setTimerRunning(false)
+      setTimerRunning(!cfg.clickStartToCount)
       setQuestionStartTime(Date.now())
       audio.stopAll()
       audio.playBg('game-play', 0.4)
@@ -552,10 +553,44 @@ export default function SpinWheelPage() {
             <div className="flex justify-between"><span>Questions</span><span className="text-white font-semibold">{config?.questionsCount ?? config?.questions.length}</span></div>
           </div>
 
-          {/* Wheel preview */}
-          <div className="flex justify-center mb-4 opacity-80">
-            <SpinWheelSVG segments={wheelDisplaySegments.slice(0, Math.min(8, wheelDisplaySegments.length))} rotation={0} spinning={false} />
+          {/* Wheel preview + segment customization */}
+          <div className="flex justify-center mb-2 opacity-80">
+            <SpinWheelSVG segments={wheelDisplaySegments} rotation={0} spinning={false} />
           </div>
+
+          <button
+            onClick={() => setShowCustomWheel(v => !v)}
+            className="w-full text-xs text-pink-300 hover:text-pink-100 mb-3 flex items-center justify-center gap-1"
+          >
+            {showCustomWheel ? '▲' : '▼'} {showCustomWheel ? 'Hide' : 'Customize'} segment values
+          </button>
+
+          {showCustomWheel && (
+            <div className="bg-gray-800/70 rounded-xl p-3 mb-4 border border-gray-700">
+              <p className="text-xs text-gray-400 mb-2">Edit point value for each segment (drag to reorder — coming soon):</p>
+              <div className="grid grid-cols-4 gap-2 mb-2">
+                {segmentValues.map((val, i) => (
+                  <div key={i} className="text-center">
+                    <div className="text-xs mb-1 font-bold" style={{ color: WHEEL_COLORS[i % WHEEL_COLORS.length] }}>
+                      {i + 1}
+                    </div>
+                    <Input
+                      type="number" value={val} min={0} step={50}
+                      onChange={e => {
+                        const v = Math.max(0, parseInt(e.target.value) || 0)
+                        setSegmentValues(prev => prev.map((s, j) => j === i ? v : s))
+                      }}
+                      className="h-8 text-xs text-center bg-gray-700 border-gray-600 text-white px-1"
+                    />
+                  </div>
+                ))}
+              </div>
+              <Button size="sm" variant="outline" className="w-full text-xs border-gray-600 text-gray-400 h-7"
+                onClick={() => { if (config) setSegmentValues(buildSegmentValues(config)) }}>
+                ↺ Regenerate randomly from min/max
+              </Button>
+            </div>
+          )}
 
           <div className="flex gap-2">
             <Button onClick={() => setMusicEnabled(m => !m)} variant="outline" size="sm" className="border-gray-700 text-gray-400">
@@ -728,7 +763,7 @@ export default function SpinWheelPage() {
               dangerouslySetInnerHTML={{ __html: currentQuestion.stem }} />
           </div>
 
-          {!timerRunning && !submitted && (
+          {config?.clickStartToCount && !timerRunning && !submitted && (
             <Button onClick={() => setTimerRunning(true)}
               className="w-full bg-pink-600 hover:bg-pink-500 text-white font-bold mb-4">
               Start Timer

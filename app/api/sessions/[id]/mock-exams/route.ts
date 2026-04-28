@@ -30,9 +30,11 @@ export async function POST(req: NextRequest, { params }: { params: { id: string 
       failMessage: body.failMessage,
       status: 'DRAFT',
       sections: {
-        create: (body.sectionDraws || []).map((d: { sectionId: string; questionsToDrawCount: number }) => ({
+        create: (body.sectionDraws || []).map((d: any) => ({
           sectionId: d.sectionId,
           questionsToDrawCount: d.questionsToDrawCount,
+          ...(d.topicBreakdown ? { topicBreakdown: d.topicBreakdown } : {}),
+          ...(d.questionTypes ? { questionTypes: d.questionTypes } : {}),
         })),
       },
     },
