@@ -604,7 +604,7 @@ export default function ExamQuestionsPage() {
       bySection.get(key)!.qs.push(q)
     }
     const groups: SectionGroup[] = []
-    for (const [secKey, { name: secName, qs }] of bySection) {
+    for (const [secKey, { name: secName, qs }] of Array.from(bySection.entries())) {
       const byTopic = new Map<string, { name: string; qs: Question[] }>()
       for (const q of qs) {
         const tKey = q.topic || '__general__'
