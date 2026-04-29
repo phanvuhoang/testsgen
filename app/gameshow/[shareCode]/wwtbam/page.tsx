@@ -25,6 +25,7 @@ type GameshowConfig = {
   shuffleQuestions: boolean; showLeaderboard: boolean; clickStartToCount: boolean
   buzzerMode: boolean; manualScoring: boolean; buzzButton: boolean
   betEnabled: boolean; betTimes: number; betMultiple: number; betWrongAnswer: string
+  deductOnWrong?: boolean; allowOthersOnIncorrect?: boolean
   maxPlayers: number; shortLink: string | null; quizSetTitle: string; questions: Question[]
 }
 type Player = {
@@ -221,6 +222,13 @@ export default function WwtbamPage() {
   useEffect(() => {
     if (phase === 'setup' && !loading && !joinRoomCode) audio.playBg('wwtbam-opening', 0.5)
   }, [phase, loading])
+
+  // B2c: Ensure Local Multiplayer starts with at least 2 player inputs
+  useEffect(() => {
+    if (config?.playMode === 'LOCAL' && phase === 'setup' && setupNames.length < 2) {
+      setSetupNames(prev => [...prev, ''])
+    }
+  }, [config?.playMode, phase])
 
   // ─── Stop audio on gameover, play podium music ───────────────────────────
   useEffect(() => {
@@ -581,8 +589,8 @@ export default function WwtbamPage() {
     const timePct = Math.max(0, (totalTime - elapsed) / totalTime)
     const base = getPoints(q.difficulty)
     let pts = config?.scoringMode === 'ACCURACY_ONLY'
-      ? (correct ? base : 0)
-      : (correct ? Math.round(base * (0.3 + 0.7 * timePct)) : 0)
+      ? (correct ? base : (config?.deductOnWrong ? -base : 0))
+      : (correct ? Math.round(base * (0.3 + 0.7 * timePct)) : (config?.deductOnWrong ? -base : 0))
     // Apply bet multiplier
     if (isBetting) {
       if (correct) pts = Math.round(pts * (config?.betMultiple ?? 2))

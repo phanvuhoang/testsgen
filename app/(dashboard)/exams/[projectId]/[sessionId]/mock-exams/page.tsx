@@ -14,7 +14,7 @@ import { Checkbox } from '@/components/ui/checkbox'
 import { Skeleton } from '@/components/ui/skeleton'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select'
 import { useToast } from '@/components/ui/use-toast'
-import { Plus, Play, BarChart2, Loader2, ChevronUp, ChevronDown, ChevronRight, Wand2, ListChecks, Settings2, X } from 'lucide-react'
+import { Plus, Play, BarChart2, Loader2, ChevronUp, ChevronDown, ChevronRight, Wand2, ListChecks, Settings2, X, Search, Eye } from 'lucide-react'
 
 type MockExam = {
   id: string; name: string; duration: number; passMark: number; status: string
@@ -31,8 +31,11 @@ type DraftSection = {
   questionTypes: string | null; topicBreakdown: string | null
 }
 
-type BankQ = { id: string; stem: string; questionType: string; topic: string | null; status: string }
-type SampleQ = { id: string; title: string | null; content: string; questionType: string; topicName: string | null; syllabusCode: string | null; sectionId?: string | null }
+type BankQ = { id: string; stem: string; questionType: string; topic: string | null; status: string; options?: string[] | null; correctAnswer?: string | null; modelAnswer?: string | null; markingScheme?: string | null; syllabusCode?: string | null; tags?: string | null }
+type SampleQ = { id: string; title: string | null; content: string; questionType: string; topicName: string | null; syllabusCode: string | null; sectionId?: string | null; answer?: string | null; tags?: string | null }
+type PreviewItem =
+  | { kind: 'bank'; q: BankQ }
+  | { kind: 'sample'; q: SampleQ }
 type TopicRow = { topicName: string; count: number }
 type TypeRow = { type: string; count: number }
 
@@ -80,6 +83,11 @@ export default function MockExamsPage() {
   const [sampleQsBySection, setSampleQsBySection] = useState<Record<string, SampleQ[]>>({})
   const [manualSelected, setManualSelected] = useState<Record<string, Set<string>>>({})
   const [expandedSecId, setExpandedSecId] = useState<string | null>(null)
+  // A3 — search + preview panel
+  const [manualSearch, setManualSearch] = useState('')
+  const [previewItem, setPreviewItem] = useState<PreviewItem | null>(null)
+  const [expandedSourceKey, setExpandedSourceKey] = useState<string | null>(null) // "{secId}:bank" / "{secId}:samples"
+  const [expandedTopicKey, setExpandedTopicKey] = useState<string | null>(null)   // "{secId}:{src}:{topic}"
 
   // Exam form
   const [form, setForm] = useState({
@@ -299,7 +307,7 @@ export default function MockExamsPage() {
 
       {/* ── Create Dialog ── */}
       <Dialog open={showCreate} onOpenChange={setShowCreate}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+        <DialogContent className={createStep === 2 && createMode === 'manual' ? 'max-w-5xl max-h-[90vh] overflow-y-auto' : 'max-w-2xl max-h-[90vh] overflow-y-auto'}>
           <DialogHeader>
             <DialogTitle className="flex items-center gap-2">
               Create Mock Exam
@@ -493,96 +501,306 @@ export default function MockExamsPage() {
                 <span className="text-sm font-semibold">Select Questions per Section</span>
               </div>
               <p className="text-xs text-gray-500">
-                Click questions to include them. The count shown per section = how many will be drawn for this exam.
-                Unchecked questions remain in the bank for future exams.
+                Click questions to include them. Use the search box and click <Eye className="inline h-3 w-3"/> to preview a question on the right.
               </p>
+
+              {/* Search bar */}
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-gray-400" />
+                <Input
+                  className="pl-9 h-8 text-sm"
+                  placeholder="Search questions by text, topic, tag..."
+                  value={manualSearch}
+                  onChange={(e) => setManualSearch(e.target.value)}
+                />
+              </div>
 
               {isLoadingQs ? (
                 <div className="flex items-center justify-center py-8 gap-2 text-gray-400">
                   <Loader2 className="h-4 w-4 animate-spin"/><span className="text-sm">Loading questions…</span>
                 </div>
               ) : (
-                <div className="space-y-3">
-                  {draftSections.map(ds => {
-                    const bankQs = bankQsBySection[ds.sectionId] || []
-                    const sampleQs = sampleQsBySection[ds.sectionId] || []
-                    const sel = manualSelected[ds.sectionId] || new Set()
-                    const isExpanded = expandedSecId === ds.sectionId
-                    return (
-                      <div key={ds.sectionId} className="border rounded-lg overflow-hidden">
-                        <button
-                          className="w-full p-3 flex items-center justify-between bg-gray-50 hover:bg-gray-100 text-left"
-                          onClick={() => setExpandedSecId(isExpanded ? null : ds.sectionId)}
-                        >
-                          <div>
-                            <span className="text-sm font-medium">{ds.name}</span>
-                            <span className="ml-2 text-xs text-gray-400">
-                              {sel.size} selected · {bankQs.length} bank · {sampleQs.length} samples
-                            </span>
-                          </div>
-                          {isExpanded ? <ChevronUp className="h-4 w-4 text-gray-400"/> : <ChevronDown className="h-4 w-4 text-gray-400"/>}
-                        </button>
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+                  {/* Left column: hierarchy */}
+                  <div className="space-y-3 max-h-[60vh] overflow-y-auto pr-1">
+                    {draftSections.map(ds => {
+                      const bankQsAll = bankQsBySection[ds.sectionId] || []
+                      const sampleQsAll = sampleQsBySection[ds.sectionId] || []
+                      const sel = manualSelected[ds.sectionId] || new Set()
 
-                        {isExpanded && (
-                          <div className="p-2 max-h-72 overflow-y-auto space-y-1">
-                            {bankQs.length > 0 && (
-                              <>
-                                <p className="text-xs font-semibold text-gray-400 px-1 pt-1">Question Bank ({bankQs.length})</p>
-                                {bankQs.map(q => (
-                                  <div
-                                    key={q.id}
-                                    className={`flex items-start gap-2 p-2 rounded cursor-pointer transition-colors ${sel.has(q.id) ? 'bg-blue-50 border border-blue-200' : 'hover:bg-gray-50'}`}
-                                    onClick={() => toggleManualQ(ds.sectionId, q.id)}
-                                  >
-                                    <Checkbox checked={sel.has(q.id)} onCheckedChange={() => toggleManualQ(ds.sectionId, q.id)} className="mt-0.5 shrink-0"/>
-                                    <div className="min-w-0 flex-1">
-                                      <div className="flex gap-1 items-center mb-0.5">
-                                        <span className={`text-xs px-1 py-0.5 rounded ${q.status === 'APPROVED' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}`}>{q.status}</span>
-                                        <span className="text-xs text-gray-400">{q.questionType.replace('MCQ_SINGLE','MCQ').replace('SHORT_ANSWER','Short')}</span>
-                                        {q.topic && <span className="text-xs text-[#028a39]">[{q.topic}]</span>}
-                                      </div>
-                                      <p className="text-xs text-gray-700 line-clamp-2">{q.stem.replace(/<[^>]+>/g,' ').trim().slice(0,100)}…</p>
-                                    </div>
-                                  </div>
+                      const matches = (text: string) =>
+                        !manualSearch.trim() || text.toLowerCase().includes(manualSearch.toLowerCase())
+                      const bankQs = bankQsAll.filter(q => matches(
+                        [q.stem, q.topic, q.syllabusCode, q.tags].filter(Boolean).join(' ')
+                      ))
+                      const sampleQs = sampleQsAll.filter(q => matches(
+                        [q.title, q.content, q.topicName, q.syllabusCode, q.tags].filter(Boolean).join(' ')
+                      ))
+
+                      const isExpanded = expandedSecId === ds.sectionId
+                      // Group bank by topic
+                      const bankByTopic: Record<string, BankQ[]> = {}
+                      for (const q of bankQs) {
+                        const tk = q.topic || 'General'
+                        ;(bankByTopic[tk] ||= []).push(q)
+                      }
+                      const sampleByTopic: Record<string, SampleQ[]> = {}
+                      for (const q of sampleQs) {
+                        const tk = q.topicName || 'General'
+                        ;(sampleByTopic[tk] ||= []).push(q)
+                      }
+
+                      const renderQRow = (item: PreviewItem) => {
+                        const id = item.kind === 'bank' ? item.q.id : item.q.id
+                        const tags = item.kind === 'bank'
+                          ? [item.q.questionType.replace('MCQ_SINGLE','MCQ').replace('SHORT_ANSWER','Short'), item.q.topic, item.q.syllabusCode, item.q.tags]
+                          : [item.q.questionType.replace('MCQ_SINGLE','MCQ').replace('SHORT_ANSWER','Short'), item.q.topicName, item.q.syllabusCode, item.q.tags]
+                        const previewText = item.kind === 'bank'
+                          ? item.q.stem.replace(/<[^>]+>/g,' ').trim().slice(0,100)
+                          : (item.q.title || item.q.content.replace(/<[^>]+>/g,' ').trim().slice(0,100))
+                        const isPreviewed = previewItem && (
+                          (previewItem.kind === 'bank' && item.kind === 'bank' && previewItem.q.id === item.q.id) ||
+                          (previewItem.kind === 'sample' && item.kind === 'sample' && previewItem.q.id === item.q.id)
+                        )
+                        return (
+                          <div
+                            key={`${item.kind}-${id}`}
+                            className={`flex items-start gap-2 p-2 rounded cursor-pointer transition-colors border ${
+                              sel.has(id)
+                                ? (item.kind === 'bank' ? 'bg-blue-50 border-blue-200' : 'bg-amber-50 border-amber-200')
+                                : 'border-transparent hover:bg-gray-50'
+                            } ${isPreviewed ? 'ring-2 ring-[#028a39]' : ''}`}
+                            onClick={() => { setPreviewItem(item); toggleManualQ(ds.sectionId, id) }}
+                          >
+                            <Checkbox checked={sel.has(id)} onCheckedChange={() => toggleManualQ(ds.sectionId, id)} className="mt-0.5 shrink-0" onClick={e => e.stopPropagation()}/>
+                            <div className="min-w-0 flex-1">
+                              <div className="flex flex-wrap gap-1 mb-0.5">
+                                {tags.filter(Boolean).slice(0, 4).map((t, i) => (
+                                  <span key={i} className="text-xs px-1 py-0.5 bg-gray-100 text-gray-600 rounded">{t}</span>
                                 ))}
-                              </>
-                            )}
-                            {sampleQs.length > 0 && (
-                              <>
-                                <p className="text-xs font-semibold text-gray-400 px-1 pt-2">Processed Samples ({sampleQs.length})</p>
-                                {sampleQs.map(q => {
-                                  const { code, issues } = parseSyllabusIssues(q.syllabusCode)
-                                  return (
-                                    <div
-                                      key={q.id}
-                                      className={`flex items-start gap-2 p-2 rounded cursor-pointer transition-colors ${sel.has(q.id) ? 'bg-amber-50 border border-amber-200' : 'hover:bg-gray-50'}`}
-                                      onClick={() => toggleManualQ(ds.sectionId, q.id)}
-                                      title={q.content.replace(/<[^>]+>/g,' ').trim().slice(0,300)}
-                                    >
-                                      <Checkbox checked={sel.has(q.id)} onCheckedChange={() => toggleManualQ(ds.sectionId, q.id)} className="mt-0.5 shrink-0"/>
-                                      <div className="min-w-0 flex-1">
-                                        <div className="flex flex-wrap gap-1 mb-0.5">
-                                          {q.topicName && <span className="text-xs text-[#028a39]">[{q.topicName}]</span>}
-                                          {code && <span className="text-xs px-1 bg-blue-50 text-blue-700 rounded font-mono">{code}</span>}
-                                          {issues.slice(0,2).map(iss => <span key={iss} className="text-xs px-1 bg-amber-50 text-amber-700 rounded">{iss}</span>)}
-                                        </div>
-                                        <p className="text-xs text-gray-700 line-clamp-2">
-                                          {q.title || q.content.replace(/<[^>]+>/g,' ').trim().slice(0,100)}…
-                                        </p>
-                                      </div>
-                                    </div>
-                                  )
-                                })}
-                              </>
-                            )}
-                            {bankQs.length === 0 && sampleQs.length === 0 && (
-                              <p className="text-xs text-gray-400 italic text-center py-4">No questions available for this section yet.</p>
-                            )}
+                              </div>
+                              <p className="text-xs text-gray-700 line-clamp-2">{previewText}…</p>
+                            </div>
+                            <button
+                              className="shrink-0 p-1 text-gray-400 hover:text-[#028a39]"
+                              title="Preview"
+                              onClick={(e) => { e.stopPropagation(); setPreviewItem(item) }}
+                            >
+                              <Eye className="h-3.5 w-3.5" />
+                            </button>
                           </div>
+                        )
+                      }
+
+                      return (
+                        <div key={ds.sectionId} className="border rounded-lg overflow-hidden">
+                          <button
+                            className="w-full p-3 flex items-center justify-between bg-gray-50 hover:bg-gray-100 text-left"
+                            onClick={() => setExpandedSecId(isExpanded ? null : ds.sectionId)}
+                          >
+                            <div>
+                              <span className="text-sm font-medium">{ds.name}</span>
+                              <span className="ml-2 text-xs text-gray-400">
+                                {sel.size} selected · {bankQs.length} bank · {sampleQs.length} samples
+                              </span>
+                            </div>
+                            {isExpanded ? <ChevronUp className="h-4 w-4 text-gray-400"/> : <ChevronDown className="h-4 w-4 text-gray-400"/>}
+                          </button>
+
+                          {isExpanded && (
+                            <div className="p-2 space-y-2">
+                              {/* Source: Question Bank */}
+                              {bankQs.length > 0 && (() => {
+                                const sourceKey = `${ds.sectionId}:bank`
+                                const isSrcOpen = expandedSourceKey === sourceKey
+                                return (
+                                  <div className="border rounded">
+                                    <button
+                                      className="w-full px-2 py-1.5 flex items-center justify-between bg-blue-50 text-xs font-semibold text-blue-700 text-left hover:bg-blue-100"
+                                      onClick={() => setExpandedSourceKey(isSrcOpen ? null : sourceKey)}
+                                    >
+                                      <span>Question Bank ({bankQs.length})</span>
+                                      {isSrcOpen ? <ChevronUp className="h-3.5 w-3.5"/> : <ChevronDown className="h-3.5 w-3.5"/>}
+                                    </button>
+                                    {isSrcOpen && (
+                                      <div className="p-2 space-y-2">
+                                        {Object.entries(bankByTopic).map(([topicName, qs]) => {
+                                          const topicKey = `${ds.sectionId}:bank:${topicName}`
+                                          const isTopicOpen = expandedTopicKey === topicKey || !!manualSearch.trim()
+                                          return (
+                                            <div key={topicKey} className="border rounded">
+                                              <button
+                                                className="w-full px-2 py-1 flex items-center justify-between bg-gray-50 text-xs font-semibold text-gray-600 text-left hover:bg-gray-100"
+                                                onClick={() => setExpandedTopicKey(isTopicOpen && !manualSearch.trim() ? null : topicKey)}
+                                              >
+                                                <span>{topicName} ({qs.length})</span>
+                                                {isTopicOpen ? <ChevronUp className="h-3 w-3"/> : <ChevronDown className="h-3 w-3"/>}
+                                              </button>
+                                              {isTopicOpen && (
+                                                <div className="p-1 space-y-1">
+                                                  {qs.map(q => renderQRow({ kind: 'bank', q }))}
+                                                </div>
+                                              )}
+                                            </div>
+                                          )
+                                        })}
+                                      </div>
+                                    )}
+                                  </div>
+                                )
+                              })()}
+                              {/* Source: Samples */}
+                              {sampleQs.length > 0 && (() => {
+                                const sourceKey = `${ds.sectionId}:samples`
+                                const isSrcOpen = expandedSourceKey === sourceKey
+                                return (
+                                  <div className="border rounded">
+                                    <button
+                                      className="w-full px-2 py-1.5 flex items-center justify-between bg-amber-50 text-xs font-semibold text-amber-700 text-left hover:bg-amber-100"
+                                      onClick={() => setExpandedSourceKey(isSrcOpen ? null : sourceKey)}
+                                    >
+                                      <span>Processed Samples ({sampleQs.length})</span>
+                                      {isSrcOpen ? <ChevronUp className="h-3.5 w-3.5"/> : <ChevronDown className="h-3.5 w-3.5"/>}
+                                    </button>
+                                    {isSrcOpen && (
+                                      <div className="p-2 space-y-2">
+                                        {Object.entries(sampleByTopic).map(([topicName, qs]) => {
+                                          const topicKey = `${ds.sectionId}:samples:${topicName}`
+                                          const isTopicOpen = expandedTopicKey === topicKey || !!manualSearch.trim()
+                                          return (
+                                            <div key={topicKey} className="border rounded">
+                                              <button
+                                                className="w-full px-2 py-1 flex items-center justify-between bg-gray-50 text-xs font-semibold text-gray-600 text-left hover:bg-gray-100"
+                                                onClick={() => setExpandedTopicKey(isTopicOpen && !manualSearch.trim() ? null : topicKey)}
+                                              >
+                                                <span>{topicName} ({qs.length})</span>
+                                                {isTopicOpen ? <ChevronUp className="h-3 w-3"/> : <ChevronDown className="h-3 w-3"/>}
+                                              </button>
+                                              {isTopicOpen && (
+                                                <div className="p-1 space-y-1">
+                                                  {qs.map(q => renderQRow({ kind: 'sample', q }))}
+                                                </div>
+                                              )}
+                                            </div>
+                                          )
+                                        })}
+                                      </div>
+                                    )}
+                                  </div>
+                                )
+                              })()}
+                              {bankQs.length === 0 && sampleQs.length === 0 && (
+                                <p className="text-xs text-gray-400 italic text-center py-4">
+                                  {manualSearch.trim() ? 'No matching questions.' : 'No questions available for this section yet.'}
+                                </p>
+                              )}
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
+
+                  {/* Right column: preview panel */}
+                  <div className="border rounded-lg p-3 bg-gray-50 max-h-[60vh] overflow-y-auto sticky top-0">
+                    {!previewItem ? (
+                      <div className="text-center text-xs text-gray-400 py-8">
+                        <Eye className="h-6 w-6 mx-auto mb-2 opacity-50" />
+                        Click a question to preview it here.
+                      </div>
+                    ) : (
+                      <div className="space-y-3">
+                        <div className="flex items-center justify-between">
+                          <span className="text-xs font-semibold text-gray-500 uppercase tracking-wide">
+                            {previewItem.kind === 'bank' ? 'Question Bank' : 'Sample'}
+                          </span>
+                          <button onClick={() => setPreviewItem(null)} className="text-gray-400 hover:text-gray-600">
+                            <X className="h-4 w-4" />
+                          </button>
+                        </div>
+                        {previewItem.kind === 'bank' ? (
+                          (() => {
+                            const q = previewItem.q
+                            return (
+                              <div className="space-y-2 text-xs">
+                                <div className="flex flex-wrap gap-1">
+                                  {q.topic && <span className="px-1.5 py-0.5 bg-green-100 text-green-700 rounded">{q.topic}</span>}
+                                  {q.syllabusCode && <span className="px-1.5 py-0.5 bg-purple-100 text-purple-700 rounded font-mono">{q.syllabusCode}</span>}
+                                  <span className="px-1.5 py-0.5 bg-gray-200 text-gray-600 rounded">{q.questionType}</span>
+                                  <span className={`px-1.5 py-0.5 rounded ${q.status === 'APPROVED' ? 'bg-green-100 text-green-700' : 'bg-yellow-100 text-yellow-700'}`}>{q.status}</span>
+                                </div>
+                                <div
+                                  className="prose prose-sm max-w-none whitespace-pre-wrap [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:mb-2"
+                                  dangerouslySetInnerHTML={{ __html: /<[a-z][\s\S]*>/i.test(q.stem) ? q.stem : q.stem }}
+                                />
+                                {q.options && q.options.length > 0 && (
+                                  <div className="space-y-1">
+                                    <p className="font-semibold text-gray-600">Options</p>
+                                    {q.options.map((opt, i) => {
+                                      const letter = String.fromCharCode(65 + i)
+                                      const isCorrect = opt === q.correctAnswer
+                                      return (
+                                        <div key={i} className={`p-1.5 rounded border ${isCorrect ? 'bg-green-50 border-green-200' : 'bg-white'}`}>
+                                          <span className={`font-bold mr-1 ${isCorrect ? 'text-green-700' : 'text-gray-600'}`}>
+                                            {isCorrect ? '✓' : ''} {letter}.
+                                          </span>
+                                          {opt}
+                                        </div>
+                                      )
+                                    })}
+                                  </div>
+                                )}
+                                {q.correctAnswer && (!q.options || q.options.length === 0) && (
+                                  <div className="p-2 bg-green-50 border border-green-100 rounded">
+                                    <p className="font-semibold text-green-800 mb-0.5">Correct Answer</p>
+                                    <p className="whitespace-pre-wrap">{q.correctAnswer}</p>
+                                  </div>
+                                )}
+                                {q.modelAnswer && (
+                                  <div className="p-2 bg-amber-50 border border-amber-100 rounded">
+                                    <p className="font-semibold text-amber-900 mb-0.5">Model Answer</p>
+                                    <div
+                                      className="text-amber-900 whitespace-pre-wrap"
+                                      dangerouslySetInnerHTML={{ __html: q.modelAnswer }}
+                                    />
+                                  </div>
+                                )}
+                              </div>
+                            )
+                          })()
+                        ) : (
+                          (() => {
+                            const q = previewItem.q
+                            const { code, issues } = parseSyllabusIssues(q.syllabusCode)
+                            return (
+                              <div className="space-y-2 text-xs">
+                                <div className="flex flex-wrap gap-1">
+                                  {q.topicName && <span className="px-1.5 py-0.5 bg-green-100 text-green-700 rounded">{q.topicName}</span>}
+                                  {code && <span className="px-1.5 py-0.5 bg-purple-100 text-purple-700 rounded font-mono">{code}</span>}
+                                  {issues.map(iss => <span key={iss} className="px-1.5 py-0.5 bg-amber-100 text-amber-700 rounded">{iss}</span>)}
+                                  <span className="px-1.5 py-0.5 bg-gray-200 text-gray-600 rounded">{q.questionType}</span>
+                                </div>
+                                {q.title && <p className="font-semibold">{q.title}</p>}
+                                <div
+                                  className="prose prose-sm max-w-none whitespace-pre-wrap [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:mb-2"
+                                  dangerouslySetInnerHTML={{ __html: q.content }}
+                                />
+                                {q.answer && (
+                                  <div className="p-2 bg-amber-50 border border-amber-100 rounded">
+                                    <p className="font-semibold text-amber-900 mb-0.5">Answer</p>
+                                    <div
+                                      className="text-amber-900 whitespace-pre-wrap"
+                                      dangerouslySetInnerHTML={{ __html: q.answer }}
+                                    />
+                                  </div>
+                                )}
+                              </div>
+                            )
+                          })()
                         )}
                       </div>
-                    )
-                  })}
+                    )}
+                  </div>
                 </div>
               )}
 

@@ -744,6 +744,12 @@ model Gameshow {
   wheelMaxPoints    Int        @default(1000)  // Max points a segment can award
   wheelDeductOnWrong Boolean   @default(false) // Deduct the spun points on wrong answer
 
+  // Universal scoring option (all games)
+  deductOnWrong     Boolean    @default(false) // Subtract the question's point value when answer is wrong
+
+  // Local multiplayer — pass to next player on incorrect first attempt
+  allowOthersOnIncorrect Boolean @default(false)
+
   // Multiplayer settings
   maxPlayers        Int        @default(4)
   requireLogin      Boolean    @default(false)

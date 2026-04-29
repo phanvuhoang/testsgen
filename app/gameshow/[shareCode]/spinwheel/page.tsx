@@ -25,6 +25,7 @@ type GameshowConfig = {
   shortLink: string | null; coverImage: string | null; quizSetTitle: string
   questions: Question[]
   wheelSegments: number; wheelMinPoints: number; wheelMaxPoints: number; wheelDeductOnWrong: boolean
+  deductOnWrong?: boolean; allowOthersOnIncorrect?: boolean
 }
 type Player = {
   id: string; nickname: string; avatarColor: string
@@ -264,6 +265,13 @@ export default function SpinWheelPage() {
   }, [shareCode])
 
   useEffect(() => { if (phase === 'setup' && !loading && !joinRoomCode) audio.playBg('opening', 0.5) }, [phase, loading])
+
+  // B2d: Ensure Local/Buzz Multiplayer starts with at least 2 player inputs
+  useEffect(() => {
+    if ((config?.playMode === 'LOCAL' || config?.playMode === 'BUZZ') && phase === 'setup' && setupNames.length < 2) {
+      setSetupNames(prev => [...prev, ''])
+    }
+  }, [config?.playMode, phase])
   useEffect(() => { if (phase === 'gameover') { audio.stopAll(); audio.playBg('podium', 0.7) } }, [phase])
   useEffect(() => { if (phase === 'leaderboard') { audio.stopAll(); audio.playBg('leaderboard', 0.6) } }, [phase])
 
@@ -429,7 +437,7 @@ export default function SpinWheelPage() {
     setSelectedAnswer(answer)
     setIsCorrect(correct)
 
-    const pts = correct ? spunPoints : (config?.wheelDeductOnWrong ? -spunPoints : 0)
+    const pts = correct ? spunPoints : ((config?.wheelDeductOnWrong || config?.deductOnWrong) ? -spunPoints : 0)
     const elapsed = Date.now() - questionStartTime
 
     if (correct) { audio.playOnce('win', 0.7); setShowConfetti(true); setTimeout(() => setShowConfetti(false), 2000) }
@@ -454,13 +462,13 @@ export default function SpinWheelPage() {
 
     if (isLocal || isBuzz) {
       const nextPlayerIdx = (currentPlayerIdx + 1) % players.length
-      if (isLastQ && nextPlayerIdx === 0) {
-        // All players done with last question
+      // B2d: Each turn uses a different question (advance always, not just on round end)
+      const nextQIdx = currentIdx + 1
+      if (nextQIdx >= questions.length) {
+        // No more questions — end the game
         config?.showLeaderboard ? setPhase('leaderboard') : setPhase('gameover')
         return
       }
-      // If all players have answered current question, move to next question
-      const nextQIdx = nextPlayerIdx === 0 ? currentIdx + 1 : currentIdx
       enterSpin(nextQIdx, nextPlayerIdx)
       return
     }
@@ -802,7 +810,7 @@ export default function SpinWheelPage() {
   if (phase === 'reveal' && currentQuestion) {
     const opts = parseOptions(currentQuestion)
     const correctAnswers = getCorrectAnswers(currentQuestion)
-    const pts = isCorrect ? spunPoints : (config?.wheelDeductOnWrong ? -spunPoints : 0)
+    const pts = isCorrect ? spunPoints : ((config?.wheelDeductOnWrong || config?.deductOnWrong) ? -spunPoints : 0)
     return (
       <div className="min-h-screen bg-gray-950 flex flex-col items-center justify-center p-6 gap-6">
         {showConfetti && isCorrect && <Confetti />}

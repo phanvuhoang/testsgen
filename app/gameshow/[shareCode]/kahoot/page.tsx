@@ -22,6 +22,7 @@ type GameshowConfig = {
   shuffleQuestions: boolean; showLeaderboard: boolean; clickStartToCount: boolean
   buzzerMode: boolean; manualScoring: boolean; buzzButton: boolean
   betEnabled: boolean; betTimes: number; betMultiple: number; betWrongAnswer: string
+  deductOnWrong?: boolean; allowOthersOnIncorrect?: boolean
   maxPlayers: number; shortLink: string | null; coverImage: string | null; quizSetTitle: string; questions: Question[]
 }
 type Player = {
@@ -175,6 +176,10 @@ export default function KahootPage() {
   // Bet mechanism
   const [betsRemaining, setBetsRemaining] = useState(0)
   const [isBetting, setIsBetting] = useState(false)
+  // B2b: Local multiplayer pass-on-incorrect state
+  const [passAttemptedPlayerIds, setPassAttemptedPlayerIds] = useState<Set<string>>(new Set())
+  const [passWrongOptions, setPassWrongOptions] = useState<string[]>([])
+  const [passShowPicker, setPassShowPicker] = useState(false)
 
   const timerRef = useRef<NodeJS.Timeout|null>(null)
   const revealTimeoutRef = useRef<NodeJS.Timeout|null>(null)
@@ -246,6 +251,13 @@ export default function KahootPage() {
 
   // Opening music
   useEffect(() => { if (phase==='setup'&&!loading&&!joinRoomCode) audio.playBg('opening', 0.5) }, [phase, loading])
+
+  // B2c: Ensure Local Multiplayer starts with at least 2 player inputs
+  useEffect(() => {
+    if ((config?.playMode === 'LOCAL' || config?.playMode === 'BUZZ') && phase === 'setup' && setupNames.length < 2) {
+      setSetupNames(prev => [...prev, ''])
+    }
+  }, [config?.playMode, phase])
 
   // Podium music on gameover
   useEffect(() => { if (phase === 'gameover') { audio.stopAll(); audio.playBg('podium', 0.7) } }, [phase])
@@ -491,7 +503,10 @@ export default function KahootPage() {
   }
 
   const computePoints=(correct:boolean, elapsed:number):number=>{
-    if(!correct)return 0
+    if(!correct){
+      // Deduct base points on wrong answer if option enabled
+      return config?.deductOnWrong ? -1000 : 0
+    }
     if(config?.scoringMode==='ACCURACY_ONLY')return 1000
     const maxTime=config?.timeLimitSeconds??30
     return Math.round(1000*(0.3+0.7*Math.max(0,(maxTime-elapsed)/maxTime)))
@@ -506,6 +521,7 @@ export default function KahootPage() {
     if(isBuzzMode && config?.buzzButton && !hasBuzzed) return
     // Disable options check
     if(disabledOptions.includes(answer)) return
+    if(passWrongOptions.includes(answer)) return
     clearInterval(timerRef.current!)
     audio.stopAll(); audio.stopTimeCount()
     const elapsed=(Date.now()-questionStartTime)/1000
@@ -532,6 +548,21 @@ export default function KahootPage() {
     updatePlayer(correct,pts)
     if(correct){audio.playOnce('win',0.9);if((currentPlayer?.streak??0)>=2)setShowConfetti(true);setTimeout(()=>setShowConfetti(false),1500)}
     else audio.playOnce('lost',0.9)
+
+    // B2b: Local Multiplayer — pass to next player on incorrect (single-answer flow only)
+    if (!correct && config?.playMode === 'LOCAL' && config?.allowOthersOnIncorrect && players.length > 1 && !joinRoomCode) {
+      const newAttempted = new Set(passAttemptedPlayerIds)
+      if (currentPlayer) newAttempted.add(currentPlayer.id)
+      const remaining = players.filter(p => !newAttempted.has(p.id))
+      setPassAttemptedPlayerIds(newAttempted)
+      setPassWrongOptions(prev => Array.from(new Set([...prev, answer])))
+      if (remaining.length > 0) {
+        setPassShowPicker(true)
+        setTimerRunning(false) // pause timer while host picks
+        // Don't end question — host will pick next player or Continue
+        return
+      }
+    }
     if(joinRoomCode && myPlayerId) {
       // Online player: track local score + submit to server
       setMyLastPts(pts)
@@ -623,6 +654,29 @@ export default function KahootPage() {
       const newStreak=correct?p.streak+1:0
       return{...p,score:p.score+pts,correctCount:correct?p.correctCount+1:p.correctCount,wrongCount:!correct?p.wrongCount+1:p.wrongCount,streak:newStreak,bestStreak:Math.max(p.bestStreak,newStreak),lastPointsEarned:pts}
     }))
+  }
+
+  // B2b: Local Multiplayer — host picks next player to attempt the question
+  // Timer continues from where it stopped (timeLeft is preserved when picker shows)
+  const passToPlayer = (playerIdx: number) => {
+    setPassShowPicker(false)
+    setSubmitted(false)
+    setSelectedAnswer(null)
+    setIsCorrect(null)
+    setCurrentPlayerIdx(playerIdx)
+    // Recompute questionStartTime so the timer resumes from current timeLeft
+    const maxTime = config?.timeLimitSeconds ?? 30
+    const newStart = Date.now() - (maxTime - timeLeft) * 1000
+    setQuestionStartTime(newStart)
+    questionStartTimeRef.current = newStart
+    setTimerRunning(true)
+  }
+  // B2b: Host skips remaining players and reveals
+  const passContinue = () => {
+    setPassShowPicker(false)
+    setPassAttemptedPlayerIds(new Set())
+    setPassWrongOptions([])
+    revealTimeoutRef.current = setTimeout(() => setPhase('reveal'), 200)
   }
 
   const saveAnalytics = (questionId: string, answer: string, correct: boolean, pts: number, elapsedMs: number) => {
@@ -730,6 +784,7 @@ export default function KahootPage() {
     // Reset buzz state (local multiplayer legacy + BUZZ play mode)
     setBuzzedPlayer(null); setBuzzerOpen(false); setShowBuzz(false)
     setBuzzState(null); setDisabledOptions([]); setDisabledPlayerIds([]); setHasBuzzed(false); setIsBetting(false)
+    setPassAttemptedPlayerIds(new Set()); setPassWrongOptions([]); setPassShowPicker(false)
     setPhase('question')
 
     if(config?.clickStartToCount){
@@ -1336,6 +1391,50 @@ export default function KahootPage() {
           </div>
         )}
 
+        {/* B2b — Local Multiplayer pass-on-incorrect picker */}
+        {passShowPicker && config?.playMode === 'LOCAL' && !joinRoomCode && (
+          <div className="fixed inset-0 bg-[#0f0f1e]/90 flex items-center justify-center z-50 p-4">
+            <div className="bg-[#16213e] border-2 border-yellow-500/40 rounded-3xl p-6 max-w-md w-full">
+              <p className="text-yellow-300 font-black text-xl mb-2 text-center">Wrong answer!</p>
+              <p className="text-indigo-200 text-sm text-center mb-4">
+                Pick a player to attempt this question, or Continue to skip.
+              </p>
+              <div className="space-y-2 mb-4 max-h-60 overflow-y-auto">
+                {players.map((p, idx) => {
+                  const attempted = passAttemptedPlayerIds.has(p.id)
+                  return (
+                    <button
+                      key={p.id}
+                      disabled={attempted}
+                      onClick={() => passToPlayer(idx)}
+                      className={`w-full text-left p-3 rounded-xl border-2 flex items-center gap-3 transition-all ${
+                        attempted
+                          ? 'bg-gray-800/50 border-gray-700 opacity-50 cursor-not-allowed'
+                          : 'bg-indigo-900/40 border-indigo-500/40 hover:border-yellow-400 hover:bg-indigo-900/60'
+                      }`}
+                    >
+                      <span
+                        className="w-8 h-8 rounded-full flex items-center justify-center font-bold text-white"
+                        style={{ backgroundColor: p.avatarColor }}
+                      >
+                        {p.nickname.slice(0, 1).toUpperCase()}
+                      </span>
+                      <span className="font-bold text-white">{p.nickname}</span>
+                      {attempted && <span className="ml-auto text-xs text-gray-400">already tried</span>}
+                    </button>
+                  )
+                })}
+              </div>
+              <Button
+                onClick={passContinue}
+                className="w-full bg-yellow-500 hover:bg-yellow-400 text-black font-black"
+              >
+                Continue (skip remaining)
+              </Button>
+            </div>
+          </div>
+        )}
+
         {/* Online player: submitted overlay — show result while waiting for host */}
         {submitted && !!joinRoomCode && (
           <div className="fixed inset-0 bg-[#0f0f1e]/90 flex items-center justify-center z-50">
@@ -1406,7 +1505,7 @@ export default function KahootPage() {
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                   {options.map((opt,i)=>{
                     const col=KAHOOT_COLORS[i%4];const isSel=selectedAnswer===opt
-                    const isDisabledOpt = disabledOptions.includes(opt)
+                    const isDisabledOpt = disabledOptions.includes(opt) || passWrongOptions.includes(opt)
                     return(
                       <button key={opt} disabled={submitted||isDisabledOpt||disabledPlayerIds.includes(myPlayerId||'')} onClick={()=>handleAnswer(opt)}
                         className={`flex items-center gap-3 p-4 sm:p-5 rounded-2xl border-4 text-left font-bold transition-all active:scale-95

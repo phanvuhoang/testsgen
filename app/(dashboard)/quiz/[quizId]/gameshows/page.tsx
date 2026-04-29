@@ -55,6 +55,8 @@ type Gameshow = {
   coverImage?: string | null
   categoryNames?: string | null
   jeopardyTags?: string | null
+  deductOnWrong?: boolean
+  allowOthersOnIncorrect?: boolean
   createdAt: string
   _count?: { sessions: number }
 }
@@ -126,6 +128,10 @@ const emptyForm = {
   wheelMinPoints: '100',
   wheelMaxPoints: '1000',
   wheelDeductOnWrong: 'false',
+  // Universal scoring
+  deductOnWrong: 'false',
+  // Local Multiplayer — pass on incorrect
+  allowOthersOnIncorrect: 'false',
 }
 
 export default function GameshowsPage() {
@@ -229,6 +235,8 @@ export default function GameshowsPage() {
       wheelMinPoints: String((g as any).wheelMinPoints ?? 100),
       wheelMaxPoints: String((g as any).wheelMaxPoints ?? 1000),
       wheelDeductOnWrong: String((g as any).wheelDeductOnWrong ?? false),
+      deductOnWrong: String((g as any).deductOnWrong ?? false),
+      allowOthersOnIncorrect: String((g as any).allowOthersOnIncorrect ?? false),
     })
     setSettingsTab('general')
     setDialogOpen(true)
@@ -239,6 +247,18 @@ export default function GameshowsPage() {
     if (!form.name.trim()) {
       toast({ title: 'Name is required', variant: 'destructive' })
       return
+    }
+    // B2a: warn if Local Multiplayer and questions count is not a multiple of players
+    if (form.playMode === 'LOCAL' && form.questionSelectionMode === 'RANDOM') {
+      const players = parseInt(form.maxPlayers) || 0
+      const qcount = parseInt(form.questionsCount) || 0
+      if (players >= 2 && qcount > 0 && qcount % players !== 0) {
+        const ok = confirm(
+          `The number of questions (${qcount}) is not a multiple of player count (${players}). ` +
+          `Each player may not answer the same number of questions. Continue?`
+        )
+        if (!ok) return
+      }
     }
     setIsSaving(true)
     try {
@@ -280,6 +300,8 @@ export default function GameshowsPage() {
         wheelMinPoints: parseInt((form as any).wheelMinPoints) || 100,
         wheelMaxPoints: parseInt((form as any).wheelMaxPoints) || 1000,
         wheelDeductOnWrong: (form as any).wheelDeductOnWrong === 'true',
+        deductOnWrong: (form as any).deductOnWrong === 'true',
+        allowOthersOnIncorrect: (form as any).allowOthersOnIncorrect === 'true',
       }
 
       let res: Response
@@ -633,6 +655,10 @@ export default function GameshowsPage() {
               </div>
               <div className="space-y-2 pt-2 border-t">
                 <BoolCheckbox k="shuffleQuestions" label="Shuffle question order" />
+                <BoolCheckbox k="deductOnWrong" label="Deduct score if answer incorrectly (score can go negative)" />
+                {form.playMode === 'LOCAL' && (
+                  <BoolCheckbox k="allowOthersOnIncorrect" label="Allow others to answer if first attempt incorrect (Local Multiplayer)" />
+                )}
                 <BoolCheckbox k="showLeaderboard" label="Show leaderboard after each question (top 10 players)" />
                 <BoolCheckbox k="clickStartToCount" label="Click Start button to begin timer (wait before timing starts)" />
                 {form.clickStartToCount === 'true' && (
@@ -939,6 +965,37 @@ export default function GameshowsPage() {
                     onChange={e => setForm({ ...form, questionsCount: e.target.value })}
                     placeholder="Use all questions"
                   />
+                  {/* B2a — suggest multiples of player count for Local Multiplayer */}
+                  {form.playMode === 'LOCAL' && (() => {
+                    const players = parseInt(form.maxPlayers) || 0
+                    if (players < 2) return null
+                    const suggestions = [players, players * 2, players * 3, players * 4, players * 5].filter(n => n >= 2)
+                    const current = parseInt(form.questionsCount)
+                    const isMultiple = !current || (current % players === 0)
+                    return (
+                      <div className="text-xs space-y-1">
+                        <div className="text-gray-500">
+                          Suggested for {players} players:
+                          {suggestions.map((n, i) => (
+                            <button
+                              key={n}
+                              type="button"
+                              onClick={() => setForm({ ...form, questionsCount: String(n) })}
+                              className="ml-1 px-1.5 py-0.5 rounded bg-gray-100 hover:bg-blue-100 hover:text-blue-700 text-gray-600 border border-gray-200"
+                            >
+                              {n}
+                            </button>
+                          ))}
+                          <span className="text-gray-400"> questions</span>
+                        </div>
+                        {!isMultiple && (
+                          <div className="text-amber-600 italic">
+                            ⚠ {current} is not a multiple of {players}. Each player may not answer the same number of questions.
+                          </div>
+                        )}
+                      </div>
+                    )
+                  })()}
                 </div>
               )}
             </TabsContent>

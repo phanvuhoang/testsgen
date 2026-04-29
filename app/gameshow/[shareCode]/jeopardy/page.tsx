@@ -30,6 +30,7 @@ type GameshowConfig = {
   clickStartToCount: boolean; manualScoring: boolean; shortLink: string | null
   buzzerMode: boolean; buzzButton: boolean
   betEnabled: boolean; betTimes: number; betMultiple: number; betWrongAnswer: string
+  deductOnWrong?: boolean; allowOthersOnIncorrect?: boolean
 }
 type Player = {
   id: string; nickname: string; avatarColor: string; score: number; correctCount: number; wrongCount: number
@@ -945,9 +946,10 @@ export default function JeopardyPage() {
     setIsCorrect(correct)
     const elapsed = (config!.timeLimitSeconds - questionTimeLeft)
     const basePoints = currentTilePoints
+    const wrongPts = config?.deductOnWrong ? -basePoints : 0
     let pts = config?.scoringMode === 'ACCURACY_ONLY'
-      ? (correct ? basePoints : 0)
-      : correct ? Math.round(basePoints * (0.5 + 0.5 * (1 - elapsed / config!.timeLimitSeconds))) : 0
+      ? (correct ? basePoints : wrongPts)
+      : correct ? Math.round(basePoints * (0.5 + 0.5 * (1 - elapsed / config!.timeLimitSeconds))) : wrongPts
     if (isBetting) {
       if (correct) pts = Math.round(pts * (config?.betMultiple ?? 2))
       else { const wa = config?.betWrongAnswer ?? 'NO_DEDUCTION'; pts = wa === 'ONE_X' ? -basePoints : wa === 'MULTIPLE' ? -Math.round(basePoints * (config?.betMultiple ?? 2)) : 0 }

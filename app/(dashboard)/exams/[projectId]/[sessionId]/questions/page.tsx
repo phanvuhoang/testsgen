@@ -86,17 +86,12 @@ const statusConfig: Record<string, { label: string; className: string }> = {
 // ─── HTML Preview Component ───────────────────────────────────────────────────
 function HtmlContent({ html }: { html: string }) {
   if (!html) return null
-  // If it looks like HTML (contains tags), render it; otherwise render as plain text
-  const isHtml = /<[a-z][\s\S]*>/i.test(html)
-  if (isHtml) {
-    return (
-      <div
-        className="prose prose-sm max-w-none text-xs [&_table]:border-collapse [&_table]:w-full [&_th]:border [&_th]:border-gray-300 [&_th]:bg-gray-100 [&_th]:px-2 [&_th]:py-1 [&_td]:border [&_td]:border-gray-200 [&_td]:px-2 [&_td]:py-1 [&_strong]:font-semibold"
-        dangerouslySetInnerHTML={{ __html: html }}
-      />
-    )
-  }
-  return <p className="text-xs whitespace-pre-wrap">{html}</p>
+  return (
+    <div
+      className="prose prose-sm max-w-none text-xs whitespace-pre-wrap [&_table]:border-collapse [&_table]:w-full [&_th]:border [&_th]:border-gray-300 [&_th]:bg-gray-100 [&_th]:px-2 [&_th]:py-1 [&_td]:border [&_td]:border-gray-200 [&_td]:px-2 [&_td]:py-1 [&_strong]:font-semibold [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5 [&_p]:mb-2"
+      dangerouslySetInnerHTML={{ __html: /<[a-z][\s\S]*>/i.test(html) ? html : formatPlainText(html) }}
+    />
+  )
 }
 
 // ─── HTML Editor (now uses RichTextEditor for WYSIWYG editing) ───────────────
@@ -125,6 +120,51 @@ function HtmlEditor({
       />
     </div>
   )
+}
+
+// ─── Plain-text formatter: paragraphs + bullet/numbered lists ────────────────
+// Converts plain text with newlines and list markers into structured HTML.
+// - Paragraphs are separated by blank lines (\n\n)
+// - Lines starting with "- ", "* ", "• " become <ul><li>
+// - Lines starting with "1. ", "2. " etc. become <ol><li>
+// - Other newlines within a paragraph become <br>
+function formatPlainText(text: string): string {
+  if (!text) return ''
+  const escape = (s: string) => s
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+
+  const blocks = text.split(/\n\s*\n/)
+  const out: string[] = []
+  for (const block of blocks) {
+    const lines = block.split('\n').map(l => l.replace(/\s+$/, ''))
+    if (lines.length === 0) continue
+
+    const isBullet = (l: string) => /^\s*[-*•]\s+/.test(l)
+    const isNumbered = (l: string) => /^\s*\d+\.\s+/.test(l)
+    const allBullet = lines.every(l => l.trim() === '' || isBullet(l))
+    const allNumbered = lines.every(l => l.trim() === '' || isNumbered(l))
+
+    if (allBullet && lines.some(isBullet)) {
+      const items = lines.filter(isBullet).map(l => `<li>${escape(l.replace(/^\s*[-*•]\s+/, ''))}</li>`).join('')
+      out.push(`<ul class="list-disc pl-5 my-1 space-y-0.5">${items}</ul>`)
+    } else if (allNumbered && lines.some(isNumbered)) {
+      const items = lines.filter(isNumbered).map(l => `<li>${escape(l.replace(/^\s*\d+\.\s+/, ''))}</li>`).join('')
+      out.push(`<ol class="list-decimal pl-5 my-1 space-y-0.5">${items}</ol>`)
+    } else {
+      out.push(`<p class="mb-2 last:mb-0">${escape(lines.join('\n')).replace(/\n/g, '<br>')}</p>`)
+    }
+  }
+  return out.join('')
+}
+
+// Renders content that may be HTML or plain text. For plain text, applies
+// paragraph/list formatting via formatPlainText.
+function renderRichContent(text: string): string {
+  if (!text) return ''
+  if (/<[a-z][\s\S]*>/i.test(text)) return text
+  return formatPlainText(text)
 }
 
 // ─── Smart answer renderer: markdown/plain → HTML ────────────────────────────
@@ -178,12 +218,13 @@ function renderAnswerContent(text: string): string {
     return html
   }
 
-  const result = text
+  // Apply paragraph/list formatting then bold/italic markdown inline
+  let html = formatPlainText(text)
+  html = html
     .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>')
     .replace(/\*(.*?)\*/g, '<em>$1</em>')
-    .replace(/\n/g, '<br>')
 
-  return `<div class="text-xs">${result}</div>`
+  return `<div class="text-xs">${html}</div>`
 }
 
 // ─── Option letter badge ──────────────────────────────────────────────────────
@@ -342,6 +383,9 @@ export default function ExamQuestionsPage() {
   const [isExportingWord, setIsExportingWord] = useState(false)
   // Add to Sample
   const [addingToSampleId, setAddingToSampleId] = useState<string | null>(null)
+  // Expand state for section/topic groups (A2)
+  const [expandedSections, setExpandedSections] = useState<Set<string>>(new Set())
+  const [expandedTopics, setExpandedTopics] = useState<Set<string>>(new Set())
 
   useEffect(() => {
     fetchQuestions()
@@ -548,6 +592,57 @@ export default function ExamQuestionsPage() {
     return true
   })
 
+  // ─── Group filtered questions by Section → Topic for A2 expandable view ───
+  type TopicGroup = { topicKey: string; topicName: string; questions: Question[] }
+  type SectionGroup = { sectionKey: string; sectionName: string; topics: TopicGroup[]; allQuestions: Question[] }
+  const sectionGroups: SectionGroup[] = (() => {
+    const bySection = new Map<string, { name: string; qs: Question[] }>()
+    for (const q of filtered) {
+      const key = q.section?.id || '__uncategorized__'
+      const name = q.section?.name || 'Uncategorized'
+      if (!bySection.has(key)) bySection.set(key, { name, qs: [] })
+      bySection.get(key)!.qs.push(q)
+    }
+    const groups: SectionGroup[] = []
+    for (const [secKey, { name: secName, qs }] of bySection) {
+      const byTopic = new Map<string, { name: string; qs: Question[] }>()
+      for (const q of qs) {
+        const tKey = q.topic || '__general__'
+        const tName = q.topic || 'General'
+        if (!byTopic.has(tKey)) byTopic.set(tKey, { name: tName, qs: [] })
+        byTopic.get(tKey)!.qs.push(q)
+      }
+      const topics: TopicGroup[] = Array.from(byTopic.entries()).map(([tKey, v]) => ({
+        topicKey: `${secKey}::${tKey}`, topicName: v.name, questions: v.qs,
+      }))
+      groups.push({ sectionKey: secKey, sectionName: secName, topics, allQuestions: qs })
+    }
+    return groups
+  })()
+
+  const toggleSection = (key: string) => {
+    setExpandedSections(prev => {
+      const next = new Set(prev)
+      next.has(key) ? next.delete(key) : next.add(key)
+      return next
+    })
+  }
+  const toggleTopic = (key: string) => {
+    setExpandedTopics(prev => {
+      const next = new Set(prev)
+      next.has(key) ? next.delete(key) : next.add(key)
+      return next
+    })
+  }
+  const setManySelected = (ids: string[], on: boolean) => {
+    setSelectedIds(prev => {
+      const next = new Set(prev)
+      if (on) ids.forEach(id => next.add(id))
+      else ids.forEach(id => next.delete(id))
+      return next
+    })
+  }
+
   // ── Render answer panel for a question ────────────────────────────────────
   const renderAnswerPanel = (q: Question) => {
     const letters = ['A', 'B', 'C', 'D', 'E']
@@ -577,10 +672,16 @@ export default function ExamQuestionsPage() {
                     <span className={`font-bold shrink-0 ${isCorrect ? 'text-green-700' : 'text-gray-500'}`}>
                       {isCorrect ? '✓' : '✗'} {letter}.
                     </span>
-                    <div>
-                      <span className={`font-medium ${isCorrect ? 'text-green-800' : 'text-gray-700'}`}>{opt}</span>
+                    <div className="min-w-0">
+                      <div
+                        className={`font-medium whitespace-pre-wrap ${isCorrect ? 'text-green-800' : 'text-gray-700'}`}
+                        dangerouslySetInnerHTML={{ __html: renderRichContent(opt) }}
+                      />
                       {explanation && (
-                        <p className={`mt-0.5 ${isCorrect ? 'text-green-700' : 'text-gray-500'}`}>{explanation}</p>
+                        <div
+                          className={`mt-0.5 whitespace-pre-wrap ${isCorrect ? 'text-green-700' : 'text-gray-500'}`}
+                          dangerouslySetInnerHTML={{ __html: renderRichContent(explanation) }}
+                        />
                       )}
                     </div>
                   </div>
@@ -783,33 +884,82 @@ export default function ExamQuestionsPage() {
             </div>
           )}
 
-          {filtered.map((q, qIdx) => (
-            <Card key={q.id} className="overflow-hidden">
-              {/* Question header row */}
-              <div className="p-4 flex items-start justify-between gap-2">
-                <div className="flex items-start gap-3 flex-1 min-w-0">
+          {sectionGroups.map((sg) => {
+            const sectionExpanded = expandedSections.has(sg.sectionKey)
+            const sectionAllIds = sg.allQuestions.map(q => q.id)
+            const sectionAllSelected = sectionAllIds.length > 0 && sectionAllIds.every(id => selectedIds.has(id))
+            const sectionSomeSelected = sectionAllIds.some(id => selectedIds.has(id))
+            return (
+              <Card key={sg.sectionKey} className="overflow-hidden">
+                {/* Section header */}
+                <div className="p-3 bg-gray-100 flex items-center gap-3 border-b">
                   <Checkbox
-                    checked={selectedIds.has(q.id)}
-                    onCheckedChange={v => {
-                      setSelectedIds(prev => {
-                        const next = new Set(prev)
-                        v ? next.add(q.id) : next.delete(q.id)
-                        return next
-                      })
-                    }}
-                    className="mt-1 shrink-0"
-                    onClick={e => e.stopPropagation()}
+                    checked={sectionAllSelected ? true : (sectionSomeSelected ? 'indeterminate' as any : false)}
+                    onCheckedChange={(v) => setManySelected(sectionAllIds, !!v)}
+                    onClick={(e) => e.stopPropagation()}
                   />
-                  <div
-                    className="flex-1 min-w-0 cursor-pointer"
-                    onClick={() => setExpandedId(expandedId === q.id ? null : q.id)}
+                  <button
+                    onClick={() => toggleSection(sg.sectionKey)}
+                    className="flex items-center gap-2 flex-1 min-w-0 text-left"
                   >
-                    <div className="flex items-start gap-2">
-                      <span className="text-xs text-gray-400 shrink-0 mt-0.5">Q{qIdx + 1}</span>
-                      <p className="text-sm font-medium line-clamp-2">
-                        {q.stem.replace(/^Case:[\s\S]*?Question:\s*/i, '').trim() || q.stem}
-                      </p>
-                    </div>
+                    {sectionExpanded ? <ChevronUp className="h-4 w-4 text-gray-500 shrink-0" /> : <ChevronDown className="h-4 w-4 text-gray-500 shrink-0" />}
+                    <span className="text-sm font-semibold truncate">{sg.sectionName}</span>
+                    <span className="text-xs text-gray-500">({sg.allQuestions.length} question{sg.allQuestions.length === 1 ? '' : 's'})</span>
+                  </button>
+                </div>
+                {sectionExpanded && (
+                  <div className="p-2 space-y-2">
+                    {sg.topics.map((tg) => {
+                      const topicExpanded = expandedTopics.has(tg.topicKey)
+                      const topicAllIds = tg.questions.map(q => q.id)
+                      const topicAllSelected = topicAllIds.length > 0 && topicAllIds.every(id => selectedIds.has(id))
+                      const topicSomeSelected = topicAllIds.some(id => selectedIds.has(id))
+                      return (
+                        <div key={tg.topicKey} className="border rounded-md overflow-hidden">
+                          <div className="p-2 bg-gray-50 flex items-center gap-2 border-b">
+                            <Checkbox
+                              checked={topicAllSelected ? true : (topicSomeSelected ? 'indeterminate' as any : false)}
+                              onCheckedChange={(v) => setManySelected(topicAllIds, !!v)}
+                              onClick={(e) => e.stopPropagation()}
+                            />
+                            <button
+                              onClick={() => toggleTopic(tg.topicKey)}
+                              className="flex items-center gap-2 flex-1 min-w-0 text-left"
+                            >
+                              {topicExpanded ? <ChevronUp className="h-3.5 w-3.5 text-gray-400 shrink-0" /> : <ChevronDown className="h-3.5 w-3.5 text-gray-400 shrink-0" />}
+                              <span className="text-xs font-semibold truncate">Topic: {tg.topicName}</span>
+                              <span className="text-xs text-gray-500">({tg.questions.length} question{tg.questions.length === 1 ? '' : 's'})</span>
+                            </button>
+                          </div>
+                          {topicExpanded && (
+                            <div className="space-y-2 p-2">
+                              {tg.questions.map((q, qIdx) => (
+                                <Card key={q.id} className="overflow-hidden border-l-4 border-l-gray-200">
+                                  {/* Question header row */}
+                                  <div className="p-4 flex items-start justify-between gap-2">
+                                    <div className="flex items-start gap-3 flex-1 min-w-0">
+                                      <Checkbox
+                                        checked={selectedIds.has(q.id)}
+                                        onCheckedChange={v => {
+                                          setSelectedIds(prev => {
+                                            const next = new Set(prev)
+                                            v ? next.add(q.id) : next.delete(q.id)
+                                            return next
+                                          })
+                                        }}
+                                        className="mt-1 shrink-0"
+                                        onClick={e => e.stopPropagation()}
+                                      />
+                                      <div
+                                        className="flex-1 min-w-0 cursor-pointer"
+                                        onClick={() => setExpandedId(expandedId === q.id ? null : q.id)}
+                                      >
+                                        <div className="flex items-start gap-2">
+                                          <span className="text-xs text-gray-400 shrink-0 mt-0.5">Q{qIdx + 1}</span>
+                                          <p className="text-sm font-medium line-clamp-2">
+                                            {q.stem.replace(/^Case:[\s\S]*?Question:\s*/i, '').trim() || q.stem}
+                                          </p>
+                                        </div>
                     <div className="flex gap-2 mt-1 flex-wrap pl-5">
                       <span className="text-xs text-gray-400">{q.section?.name}</span>
                       <Badge variant="outline" className="text-xs py-0">{q.questionType.replace(/_/g, ' ')}</Badge>
@@ -886,26 +1036,26 @@ export default function ExamQuestionsPage() {
                         const stem = q.stem
                         const caseContent = stem.match(/^Case:\s*([\s\S]*?)(?=\n\s*Question:)/i)?.[1]?.trim()
                         const questionContent = stem.match(/(?:^|\n)\s*Question:\s*([\s\S]*)/i)?.[1]?.trim()
-                        const htmlClass = 'prose prose-sm max-w-none [&_table]:border-collapse [&_table]:w-full [&_th]:border [&_th]:border-gray-300 [&_th]:bg-gray-100 [&_th]:px-2 [&_th]:py-1 [&_td]:border [&_td]:border-gray-200 [&_td]:px-2 [&_td]:py-1 [&_p]:mb-1'
+                        const htmlClass = 'prose prose-sm max-w-none whitespace-pre-wrap [&_table]:border-collapse [&_table]:w-full [&_th]:border [&_th]:border-gray-300 [&_th]:bg-gray-100 [&_th]:px-2 [&_th]:py-1 [&_td]:border [&_td]:border-gray-200 [&_td]:px-2 [&_td]:py-1 [&_p]:mb-2 [&_ul]:list-disc [&_ul]:pl-5 [&_ol]:list-decimal [&_ol]:pl-5'
                         if (caseContent !== undefined || questionContent !== undefined) {
                           return (
                             <div className="space-y-3">
                               {caseContent !== undefined && (
                                 <div>
                                   <span className="text-xs font-semibold text-gray-400 uppercase tracking-wide">Case</span>
-                                  <div className={`mt-1 ${htmlClass}`} dangerouslySetInnerHTML={{ __html: caseContent || '' }} />
+                                  <div className={`mt-1 ${htmlClass}`} dangerouslySetInnerHTML={{ __html: renderRichContent(caseContent || '') }} />
                                 </div>
                               )}
                               {questionContent !== undefined && (
-                                <p className="font-semibold text-sm mt-2">
+                                <div className="font-semibold text-sm mt-2">
                                   <span className="text-[#028a39] font-bold">Question: </span>
-                                  <span>{questionContent}</span>
-                                </p>
+                                  <div className={`inline ${htmlClass}`} dangerouslySetInnerHTML={{ __html: renderRichContent(questionContent) }} />
+                                </div>
                               )}
                             </div>
                           )
                         }
-                        return <div className={htmlClass} dangerouslySetInnerHTML={{ __html: stem }} />
+                        return <div className={htmlClass} dangerouslySetInnerHTML={{ __html: renderRichContent(stem) }} />
                       })()}
 
                       {/* Show Answer toggle */}
@@ -918,12 +1068,22 @@ export default function ExamQuestionsPage() {
                       </button>
 
                       {showAnswerId === q.id && renderAnswerPanel(q)}
-                    </div>
-                  )}
-                </div>
-              )}
-            </Card>
-          ))}
+                                    </div>
+                                  )}
+                                </div>
+                              )}
+                                </Card>
+                              ))}
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
+                )}
+              </Card>
+            )
+          })}
         </div>
       )}
 

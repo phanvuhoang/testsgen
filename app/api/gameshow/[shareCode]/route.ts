@@ -90,6 +90,8 @@ export async function GET(
     wheelMinPoints: (gameshow as any).wheelMinPoints ?? 100,
     wheelMaxPoints: (gameshow as any).wheelMaxPoints ?? 1000,
     wheelDeductOnWrong: (gameshow as any).wheelDeductOnWrong ?? false,
+    deductOnWrong: (gameshow as any).deductOnWrong ?? false,
+    allowOthersOnIncorrect: (gameshow as any).allowOthersOnIncorrect ?? false,
     shortLink: (gameshow as any).shortLink ?? null,
     coverImage: (gameshow as any).coverImage ?? null,
     quizSetTitle: (gameshow as any).quizSet?.title ?? '',
