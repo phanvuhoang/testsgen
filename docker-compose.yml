@@ -20,8 +20,8 @@ services:
 
       # AI Provider — DeepSeek (default)
       AI_PROVIDER: ${AI_PROVIDER:-deepseek}
-      AI_MODEL_GENERATION: ${AI_MODEL_GENERATION:-deepseek-reasoner}
-      AI_MODEL_GRADING: ${AI_MODEL_GRADING:-deepseek-reasoner}
+      AI_MODEL_GENERATION: ${AI_MODEL_GENERATION:-deepseek-v4-pro}
+      AI_MODEL_GRADING: ${AI_MODEL_GRADING:-deepseek-v4-pro}
 
       # DeepSeek (default provider)
       DEEPSEEK_API_KEY: ${DEEPSEEK_API_KEY:-}

@@ -96,7 +96,8 @@ export async function POST(req: NextRequest, { params }: { params: { id: string;
   }
 
   const results: any[] = []
-  for await (const q of generateExamQuestions(generatorConfig, modelId || 'deepseek:deepseek-reasoner')) {
+  const fallbackModelId = `deepseek:${process.env.AI_MODEL_GENERATION || 'deepseek-v4-pro'}`
+  for await (const q of generateExamQuestions(generatorConfig, modelId || fallbackModelId)) {
     results.push(q)
     break // only generate 1
   }

@@ -1090,7 +1090,8 @@ export default function QuizQuestionsPage() {
                     <>
                       <SelectItem value="claudible:claude-haiku-4.5">Claudible Haiku 4.5 (Default)</SelectItem>
                       <SelectItem value="claudible:claude-sonnet-4.6">Claudible Sonnet 4.6</SelectItem>
-                      <SelectItem value="deepseek:deepseek-reasoner">DeepSeek Reasoner</SelectItem>
+                      {/* Server resolves "server-default" to AI_MODEL_GENERATION env var */}
+                      <SelectItem value="deepseek:server-default">DeepSeek (Default)</SelectItem>
                       <SelectItem value="openrouter:xiaomi/mimo-v2-pro">OpenRouter — xiaomi/mimo-v2-pro</SelectItem>
                       <SelectItem value="openrouter:qwen/qwen3-plus">OpenRouter — qwen/qwen3-plus</SelectItem>
                     </>

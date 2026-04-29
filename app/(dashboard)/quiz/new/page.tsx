@@ -532,7 +532,8 @@ export default function NewQuizPage() {
                       <SelectItem key={m.id} value={m.id}>{m.label}</SelectItem>
                     ))}
                     {aiModels.length === 0 && (
-                      <SelectItem value="deepseek:deepseek-reasoner">DeepSeek Reasoner (Default)</SelectItem>
+                      // Fallback: server will resolve to AI_MODEL_GENERATION env var when this is sent
+                      <SelectItem value="deepseek:server-default">DeepSeek (Default)</SelectItem>
                     )}
                   </SelectContent>
                 </Select>

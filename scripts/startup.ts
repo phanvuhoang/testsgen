@@ -29,8 +29,9 @@ async function seedAdmin() {
   // Initialize default system settings if not present
   const defaultSettings = [
     { key: 'ai_provider', value: process.env.AI_PROVIDER || 'deepseek' },
-    { key: 'ai_model_generation', value: process.env.AI_MODEL_GENERATION || 'deepseek-reasoner' },
-    { key: 'ai_model_grading', value: process.env.AI_MODEL_GRADING || 'deepseek-reasoner' },
+    // Default DeepSeek generation/grading model. Can be overridden via env vars.
+    { key: 'ai_model_generation', value: process.env.AI_MODEL_GENERATION || 'deepseek-v4-pro' },
+    { key: 'ai_model_grading', value: process.env.AI_MODEL_GRADING || 'deepseek-v4-pro' },
     { key: 'app_name', value: 'TestsGen' },
     { key: 'openrouter_models', value: process.env.OPENROUTER_MODELS || 'xiaomi/mimo-v2-pro,qwen/qwen3-plus,anthropic/claude-haiku-4-5' },
   ]
