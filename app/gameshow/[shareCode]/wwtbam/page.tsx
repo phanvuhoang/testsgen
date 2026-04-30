@@ -339,6 +339,9 @@ export default function WwtbamPage() {
               const actualStart = gs.questionStartTime ?? Date.now()
               const actualElapsed = (Date.now() - actualStart) / 1000
               const actualRemaining = Math.max(1, Math.round((cfg?.timeLimitSeconds ?? 30) - actualElapsed))
+              // Must update ref directly so timer effect 2 uses the correct start time
+              questionStartTimeRef.current = actualStart
+              setQuestionStartTime(actualStart)
               setTimeLeft(actualRemaining)
               setTimerRunning(true)
             } else if (gs.timerStarted === false && (cfg?.playMode === 'BUZZ' || (cfg?.playMode === 'ONLINE' && cfg?.clickStartToCount))) {
@@ -704,19 +707,19 @@ export default function WwtbamPage() {
 
     const isLocal = config?.playMode === 'LOCAL'
     const isFreeChoice = config?.selectionMode === 'FREE_CHOICE'
-    if (isLocal) {
-      // Use refs to get latest values — avoids stale closure bug in setTimeout callbacks
+    if (isLocal && playersRef.current.length > 1) {
+      // Rotate player — use ref values to avoid stale closures in setTimeout paths
       const latestPlayerIdx = currentPlayerIdxRef.current
       const latestQuestionIdx = currentIdxRef.current
       const latestPlayers = playersRef.current
-      const allDone = isFreeChoice
+      const next = (latestPlayerIdx + 1) % latestPlayers.length
+      setCurrentPlayerIdx(next)
+      const isLastQ = isFreeChoice
         ? answeredQuestions.size >= questions.length
         : latestQuestionIdx >= questions.length - 1
-      if (allDone) { setPhase('gameover'); return }
-      const next = latestPlayers.length > 1 ? (latestPlayerIdx + 1) % latestPlayers.length : 0
-      setCurrentPlayerIdx(next)
+      if (isLastQ && next === 0) { setPhase('gameover'); return }
       if (isFreeChoice) { audio.playBg('selecting', 0.5); setPhase('select') }
-      else beginQuestion(latestQuestionIdx + 1)
+      else beginQuestion(isLastQ ? 0 : latestQuestionIdx + 1)
     } else {
       if (isLastQ) { setPhase('gameover'); return }
       if (isFreeChoice) { audio.playBg('selecting', 0.5); setPhase('select') }
@@ -1050,10 +1053,33 @@ export default function WwtbamPage() {
             </h2>
             <div className="space-y-3 mb-6">
               {setupNames.map((name, i) => (
-                <Input key={i} value={name}
-                  onChange={e => { const n = [...setupNames]; n[i] = e.target.value; setSetupNames(n) }}
-                  placeholder={config?.playMode === 'SINGLE' ? 'Your name...' : `Player ${i + 1} name...`}
-                  className="bg-[#0a0a2e] border-blue-500/30 text-white placeholder:text-blue-400" />
+                <div key={i} className="flex gap-2 items-center">
+                  <div className="flex flex-col gap-0.5">
+                    <button
+                      disabled={i === 0}
+                      onClick={() => { const n = [...setupNames]; [n[i-1], n[i]] = [n[i], n[i-1]]; setSetupNames(n) }}
+                      className="text-blue-400 hover:text-blue-200 disabled:opacity-20 leading-none px-1 text-xs"
+                      title="Move up"
+                    >▲</button>
+                    <button
+                      disabled={i === setupNames.length - 1}
+                      onClick={() => { const n = [...setupNames]; [n[i], n[i+1]] = [n[i+1], n[i]]; setSetupNames(n) }}
+                      className="text-blue-400 hover:text-blue-200 disabled:opacity-20 leading-none px-1 text-xs"
+                      title="Move down"
+                    >▼</button>
+                  </div>
+                  <Input value={name}
+                    onChange={e => { const n = [...setupNames]; n[i] = e.target.value; setSetupNames(n) }}
+                    placeholder={config?.playMode === 'SINGLE' ? 'Your name...' : `Player ${i + 1} name...`}
+                    className="bg-[#0a0a2e] border-blue-500/30 text-white placeholder:text-blue-400 flex-1" />
+                  {setupNames.length > 2 && (
+                    <button
+                      onClick={() => setSetupNames(setupNames.filter((_, j) => j !== i))}
+                      className="text-blue-400 hover:text-red-400 transition-colors px-1 text-sm"
+                      title="Remove player"
+                    >✕</button>
+                  )}
+                </div>
               ))}
             </div>
             {config?.playMode !== 'SINGLE' && setupNames.length < maxP && (

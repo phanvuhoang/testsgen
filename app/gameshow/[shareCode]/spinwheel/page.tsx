@@ -532,11 +532,25 @@ export default function SpinWheelPage() {
             <div className="space-y-2 mb-4">
               <p className="text-gray-400 text-sm font-medium">Players</p>
               {setupNames.map((name, i) => (
-                <div key={i} className="flex gap-2">
+                <div key={i} className="flex gap-2 items-center">
+                  <div className="flex flex-col gap-0.5 shrink-0">
+                    <button
+                      disabled={i === 0}
+                      onClick={() => setSetupNames(prev => { const n=[...prev]; [n[i-1],n[i]]=[n[i],n[i-1]]; return n })}
+                      className="text-pink-400 hover:text-pink-200 disabled:opacity-20 leading-none px-1 text-xs"
+                      title="Move up"
+                    >▲</button>
+                    <button
+                      disabled={i === setupNames.length - 1}
+                      onClick={() => setSetupNames(prev => { const n=[...prev]; [n[i],n[i+1]]=[n[i+1],n[i]]; return n })}
+                      className="text-pink-400 hover:text-pink-200 disabled:opacity-20 leading-none px-1 text-xs"
+                      title="Move down"
+                    >▼</button>
+                  </div>
                   <Input value={name} onChange={e => setSetupNames(prev => prev.map((n, j) => j === i ? e.target.value : n))}
-                    placeholder={`Player ${i + 1}`} className="bg-gray-800 border-gray-700 text-white"
+                    placeholder={`Player ${i + 1}`} className="bg-gray-800 border-gray-700 text-white flex-1"
                     onKeyDown={e => e.key === 'Enter' && startGame()} />
-                  {setupNames.length > 1 && (
+                  {setupNames.length > 2 && (
                     <Button size="sm" variant="ghost" className="text-gray-400 hover:text-red-400"
                       onClick={() => setSetupNames(prev => prev.filter((_, j) => j !== i))}>✕</Button>
                   )}

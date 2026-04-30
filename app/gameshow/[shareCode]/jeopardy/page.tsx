@@ -1305,13 +1305,34 @@ export default function JeopardyPage() {
             <div className="space-y-3 mb-4">
               {setupNames.map((name, i) => (
                 <div key={i} className="flex gap-2 items-center">
+                  <div className="flex flex-col gap-0.5 shrink-0">
+                    <button
+                      disabled={i === 0}
+                      onClick={() => { const n = [...setupNames]; [n[i-1], n[i]] = [n[i], n[i-1]]; setSetupNames(n) }}
+                      className="text-blue-400 hover:text-blue-200 disabled:opacity-20 leading-none px-1 text-xs"
+                      title="Move up"
+                    >▲</button>
+                    <button
+                      disabled={i === setupNames.length - 1}
+                      onClick={() => { const n = [...setupNames]; [n[i], n[i+1]] = [n[i+1], n[i]]; setSetupNames(n) }}
+                      className="text-blue-400 hover:text-blue-200 disabled:opacity-20 leading-none px-1 text-xs"
+                      title="Move down"
+                    >▼</button>
+                  </div>
                   <div className="w-3 h-3 rounded-full flex-shrink-0" style={{ backgroundColor: PLAYER_COLORS[i % PLAYER_COLORS.length] }} />
                   <Input
                     value={name}
                     onChange={e => { const n = [...setupNames]; n[i] = e.target.value; setSetupNames(n) }}
                     placeholder={config?.playMode === 'SINGLE' ? 'Your name...' : `Player ${i + 1}...`}
-                    className="bg-[#0a0a2e] border-blue-500/30 text-white placeholder:text-blue-400 rounded-xl"
+                    className="bg-[#0a0a2e] border-blue-500/30 text-white placeholder:text-blue-400 rounded-xl flex-1"
                   />
+                  {setupNames.length > 2 && (
+                    <button
+                      onClick={() => setSetupNames(setupNames.filter((_, j) => j !== i))}
+                      className="text-blue-400 hover:text-red-400 transition-colors px-1 text-sm shrink-0"
+                      title="Remove player"
+                    >✕</button>
+                  )}
                 </div>
               ))}
             </div>
