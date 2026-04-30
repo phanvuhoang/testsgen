@@ -529,7 +529,11 @@ export default function WwtbamPage() {
     setEliminatedOptions([]); setPhoneAnswer(null)
     setAudienceData(null); setShowLifelineResult(false)
     setTimeLeft(config?.timeLimitSeconds ?? 30)
-    setQuestionStartTime(Date.now())
+    const now = Date.now()
+    setQuestionStartTime(now)
+    // Update ref directly — useEffect runs async, so without this, the wall-clock timer
+    // reads a stale questionStartTime (from when the question started, not when Start was pressed)
+    questionStartTimeRef.current = now
     timeCountPlayedRef.current = false
     answeredRef.current = false
     setSubmitted(false)
@@ -708,18 +712,20 @@ export default function WwtbamPage() {
     const isLocal = config?.playMode === 'LOCAL'
     const isFreeChoice = config?.selectionMode === 'FREE_CHOICE'
     if (isLocal && playersRef.current.length > 1) {
-      // Rotate player — use ref values to avoid stale closures in setTimeout paths
+      // Rotate player — always use refs to avoid stale closures in setTimeout paths
       const latestPlayerIdx = currentPlayerIdxRef.current
       const latestQuestionIdx = currentIdxRef.current
       const latestPlayers = playersRef.current
-      const next = (latestPlayerIdx + 1) % latestPlayers.length
-      setCurrentPlayerIdx(next)
-      const isLastQ = isFreeChoice
+      const nextQIdx = latestQuestionIdx + 1
+      const nextPlayerIdx = (latestPlayerIdx + 1) % latestPlayers.length
+      setCurrentPlayerIdx(nextPlayerIdx)
+      // Game ends when all questions have been answered
+      const allDone = isFreeChoice
         ? answeredQuestions.size >= questions.length
-        : latestQuestionIdx >= questions.length - 1
-      if (isLastQ && next === 0) { setPhase('gameover'); return }
+        : nextQIdx >= questions.length
+      if (allDone) { setPhase('gameover'); return }
       if (isFreeChoice) { audio.playBg('selecting', 0.5); setPhase('select') }
-      else beginQuestion(isLastQ ? 0 : latestQuestionIdx + 1)
+      else beginQuestion(nextQIdx)
     } else {
       if (isLastQ) { setPhase('gameover'); return }
       if (isFreeChoice) { audio.playBg('selecting', 0.5); setPhase('select') }
@@ -809,6 +815,13 @@ export default function WwtbamPage() {
       setPhase('gameover')
       return
     }
+
+    // LOCAL multiplayer FREE_CHOICE: rotate to next player before going back to board
+    if (config?.playMode === 'LOCAL' && playersRef.current.length > 1 && !isOnlineAdmin) {
+      const nextPlayerIdx = (currentPlayerIdxRef.current + 1) % playersRef.current.length
+      setCurrentPlayerIdx(nextPlayerIdx)
+    }
+
     if (isOnlineAdmin) {
       fetch(`/api/gameshow/${shareCode}/session/${rc}`, {
         method: 'PATCH', headers: { 'Content-Type': 'application/json' },
