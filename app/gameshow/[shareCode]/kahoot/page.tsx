@@ -355,14 +355,14 @@ export default function KahootPage() {
             setTimeLeft(remaining)
             setQuestionStartTime(startTime)
             setPhase('question')
-            // In BUZZ mode: admin broadcasts timerStarted:true to start all players' timers
-            if (gs.timerStarted === true && cfg?.playMode === 'BUZZ') {
+            // In BUZZ mode and ONLINE+clickStartToCount: admin broadcasts timerStarted:true to start all players' timers
+            if (gs.timerStarted === true && (cfg?.playMode === 'BUZZ' || (cfg?.playMode === 'ONLINE' && cfg?.clickStartToCount))) {
               const actualStart = gs.questionStartTime ?? Date.now()
               const actualElapsed = (Date.now() - actualStart) / 1000
               const actualRemaining = Math.max(1, Math.round((cfg?.timeLimitSeconds ?? 30) - actualElapsed))
               setTimeLeft(actualRemaining)
               setTimerRunning(true)
-            } else if (gs.timerStarted === false && cfg?.playMode === 'BUZZ') {
+            } else if (gs.timerStarted === false && (cfg?.playMode === 'BUZZ' || (cfg?.playMode === 'ONLINE' && cfg?.clickStartToCount))) {
               clearInterval(timerRef.current!)
               setTimerRunning(false)
             }
@@ -839,9 +839,10 @@ export default function KahootPage() {
       if (remaining <= 0) { clearInterval(timerRef.current!); setTimeLeft(0); handleTimeout(); return }
       setTimeLeft(remaining)
     }, 500)
-    // In BUZZ mode: broadcast timer start to players
+    // In BUZZ mode and ONLINE+clickStartToCount: broadcast timer start to players
     const rc = roomCodeRef.current
-    if (rc && configRef.current?.playMode === 'BUZZ') {
+    const cfg = configRef.current
+    if (rc && (cfg?.playMode === 'BUZZ' || (cfg?.playMode === 'ONLINE' && cfg?.clickStartToCount))) {
       fetch(`/api/gameshow/${shareCode}/session/${rc}`, {
         method: 'PATCH', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ gameState: { timerStarted: true, questionStartTime: startTime } })

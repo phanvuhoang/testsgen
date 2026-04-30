@@ -162,6 +162,8 @@ export default function WwtbamPage() {
   const currentIdxRef = useRef(0)
   // currentPlayerIdxRef: synced copy to avoid stale closure in setTimeout callbacks
   const currentPlayerIdxRef = useRef(0)
+  // playersRef: synced copy to avoid stale closure in advanceFromLeaderboard
+  const playersRef = useRef<Player[]>([])
   const roomCodeRef = useRef<string | null>(null)
   const evsRef = useRef<EventSource | null>(null)
   const configRef = useRef<GameshowConfig | null>(null)
@@ -177,6 +179,7 @@ export default function WwtbamPage() {
   useEffect(() => { submittedRef.current = submitted }, [submitted])
   useEffect(() => { currentIdxRef.current = currentIdx }, [currentIdx])
   useEffect(() => { currentPlayerIdxRef.current = currentPlayerIdx }, [currentPlayerIdx])
+  useEffect(() => { playersRef.current = players }, [players])
   useEffect(() => { questionStartTimeRef.current = questionStartTime }, [questionStartTime])
 
   // ─── Fetch config — detect join vs admin flow ────────────────────────────
@@ -331,14 +334,14 @@ export default function WwtbamPage() {
             setTimeLeft(remaining)
             setQuestionStartTime(startTime)
             setPhase('question')
-            // In BUZZ mode: admin broadcasts timerStarted:true to start all players' timers
-            if (gs.timerStarted === true && cfg?.playMode === 'BUZZ') {
+            // In BUZZ mode and ONLINE+clickStartToCount: admin broadcasts timerStarted:true to start all players' timers
+            if (gs.timerStarted === true && (cfg?.playMode === 'BUZZ' || (cfg?.playMode === 'ONLINE' && cfg?.clickStartToCount))) {
               const actualStart = gs.questionStartTime ?? Date.now()
               const actualElapsed = (Date.now() - actualStart) / 1000
               const actualRemaining = Math.max(1, Math.round((cfg?.timeLimitSeconds ?? 30) - actualElapsed))
               setTimeLeft(actualRemaining)
               setTimerRunning(true)
-            } else if (gs.timerStarted === false && cfg?.playMode === 'BUZZ') {
+            } else if (gs.timerStarted === false && (cfg?.playMode === 'BUZZ' || (cfg?.playMode === 'ONLINE' && cfg?.clickStartToCount))) {
               clearInterval(timerRef.current!)
               setTimerRunning(false)
             }
@@ -560,9 +563,10 @@ export default function WwtbamPage() {
       TONE.tick()
       setTimeLeft(remaining)
     }, 500)
-    // In BUZZ mode: broadcast timer start to players
+    // In BUZZ mode and ONLINE+clickStartToCount mode: broadcast timer start to players
     const rc = roomCodeRef.current
-    if (rc && configRef.current?.playMode === 'BUZZ') {
+    const cfg = configRef.current
+    if (rc && (cfg?.playMode === 'BUZZ' || (cfg?.playMode === 'ONLINE' && cfg?.clickStartToCount))) {
       fetch(`/api/gameshow/${shareCode}/session/${rc}`, {
         method: 'PATCH', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ gameState: { timerStarted: true, questionStartTime: startTime } })
@@ -701,14 +705,15 @@ export default function WwtbamPage() {
     const isLocal = config?.playMode === 'LOCAL'
     const isFreeChoice = config?.selectionMode === 'FREE_CHOICE'
     if (isLocal) {
-      // Use ref to get latest currentPlayerIdx (avoids stale closure in setTimeout)
+      // Use refs to get latest values — avoids stale closure bug in setTimeout callbacks
       const latestPlayerIdx = currentPlayerIdxRef.current
       const latestQuestionIdx = currentIdxRef.current
+      const latestPlayers = playersRef.current
       const allDone = isFreeChoice
         ? answeredQuestions.size >= questions.length
         : latestQuestionIdx >= questions.length - 1
       if (allDone) { setPhase('gameover'); return }
-      const next = (latestPlayerIdx + 1) % players.length
+      const next = latestPlayers.length > 1 ? (latestPlayerIdx + 1) % latestPlayers.length : 0
       setCurrentPlayerIdx(next)
       if (isFreeChoice) { audio.playBg('selecting', 0.5); setPhase('select') }
       else beginQuestion(latestQuestionIdx + 1)

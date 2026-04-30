@@ -359,14 +359,14 @@ export default function JeopardyPage() {
             if (gs.disabledPlayerIds !== undefined) setDisabledPlayerIds(gs.disabledPlayerIds ?? [])
             setQuestionTimeLeft(remaining)
             setPhase('question')
-            // In BUZZ mode: admin broadcasts timerStarted:true to start all players' timers
-            if (gs.timerStarted === true && cfg?.playMode === 'BUZZ') {
+            // In BUZZ mode and ONLINE+clickStartToCount: admin broadcasts timerStarted:true to start all players' timers
+            if (gs.timerStarted === true && (cfg?.playMode === 'BUZZ' || (cfg?.playMode === 'ONLINE' && cfg?.clickStartToCount))) {
               const actualStart = gs.questionStartTime ?? Date.now()
               const actualElapsed = (Date.now() - actualStart) / 1000
               const actualRemaining = Math.max(1, Math.round((cfg?.timeLimitSeconds ?? 30) - actualElapsed))
               setQuestionTimeLeft(actualRemaining)
               setTimerRunning(true)
-            } else if (gs.timerStarted === false && cfg?.playMode === 'BUZZ') {
+            } else if (gs.timerStarted === false && (cfg?.playMode === 'BUZZ' || (cfg?.playMode === 'ONLINE' && cfg?.clickStartToCount))) {
               clearInterval(timerRef.current!)
               setTimerRunning(false)
             }
@@ -753,9 +753,10 @@ export default function JeopardyPage() {
     audio.playBg('game-play', 0.55)
     const startTime = Date.now()
     setTimerRunning(true)
-    // In BUZZ mode: broadcast timer start to players
+    // In BUZZ mode and ONLINE+clickStartToCount: broadcast timer start to players
     const rc = roomCodeRef.current
-    if (rc && configRef.current?.playMode === 'BUZZ') {
+    const cfg = configRef.current
+    if (rc && (cfg?.playMode === 'BUZZ' || (cfg?.playMode === 'ONLINE' && cfg?.clickStartToCount))) {
       fetch(`/api/gameshow/${shareCode}/session/${rc}`, {
         method: 'PATCH', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ gameState: { timerStarted: true, questionStartTime: startTime } })
@@ -1586,8 +1587,15 @@ export default function JeopardyPage() {
             </div>
           )}
 
-          {/* Start Timer: BUZZ mode→admin sees it; non-BUZZ→players see it. Always above options. */}
-          {waiting && (config?.playMode === 'BUZZ' ? isOnlineAdmin : !isOnlineAdmin) && (
+          {/* Start Timer:
+              - BUZZ mode: only admin sees it
+              - ONLINE mode: only host (admin) sees it; players wait for SSE timerStarted
+              - LOCAL/SINGLE: non-admin players see it */}
+          {waiting && (
+            config?.playMode === 'BUZZ' ? isOnlineAdmin
+            : config?.playMode === 'ONLINE' ? isOnlineAdmin
+            : !isOnlineAdmin
+          ) && (
             <div className="flex flex-col items-center gap-4 mb-4">
               <p className="text-blue-300 text-sm">Press Start when ready to begin the timer</p>
               <Button onClick={handleStartTimer}
