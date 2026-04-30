@@ -656,9 +656,8 @@ export default function GameshowsPage() {
               <div className="space-y-2 pt-2 border-t">
                 <BoolCheckbox k="shuffleQuestions" label="Shuffle question order" />
                 <BoolCheckbox k="deductOnWrong" label="Deduct score if answer incorrectly (score can go negative)" />
-                {form.playMode === 'LOCAL' && (
-                  <BoolCheckbox k="allowOthersOnIncorrect" label="Allow others to answer if first attempt incorrect (Local Multiplayer)" />
-                )}
+                {/* allowOthersOnIncorrect is not shown for LOCAL mode — each player answers
+                    their own turn in LOCAL multiplayer, so pass-on-incorrect doesn't apply */}
                 <BoolCheckbox k="showLeaderboard" label="Show leaderboard after each question (top 10 players)" />
                 <BoolCheckbox k="clickStartToCount" label="Click Start button to begin timer (wait before timing starts)" />
                 {form.clickStartToCount === 'true' && (

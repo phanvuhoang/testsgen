@@ -160,6 +160,8 @@ export default function WwtbamPage() {
   const submittedRef = useRef(false)
   // currentIdxRef: synced copy for SSE handler
   const currentIdxRef = useRef(0)
+  // currentPlayerIdxRef: synced copy to avoid stale closure in setTimeout callbacks
+  const currentPlayerIdxRef = useRef(0)
   const roomCodeRef = useRef<string | null>(null)
   const evsRef = useRef<EventSource | null>(null)
   const configRef = useRef<GameshowConfig | null>(null)
@@ -174,6 +176,7 @@ export default function WwtbamPage() {
   useEffect(() => { configRef.current = config }, [config])
   useEffect(() => { submittedRef.current = submitted }, [submitted])
   useEffect(() => { currentIdxRef.current = currentIdx }, [currentIdx])
+  useEffect(() => { currentPlayerIdxRef.current = currentPlayerIdx }, [currentPlayerIdx])
   useEffect(() => { questionStartTimeRef.current = questionStartTime }, [questionStartTime])
 
   // ─── Fetch config — detect join vs admin flow ────────────────────────────
@@ -698,14 +701,17 @@ export default function WwtbamPage() {
     const isLocal = config?.playMode === 'LOCAL'
     const isFreeChoice = config?.selectionMode === 'FREE_CHOICE'
     if (isLocal) {
+      // Use ref to get latest currentPlayerIdx (avoids stale closure in setTimeout)
+      const latestPlayerIdx = currentPlayerIdxRef.current
+      const latestQuestionIdx = currentIdxRef.current
       const allDone = isFreeChoice
         ? answeredQuestions.size >= questions.length
-        : currentIdx >= questions.length - 1
+        : latestQuestionIdx >= questions.length - 1
       if (allDone) { setPhase('gameover'); return }
-      const next = (currentPlayerIdx + 1) % players.length
+      const next = (latestPlayerIdx + 1) % players.length
       setCurrentPlayerIdx(next)
       if (isFreeChoice) { audio.playBg('selecting', 0.5); setPhase('select') }
-      else beginQuestion(currentIdx + 1)
+      else beginQuestion(latestQuestionIdx + 1)
     } else {
       if (isLastQ) { setPhase('gameover'); return }
       if (isFreeChoice) { audio.playBg('selecting', 0.5); setPhase('select') }
@@ -1263,8 +1269,15 @@ export default function WwtbamPage() {
               </div>
             )}
 
-            {/* Start button overlay — in BUZZ mode only admin sees this */}
-            {waitingForStart && (config?.playMode === 'BUZZ' ? isOnlineAdmin : !isOnlineAdmin) && (
+            {/* Start button overlay:
+               - BUZZ mode: only admin sees this
+               - ONLINE mode: only host (admin) sees this — players wait for host
+               - LOCAL/SINGLE: player (non-admin) sees this */}
+            {waitingForStart && (
+              config?.playMode === 'BUZZ' ? isOnlineAdmin
+              : config?.playMode === 'ONLINE' ? isOnlineAdmin
+              : !isOnlineAdmin
+            ) && (
               <div className="flex justify-center mb-6">
                 <Button onClick={handleStartCount}
                   className="bg-yellow-400 hover:bg-yellow-300 text-black font-black text-lg px-10 py-5 rounded-2xl shadow-lg">

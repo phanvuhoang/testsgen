@@ -1280,8 +1280,15 @@ export default function KahootPage() {
           </div>
         )}
 
-        {/* Start button (clickStartToCount mode) — in BUZZ mode only admin sees this */}
-        {waitingForStart&&!isBuzzerMode&&(config?.playMode!=='BUZZ'||!joinRoomCode)&&(
+        {/* Start button (clickStartToCount mode):
+            - BUZZ mode: only admin (host) sees this
+            - ONLINE mode: only host sees this — players wait
+            - LOCAL/SINGLE: player sees this */}
+        {waitingForStart&&!isBuzzerMode&&(
+          config?.playMode==='BUZZ' ? !joinRoomCode&&!!roomCode
+          : config?.playMode==='ONLINE' ? !joinRoomCode&&!!roomCode
+          : !joinRoomCode&&!roomCode
+        )&&(
           <div className="flex justify-center py-4 bg-[#1a1a2e]">
             <Button onClick={handleStartCount}
               className="bg-[#6366f1] hover:bg-[#4f46e5] text-white font-black text-lg px-10 py-5 rounded-2xl shadow-lg">
