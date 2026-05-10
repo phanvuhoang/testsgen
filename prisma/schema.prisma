@@ -127,6 +127,7 @@ model User {
   attempts         Attempt[]
   gameshowSessions GameshowSession[] @relation("GameshowHost")
   gameshowPlayers  GameshowPlayer[]  @relation("GameshowPlayers")
+  studyPrepSets    StudyPrepSet[]
 
   @@map("testsgen_users")
 }
@@ -172,6 +173,7 @@ model Session {
   parsedQuestions  ParsedQuestion[]
   generateJobs     GenerateJob[]
   sessionVariables SessionVariable[]
+  studyPrepSets    StudyPrepSet[]
 
   @@map("testsgen_sessions")
 }
@@ -495,6 +497,7 @@ model QuizSet {
   variants    QuizVariant[]
   classes     QuizClass[]    @relation("QuizSetClasses")
   gameshows   Gameshow[]     @relation("QuizSetGameshows")
+  studyPrepSets StudyPrepSet[]
 
   @@map("testsgen_quiz_sets")
 }
@@ -827,4 +830,104 @@ model SystemSetting {
   updatedAt DateTime @updatedAt
 
   @@map("testsgen_system_settings")
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MODULE 3 — STUDY PREP / EXAMS PREP
+// ─────────────────────────────────────────────────────────────────────────────
+//
+// A StudyPrepSet is a container for prep assets (study plan, secret-sauce
+// notes, mock-exam plan, etc.) generated from EXISTING Module 1 / Module 2
+// sources — it links optionally to a Session (Module 1) and/or a QuizSet
+// (Module 2). All generated assets are saved as JSON + Markdown blobs so the
+// schema stays minimal and additive.
+
+enum StudyAssetStatus {
+  DRAFT
+  PUBLISHED
+}
+
+model StudyPrepSet {
+  id          String   @id @default(cuid())
+  name        String
+  description String?
+
+  // ── Optional links to existing sources ──
+  sessionId   String?
+  quizSetId   String?
+
+  // ── Exam target metadata (can be edited later) ──
+  targetExam     String?      // e.g. "VTCA Advanced Tax — December 2026"
+  examDate       DateTime?
+  targetScore    String?      // e.g. "75%" or "Pass with merit"
+  weeklyHours    Int?         // available study hours per week
+  language       String?  @default("en")  // "en" | "vi"
+
+  createdById String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  session   Session?  @relation(fields: [sessionId], references: [id], onDelete: SetNull)
+  quizSet   QuizSet?  @relation(fields: [quizSetId], references: [id], onDelete: SetNull)
+  createdBy User      @relation(fields: [createdById], references: [id])
+
+  studyPlans     StudyPlan[]
+  studyMaterials StudyMaterial[]
+  mockExamPlans  MockExamPlan[]
+
+  @@map("testsgen_study_prep_sets")
+}
+
+model StudyPlan {
+  id           String           @id @default(cuid())
+  prepSetId    String
+  title        String
+  status       StudyAssetStatus @default(DRAFT)
+  content      String           @db.Text   // Markdown body — editable
+  structured   Json?            // Optional structured plan: {weeks:[...], milestones:[...], readiness:[...]}
+  mindmap      String?          @db.Text   // Optional Mermaid mindmap source
+  sourceRefs   Json?            // [{type:"document"|"question"|"quizQuestion", id, label}]
+  generatedBy  String?
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+
+  prepSet StudyPrepSet @relation(fields: [prepSetId], references: [id], onDelete: Cascade)
+
+  @@map("testsgen_study_plans")
+}
+
+model StudyMaterial {
+  id           String           @id @default(cuid())
+  prepSetId    String
+  title        String
+  status       StudyAssetStatus @default(DRAFT)
+  content      String           @db.Text   // "Secret sauce" notes — Markdown
+  structured   Json?            // {sections:[{title, keyPoints[], traps[], formulas[]}]}
+  mindmap      String?          @db.Text
+  sourceRefs   Json?
+  generatedBy  String?
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+
+  prepSet StudyPrepSet @relation(fields: [prepSetId], references: [id], onDelete: Cascade)
+
+  @@map("testsgen_study_materials")
+}
+
+model MockExamPlan {
+  id           String           @id @default(cuid())
+  prepSetId    String
+  title        String
+  status       StudyAssetStatus @default(DRAFT)
+  content      String           @db.Text   // Markdown summary — editable
+  structured   Json?            // {mockExams:[{name,when,sections:[{topic,count,difficultyMix}],questionIds:[...]}]}
+  sourceRefs   Json?
+  generatedBy  String?
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+
+  prepSet StudyPrepSet @relation(fields: [prepSetId], references: [id], onDelete: Cascade)
+
+  @@map("testsgen_mock_exam_plans")
 }

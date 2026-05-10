@@ -21,6 +21,7 @@ import {
   User,
   GraduationCap,
   History,
+  Sparkles,
 } from 'lucide-react'
 import {
   DropdownMenu,
@@ -63,6 +64,12 @@ const navSections: NavSection[] = [
     items: [
       { href: '/quiz', label: 'My Quiz Sets', icon: Puzzle, roles: ['ADMIN', 'TEACHER'] },
       { href: '/my-results', label: 'My Results', icon: History },
+    ],
+  },
+  {
+    label: 'Module 3 — Study Prep',
+    items: [
+      { href: '/study-prep', label: 'Study Prep Sets', icon: Sparkles, roles: ['ADMIN', 'TEACHER'] },
     ],
   },
   {

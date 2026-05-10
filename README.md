@@ -18,6 +18,17 @@ A full-stack AI-powered assessment platform built with Next.js 14, PostgreSQL, a
 - CSV import/export for questions
 - Results dashboard with attempt analytics
 
+### Module 3 — Study Prep / Exams Prep
+- Build a **Study Prep Set** on top of an existing Module 1 session and / or Module 2 quiz set — no re-uploading.
+- AI generates three core assets from the same source pool:
+  1. **Study Plan** — mentor-style roadmap with topic priorities, week-by-week schedule, milestones, mock-exam checkpoints, final 7-day & 24-hour readiness checklists.
+  2. **Secret-Sauce Notes** — condensed, exam-oriented revision pack with key rules, formulas, common traps, likely exam themes, and inline citations to source documents and past questions.
+  3. **Mock Exam Plan** — baseline / mid / final mock blueprint mapped to topics and existing question-bank items, with section-level difficulty mix.
+- Every asset is editable Markdown, can be marked DRAFT / PUBLISHED, and downloads as `.md`.
+- Optional Mermaid mindmap rendering for plans and notes (rendered client-side; no extra server dep).
+- All citations follow the `[doc:id]` / `[q:id]` convention so teachers can trace each claim back to the source.
+- See `docs/MODULE3.md` for architecture, prompts, and integration notes (incl. SurfSense / NotebookLM as optional companion).
+
 ### Admin Panel
 - User management (create/edit/suspend users, role assignment)
 - System settings: AI provider, API key, model selection

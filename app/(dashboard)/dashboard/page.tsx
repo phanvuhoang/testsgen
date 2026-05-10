@@ -14,6 +14,7 @@ import {
   ArrowRight,
   BookOpen,
   TrendingUp,
+  Sparkles,
 } from 'lucide-react'
 import { formatDateTime } from '@/lib/utils'
 
@@ -268,7 +269,7 @@ export default async function DashboardPage() {
       </div>
 
       {/* Module Tiles */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mb-6">
         <Card className="hover:shadow-md transition-shadow cursor-pointer">
           <CardHeader>
             <div className="flex items-center gap-3">
@@ -307,6 +308,28 @@ export default async function DashboardPage() {
             <Button asChild variant="outline" className="w-full">
               <Link href="/quiz" className="flex items-center justify-center gap-2">
                 Go to Quiz Generator
+                <ArrowRight className="h-4 w-4" />
+              </Link>
+            </Button>
+          </CardContent>
+        </Card>
+
+        <Card className="hover:shadow-md transition-shadow cursor-pointer">
+          <CardHeader>
+            <div className="flex items-center gap-3">
+              <div className="bg-emerald-50 p-3 rounded-lg">
+                <Sparkles className="h-6 w-6 text-emerald-600" />
+              </div>
+              <div>
+                <CardTitle>Module 3 — Study Prep</CardTitle>
+                <CardDescription>Generate study plans, secret-sauce notes, and mock-exam plans</CardDescription>
+              </div>
+            </div>
+          </CardHeader>
+          <CardContent>
+            <Button asChild variant="outline" className="w-full">
+              <Link href="/study-prep" className="flex items-center justify-center gap-2">
+                Go to Study Prep
                 <ArrowRight className="h-4 w-4" />
               </Link>
             </Button>
